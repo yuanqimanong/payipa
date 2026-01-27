@@ -1,14 +1,15 @@
 from datetime import timedelta
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.security import OAuth2PasswordRequestForm
 
-from app.api.deps import SessionDep
+from app.api.deps import CurrentUser, SessionDep
 from app.core import security
 from app.core.config import settings
 from app.cruds import auth_crud
 from app.models.basic_model import Token
+from app.models.user_model import UserPublic
 
 router = APIRouter(tags=["login"])
 
@@ -30,3 +31,11 @@ def login_access_token(session: SessionDep, form_data: Annotated[OAuth2PasswordR
         raise HTTPException(status_code=400, detail="Inactive user")
     access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     return Token(access_token=security.create_access_token(user.id, expires_delta=access_token_expires))
+
+
+@router.post("/login/test-token", response_model=UserPublic)
+def test_token(current_user: CurrentUser) -> Any:
+    """
+    Test access token
+    """
+    return current_user
