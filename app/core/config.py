@@ -1,10 +1,7 @@
 import secrets
 from pathlib import Path
 
-from pydantic import (
-    PostgresDsn,
-    computed_field,
-)
+from pydantic import EmailStr, PostgresDsn, computed_field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -38,5 +35,7 @@ class Settings(BaseSettings):
             path=self.POSTGRES_DB,
         )
 
+    FIRST_SUPERUSER: EmailStr
+    FIRST_SUPERUSER_PASSWORD: str
 
 settings = Settings()  # type: ignore

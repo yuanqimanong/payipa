@@ -1,7 +1,7 @@
 from sqlmodel import Session
 
 from app.core.security import verify_password
-from app.cruds.user import get_user_by_email
+from app.cruds.user_crud import get_user_by_email
 from app.models.user_model import User
 
 # python -c "import argon2; print(argon2.PasswordHasher().hash('random_password'))"
