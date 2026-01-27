@@ -1,8 +1,9 @@
 import uvicorn
 from fastapi import FastAPI
 from fastapi.routing import APIRoute
+from fastapi.staticfiles import StaticFiles
 
-from app.api.main import api_router
+from app.api.main import api_router, pages_router
 from app.core.config import settings
 
 
@@ -16,7 +17,9 @@ app = FastAPI(
     generate_unique_id_function=custom_generate_unique_id,
 )
 
+app.mount("/static", StaticFiles(directory="static"), name="static")
 
+app.include_router(pages_router)
 app.include_router(api_router, prefix=settings.API_VERSION_STR)
 
 if __name__ == "__main__":

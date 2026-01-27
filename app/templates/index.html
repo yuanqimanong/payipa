@@ -1,10 +1,28 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <title>Title</title>
-</head>
-<body>
+{% extends "base.html" %}
 
-</body>
-</html>
+{% block title %}首页{% endblock %}
+
+{% block content %}
+<h1>{{ message }}</h1>
+<p>这是一个使用 FastAPI + Jinja2 的示例</p>
+
+<h2>用户列表</h2>
+<ul>
+    {% for user in ["Alice", "Bob", "Charlie"] %}
+    <li>{{ user }}</li>  <!-- Removed the broken link -->
+    {% endfor %}
+</ul>
+
+<h2>API 测试</h2>
+<button onclick="fetchUsers()">获取API用户</button>
+<div id="api-result"></div>
+
+<script>
+    async function fetchUsers() {
+        const response = await fetch('/api/users');
+        const data = await response.json();
+        document.getElementById('api-result').innerHTML =
+            JSON.stringify(data, null, 2);
+    }
+</script>
+{% endblock %}

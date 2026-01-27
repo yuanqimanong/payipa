@@ -14,11 +14,6 @@ from app.models.user_model import UserPublic
 router = APIRouter(tags=["login"])
 
 
-@router.get("/")
-def read_root():
-    return {"message": "Welcome to Payipa - FastAPI Project!"}
-
-
 @router.post("/login/access-token")
 def login_access_token(session: SessionDep, form_data: Annotated[OAuth2PasswordRequestForm, Depends()]) -> Token:
     """
