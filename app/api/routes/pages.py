@@ -1,12 +1,14 @@
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
-from fastapi.templating import Jinja2Templates
 
 router = APIRouter(tags=["pages"])
 
 
-def get_templates():
-    return Jinja2Templates(directory="templates")
+def serve_template(template_name: str):
+    """返回指定模板的响应"""
+    with open(f"templates/{template_name}.html", encoding="utf-8") as f:
+        content = f.read()
+    return HTMLResponse(content=content)
 
 
 @router.get("/")
@@ -15,5 +17,15 @@ async def root_redirect():
 
 
 @router.get("/index", response_class=HTMLResponse)
-async def home_page(request: Request, templates: Jinja2Templates = Depends(get_templates)):
-    return templates.TemplateResponse("index.html", {"request": request, "message": "欢迎来到首页"})
+async def home_page(request: Request):
+    return serve_template("index")
+
+
+@router.get("/login", response_class=HTMLResponse)
+async def login_page(request: Request):
+    return serve_template("login")
+
+
+@router.get("/register", response_class=HTMLResponse)
+async def register_page(request: Request):
+    return serve_template("register")

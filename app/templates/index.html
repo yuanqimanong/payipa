@@ -3,108 +3,299 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>任务管理平台</title>
+    <title>任务管理平台 - PayIPA</title>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
     <link rel="stylesheet" href="/static/css/index.css">
 </head>
 <body>
-    <div class="container">
-        <header class="header">
-            <h1>📋 任务管理平台</h1>
-            <p class="welcome-message">{{ message }}</p>
-        </header>
-
-        <div class="task-controls">
-            <div class="search-filter">
-                <input type="text" id="taskSearch" placeholder="搜索任务..." class="search-input">
-                <select id="taskFilter" class="filter-select">
-                    <option value="all">全部任务</option>
-                    <option value="pending">待处理</option>
-                    <option value="in-progress">进行中</option>
-                    <option value="completed">已完成</option>
-                </select>
+    <div id="app">
+        <div v-if="!isLoggedIn" class="container">
+            <div class="header">
+                <h1>🔒 需要登录</h1>
+                <p class="welcome-message">请先登录以访问此页面</p>
             </div>
-
-            <button id="addTaskBtn" class="btn btn-primary">+ 添加新任务</button>
-        </div>
-
-        <div class="stats-container">
-            <div class="stat-card">
-                <h3 id="totalTasks">0</h3>
-                <p>总任务数</p>
-            </div>
-            <div class="stat-card">
-                <h3 id="pendingTasks">0</h3>
-                <p>待处理</p>
-            </div>
-            <div class="stat-card">
-                <h3 id="completedTasks">0</h3>
-                <p>已完成</p>
+            <div style="text-align: center; margin-top: 2rem;">
+                <a href="/login" class="btn btn-primary">前往登录</a>
             </div>
         </div>
+        
+        <div v-else class="container">
+            <header class="header">
+                <h1>📋 任务管理平台</h1>
+                <p class="welcome-message">欢迎回来，{{ userInfo.full_name || userInfo.email }}！</p>
+                <div style="margin-top: 1rem;">
+                    <button @click="logout" class="btn btn-secondary">退出登录</button>
+                </div>
+            </header>
 
-        <div class="tasks-container">
-            <table class="tasks-table">
-                <thead>
-                    <tr>
-                        <th>任务名称</th>
-                        <th>状态</th>
-                        <th>优先级</th>
-                        <th>截止日期</th>
-                        <th>操作</th>
-                    </tr>
-                </thead>
-                <tbody id="tasksList">
-                    <!-- 任务列表将通过JavaScript动态填充 -->
-                </tbody>
-            </table>
-        </div>
+            <div class="task-controls">
+                <div class="search-filter">
+                    <input type="text" id="taskSearch" v-model="searchTerm" placeholder="搜索任务..." class="search-input">
+                    <select id="taskFilter" v-model="filterStatus" class="filter-select">
+                        <option value="all">全部任务</option>
+                        <option value="pending">待处理</option>
+                        <option value="in-progress">进行中</option>
+                        <option value="completed">已完成</option>
+                    </select>
+                </div>
 
-        <!-- 任务模态框 -->
-        <div id="taskModal" class="modal">
-            <div class="modal-content">
-                <span class="close">&times;</span>
-                <h2 id="modalTitle">添加新任务</h2>
-                <form id="taskForm">
-                    <input type="hidden" id="taskId">
-                    <div class="form-group">
-                        <label for="taskName">任务名称:</label>
-                        <input type="text" id="taskName" required>
-                    </div>
-                    <div class="form-group">
-                        <label for="taskDescription">任务描述:</label>
-                        <textarea id="taskDescription" rows="3"></textarea>
-                    </div>
-                    <div class="form-row">
+                <button @click="openAddTaskModal" class="btn btn-primary">+ 添加新任务</button>
+            </div>
+
+            <div class="stats-container">
+                <div class="stat-card">
+                    <h3>{{ stats.totalTasks }}</h3>
+                    <p>总任务数</p>
+                </div>
+                <div class="stat-card">
+                    <h3>{{ stats.pendingTasks }}</h3>
+                    <p>待处理</p>
+                </div>
+                <div class="stat-card">
+                    <h3>{{ stats.completedTasks }}</h3>
+                    <p>已完成</p>
+                </div>
+            </div>
+
+            <div class="tasks-container">
+                <table class="tasks-table">
+                    <thead>
+                        <tr>
+                            <th>任务名称</th>
+                            <th>状态</th>
+                            <th>优先级</th>
+                            <th>截止日期</th>
+                            <th>操作</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr v-for="task in filteredTasks" :key="task.id">
+                            <td>{{ task.name }}</td>
+                            <td><span class="status-badge" :class="'status-' + task.status">{{ getStatusText(task.status) }}</span></td>
+                            <td><span :class="'priority-' + task.priority">{{ getPriorityText(task.priority) }}</span></td>
+                            <td>{{ task.dueDate || '-' }}</td>
+                            <td>
+                                <button @click="openEditTaskModal(task)" class="btn btn-secondary">编辑</button>
+                                <button @click="deleteTask(task.id)" class="btn btn-danger">删除</button>
+                            </td>
+                        </tr>
+                        <tr v-if="filteredTasks.length === 0">
+                            <td colspan="5" style="text-align: center; padding: 20px;">没有找到匹配的任务</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- 任务模态框 -->
+            <div v-if="showModal" class="modal" @click="closeTaskModal">
+                <div class="modal-content" @click.stop>
+                    <span class="close" @click="closeTaskModal">&times;</span>
+                    <h2>{{ modalTitle }}</h2>
+                    <form @submit.prevent="saveTask">
                         <div class="form-group">
-                            <label for="taskStatus">状态:</label>
-                            <select id="taskStatus">
-                                <option value="pending">待处理</option>
-                                <option value="in-progress">进行中</option>
-                                <option value="completed">已完成</option>
-                            </select>
+                            <label for="taskName">任务名称:</label>
+                            <input type="text" id="taskName" v-model="currentTask.name" required>
                         </div>
                         <div class="form-group">
-                            <label for="taskPriority">优先级:</label>
-                            <select id="taskPriority">
-                                <option value="low">低</option>
-                                <option value="medium">中</option>
-                                <option value="high">高</option>
-                            </select>
+                            <label for="taskDescription">任务描述:</label>
+                            <textarea id="taskDescription" v-model="currentTask.description" rows="3"></textarea>
                         </div>
-                    </div>
-                    <div class="form-group">
-                        <label for="dueDate">截止日期:</label>
-                        <input type="date" id="dueDate">
-                    </div>
-                    <div class="form-actions">
-                        <button type="submit" class="btn btn-success">保存</button>
-                        <button type="button" class="btn btn-secondary cancel-btn">取消</button>
-                    </div>
-                </form>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="taskStatus">状态:</label>
+                                <select id="taskStatus" v-model="currentTask.status">
+                                    <option value="pending">待处理</option>
+                                    <option value="in-progress">进行中</option>
+                                    <option value="completed">已完成</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="taskPriority">优先级:</label>
+                                <select id="taskPriority" v-model="currentTask.priority">
+                                    <option value="low">低</option>
+                                    <option value="medium">中</option>
+                                    <option value="high">高</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label for="dueDate">截止日期:</label>
+                            <input type="date" id="dueDate" v-model="currentTask.dueDate">
+                        </div>
+                        <div class="form-actions">
+                            <button type="submit" class="btn btn-success">保存</button>
+                            <button type="button" class="btn btn-secondary" @click="closeTaskModal">取消</button>
+                        </div>
+                    </form>
+                </div>
             </div>
         </div>
     </div>
 
-    <script src="/static/js/index.js"></script>
+    <script>
+        const { createApp, ref, computed, onMounted } = Vue;
+        
+        createApp({
+            setup() {
+                const isLoggedIn = ref(false);
+                const userInfo = ref({});
+                const tasks = ref([
+                    { id: 1, name: '用户注册功能', description: '实现用户注册流程', status: 'completed', priority: 'high', dueDate: '2023-12-15' },
+                    { id: 2, name: '登录验证', description: '添加多因素认证', status: 'in-progress', priority: 'medium', dueDate: '2023-12-20' },
+                    { id: 3, name: '数据库优化', description: '优化查询性能', status: 'pending', priority: 'low', dueDate: '2023-12-25' },
+                    { id: 4, name: 'API文档编写', description: '完善API文档', status: 'pending', priority: 'medium', dueDate: '2023-12-18' }
+                ]);
+                
+                const showModal = ref(false);
+                const modalTitle = ref('');
+                const currentTask = ref({ id: null, name: '', description: '', status: 'pending', priority: 'medium', dueDate: '' });
+                const searchTerm = ref('');
+                const filterStatus = ref('all');
+                
+                // 计算属性
+                const filteredTasks = computed(() => {
+                    return tasks.value.filter(task => {
+                        const matchesSearch = !searchTerm.value || 
+                            task.name.toLowerCase().includes(searchTerm.value.toLowerCase()) ||
+                            task.description.toLowerCase().includes(searchTerm.value.toLowerCase());
+                        const matchesFilter = filterStatus.value === 'all' || task.status === filterStatus.value;
+                        return matchesSearch && matchesFilter;
+                    });
+                });
+                
+                const stats = computed(() => {
+                    return {
+                        totalTasks: tasks.value.length,
+                        pendingTasks: tasks.value.filter(t => t.status === 'pending').length,
+                        completedTasks: tasks.value.filter(t => t.status === 'completed').length
+                    };
+                });
+                
+                // 检查登录状态
+                const checkAuth = async () => {
+                    const token = localStorage.getItem('access_token');
+                    if (!token) {
+                        isLoggedIn.value = false;
+                        return;
+                    }
+                    
+                    try {
+                        const response = await fetch('/api/v0/login/test-token', {
+                            method: 'POST',
+                            headers: {
+                                'Authorization': `Bearer ${token}`,
+                                'Content-Type': 'application/json'
+                            }
+                        });
+                        
+                        if (response.ok) {
+                            const userData = await response.json();
+                            userInfo.value = userData;
+                            isLoggedIn.value = true;
+                        } else {
+                            // Token无效，清除本地存储
+                            localStorage.removeItem('access_token');
+                            isLoggedIn.value = false;
+                            window.location.href = '/login';
+                        }
+                    } catch (error) {
+                        console.error('认证检查失败:', error);
+                        isLoggedIn.value = false;
+                    }
+                };
+                
+                // 登出
+                const logout = () => {
+                    localStorage.removeItem('access_token');
+                    isLoggedIn.value = false;
+                    window.location.href = '/login';
+                };
+                
+                // 任务管理方法
+                const openAddTaskModal = () => {
+                    modalTitle.value = '添加新任务';
+                    currentTask.value = { id: null, name: '', description: '', status: 'pending', priority: 'medium', dueDate: '' };
+                    showModal.value = true;
+                };
+                
+                const openEditTaskModal = (task) => {
+                    modalTitle.value = '编辑任务';
+                    currentTask.value = { ...task };
+                    showModal.value = true;
+                };
+                
+                const closeTaskModal = () => {
+                    showModal.value = false;
+                };
+                
+                const saveTask = () => {
+                    if (currentTask.value.id) {
+                        // 编辑任务
+                        const index = tasks.value.findIndex(t => t.id === currentTask.value.id);
+                        if (index !== -1) {
+                            tasks.value[index] = { ...currentTask.value };
+                        }
+                    } else {
+                        // 添加新任务
+                        const newId = tasks.value.length > 0 ? Math.max(...tasks.value.map(t => t.id)) + 1 : 1;
+                        tasks.value.push({
+                            ...currentTask.value,
+                            id: newId
+                        });
+                    }
+                    closeTaskModal();
+                };
+                
+                const deleteTask = (id) => {
+                    if (confirm('确定要删除这个任务吗？')) {
+                        tasks.value = tasks.value.filter(task => task.id !== id);
+                    }
+                };
+                
+                const getStatusText = (status) => {
+                    switch(status) {
+                        case 'pending': return '待处理';
+                        case 'in-progress': return '进行中';
+                        case 'completed': return '已完成';
+                        default: return status;
+                    }
+                };
+                
+                const getPriorityText = (priority) => {
+                    switch(priority) {
+                        case 'low': return '低';
+                        case 'medium': return '中';
+                        case 'high': return '高';
+                        default: return priority;
+                    }
+                };
+                
+                onMounted(() => {
+                    checkAuth();
+                });
+                
+                return {
+                    isLoggedIn,
+                    userInfo,
+                    tasks,
+                    filteredTasks,
+                    stats,
+                    showModal,
+                    modalTitle,
+                    currentTask,
+                    searchTerm,
+                    filterStatus,
+                    logout,
+                    openAddTaskModal,
+                    openEditTaskModal,
+                    closeTaskModal,
+                    saveTask,
+                    deleteTask,
+                    getStatusText,
+                    getPriorityText
+                };
+            }
+        }).mount('#app');
+    </script>
 </body>
 </html>
