@@ -29,3 +29,9 @@ def get_task_by_fp(session, task) -> Task:
     statement = select(Task).where(Task.task_fingerprint == task_md5)
     session_task = session.exec(statement).first()
     return session_task
+
+
+def check_repeat_task_name(session, task_name, user_id) -> Task:
+    statement = select(Task).where(Task.task_name == task_name, Task.user_id == user_id)
+    session_task = session.exec(statement).first()
+    return session_task

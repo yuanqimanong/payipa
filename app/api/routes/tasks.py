@@ -33,6 +33,14 @@ def create_task(*, session: SessionDep, task_in: TaskCreate, current_user: Curre
             status_code=400,
             detail=f"该任务已在系统中存在：[{existing_task.task_group} - {existing_task.task_name}]",
         )
+    repeat_name = task_crud.check_repeat_task_name(
+        session=session, task_name=task_in.task_name, user_id=current_user.id
+    )
+    if repeat_name:
+        raise HTTPException(
+            status_code=400,
+            detail=f"该任务名称 [{task_in.task_name}] 重复，请更换名称。",
+        )
 
     task = task_crud.create_task(session=session, task_in=task_in, user_id=current_user.id)
     return task
