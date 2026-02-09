@@ -12,6 +12,7 @@ dependencies = [
     "pyjwt<3.0.0,>=2.8.0",
     "pwdlib[argon2,bcrypt]>=0.3.0",
     "tenacity<9.0.0,>=8.2.3",
+    "uuid>=1.30",
 ]
 
 [dependency-groups]

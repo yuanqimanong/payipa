@@ -23,6 +23,7 @@ if config.config_file_name is not None:
 from app.models.basic_model import SQLModel  # noqa
 from app.core.config import settings # noqa
 import app.models.user_model
+import app.models.task_model
 
 target_metadata = SQLModel.metadata
 
