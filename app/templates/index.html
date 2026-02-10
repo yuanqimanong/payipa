@@ -3,15 +3,439 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>任务管理平台 - PayIPA</title>
+    <title>数据采集平台 - PaYiPa</title>
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
     <link rel="stylesheet" href="/static/css/style.css">
+    <style>
+        /* Layout Styles */
+        .app-layout {
+            display: flex;
+            min-height: 100vh;
+        }
+
+        /* Sidebar Styles */
+        .sidebar {
+            width: 260px;
+            background: linear-gradient(180deg, #1a1f36 0%, #252b47 100%);
+            color: #fff;
+            display: flex;
+            flex-direction: column;
+            position: fixed;
+            height: 100vh;
+            left: 0;
+            top: 0;
+            z-index: 100;
+            box-shadow: 4px 0 15px rgba(0, 0, 0, 0.1);
+        }
+
+        .sidebar-header {
+            padding: 24px 20px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .sidebar-logo {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .sidebar-logo-icon {
+            width: 40px;
+            height: 40px;
+            background: linear-gradient(135deg, #4361ee 0%, #7c3aed 100%);
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+        }
+
+        .sidebar-logo-text {
+            font-size: 1.25rem;
+            font-weight: 700;
+            letter-spacing: 0.5px;
+        }
+
+        .sidebar-nav {
+            flex: 1;
+            padding: 20px 0;
+            overflow-y: auto;
+        }
+
+        .nav-section {
+            margin-bottom: 8px;
+        }
+
+        .nav-section-title {
+            padding: 8px 20px;
+            font-size: 0.7rem;
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+            color: rgba(255, 255, 255, 0.4);
+            font-weight: 600;
+        }
+
+        .nav-item {
+            display: flex;
+            align-items: center;
+            padding: 12px 20px;
+            color: rgba(255, 255, 255, 0.7);
+            text-decoration: none;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            border-left: 3px solid transparent;
+            gap: 12px;
+        }
+
+        .nav-item:hover {
+            background: rgba(255, 255, 255, 0.05);
+            color: #fff;
+        }
+
+        .nav-item.active {
+            background: rgba(67, 97, 238, 0.15);
+            color: #fff;
+            border-left-color: #4361ee;
+        }
+
+        .nav-item-icon {
+            width: 20px;
+            text-align: center;
+            font-size: 1rem;
+        }
+
+        .nav-item-text {
+            flex: 1;
+            font-size: 0.9rem;
+        }
+
+        .nav-item-arrow {
+            font-size: 0.7rem;
+            transition: transform 0.3s ease;
+        }
+
+        .nav-item-arrow.expanded {
+            transform: rotate(90deg);
+        }
+
+        .nav-submenu {
+            overflow: hidden;
+            max-height: 0;
+            transition: max-height 0.3s ease;
+        }
+
+        .nav-submenu.expanded {
+            max-height: 200px;
+        }
+
+        .nav-submenu .nav-item {
+            padding-left: 52px;
+            font-size: 0.85rem;
+        }
+
+        /* Main Content Styles */
+        .main-wrapper {
+            flex: 1;
+            margin-left: 260px;
+            display: flex;
+            flex-direction: column;
+            min-height: 100vh;
+        }
+
+        /* Top Header Styles */
+        .top-header {
+            background: #fff;
+            padding: 16px 30px;
+            display: flex;
+            justify-content: flex-end;
+            align-items: center;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+            position: sticky;
+            top: 0;
+            z-index: 50;
+        }
+
+        .user-info-section {
+            display: flex;
+            align-items: center;
+            gap: 24px;
+        }
+
+        .login-time {
+            color: #6c757d;
+            font-size: 0.85rem;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .login-time-icon {
+            font-size: 1rem;
+        }
+
+        .user-profile {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 8px 16px;
+            background: #f8f9fa;
+            border-radius: 30px;
+        }
+
+        .user-avatar {
+            width: 36px;
+            height: 36px;
+            background: linear-gradient(135deg, #4361ee 0%, #7c3aed 100%);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #fff;
+            font-weight: 600;
+            font-size: 0.9rem;
+        }
+
+        .user-details {
+            text-align: left;
+        }
+
+        .user-name {
+            font-weight: 600;
+            color: #212529;
+            font-size: 0.9rem;
+        }
+
+        .user-role {
+            font-size: 0.75rem;
+            color: #6c757d;
+        }
+
+        .logout-btn {
+            padding: 8px 16px;
+            background: transparent;
+            border: 1px solid #dee2e6;
+            border-radius: 6px;
+            color: #6c757d;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            font-size: 0.85rem;
+        }
+
+        .logout-btn:hover {
+            background: #f72585;
+            border-color: #f72585;
+            color: #fff;
+        }
+
+        /* Main Content Area */
+        .main-content-area {
+            flex: 1;
+            padding: 30px;
+            background: #f0f2f5;
+        }
+
+        .page-title {
+            margin-bottom: 30px;
+        }
+
+        .page-title h1 {
+            font-size: 1.75rem;
+            color: #212529;
+            margin-bottom: 8px;
+        }
+
+        .page-title p {
+            color: #6c757d;
+            font-size: 0.95rem;
+        }
+
+        /* Data Collector Cards Grid */
+        .collectors-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 24px;
+        }
+
+        .collector-card {
+            background: #fff;
+            border-radius: 12px;
+            padding: 24px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.06);
+            transition: all 0.3s ease;
+            cursor: pointer;
+            border: 1px solid transparent;
+        }
+
+        .collector-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 8px 30px rgba(0, 0, 0, 0.1);
+            border-color: #4361ee;
+        }
+
+        .collector-header {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            margin-bottom: 16px;
+        }
+
+        .collector-icon {
+            width: 56px;
+            height: 56px;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 28px;
+        }
+
+        .collector-icon.reddit {
+            background: linear-gradient(135deg, #ff4500 0%, #ff6b35 100%);
+        }
+
+        .collector-icon.facebook {
+            background: linear-gradient(135deg, #1877f2 0%, #42a5f5 100%);
+        }
+
+        .collector-icon.twitter {
+            background: linear-gradient(135deg, #1da1f2 0%, #4fc3f7 100%);
+        }
+
+        .collector-icon.instagram {
+            background: linear-gradient(135deg, #e4405f 0%, #f77737 100%);
+        }
+
+        .collector-icon.youtube {
+            background: linear-gradient(135deg, #ff0000 0%, #ff5252 100%);
+        }
+
+        .collector-icon.linkedin {
+            background: linear-gradient(135deg, #0077b5 0%, #00a0dc 100%);
+        }
+
+        .collector-title-section {
+            flex: 1;
+        }
+
+        .collector-title {
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: #212529;
+            margin-bottom: 4px;
+        }
+
+        .collector-platform {
+            font-size: 0.8rem;
+            color: #6c757d;
+        }
+
+        .collector-status {
+            padding: 4px 10px;
+            border-radius: 20px;
+            font-size: 0.75rem;
+            font-weight: 500;
+        }
+
+        .collector-status.active {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .collector-status.inactive {
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        .collector-status.pending {
+            background: #fff3cd;
+            color: #856404;
+        }
+
+        .collector-desc {
+            color: #6c757d;
+            font-size: 0.9rem;
+            margin-bottom: 20px;
+            line-height: 1.5;
+        }
+
+        .collector-stats {
+            display: flex;
+            justify-content: space-between;
+            padding-top: 16px;
+            border-top: 1px solid #eee;
+        }
+
+        .stat-item {
+            text-align: center;
+        }
+
+        .stat-value {
+            font-size: 1.25rem;
+            font-weight: 700;
+            color: #4361ee;
+        }
+
+        .stat-label {
+            font-size: 0.75rem;
+            color: #6c757d;
+            margin-top: 2px;
+        }
+
+        /* Login Card Styles (Keep original) */
+        .login-prompt {
+            max-width: 500px;
+            margin: 15vh auto;
+            text-align: center;
+            padding: 3rem;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+        }
+
+        /* Responsive Design */
+        @media (max-width: 1200px) {
+            .collectors-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+        }
+
+        @media (max-width: 768px) {
+            .sidebar {
+                width: 0;
+                overflow: hidden;
+            }
+
+            .sidebar.mobile-open {
+                width: 260px;
+            }
+
+            .main-wrapper {
+                margin-left: 0;
+            }
+
+            .collectors-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .top-header {
+                padding: 12px 16px;
+            }
+
+            .user-info-section {
+                gap: 12px;
+            }
+
+            .login-time {
+                display: none;
+            }
+        }
+    </style>
 </head>
 <body>
 <div id="app">
-    <div class="container">
-        <div v-if="!isLoggedIn" class="card"
-             style="max-width: 500px; margin: 15vh auto; text-align: center; padding: 3rem;">
+    <!-- 未登录状态 -->
+    <div v-if="!isLoggedIn" class="container">
+        <div class="login-prompt">
             <div class="header">
                 <h1 style="font-size: 2.5rem; margin-bottom: 1rem; color: var(--danger-color);">🔒</h1>
                 <h2 style="font-size: 1.75rem; margin-bottom: 1rem; color: var(--dark-text);">需要登录</h2>
@@ -21,129 +445,121 @@
                 <a href="/login" class="btn btn-primary" style="padding: 12px 30px; font-size: 16px;">前往登录</a>
             </div>
         </div>
+    </div>
 
-        <div v-else class="main-content">
-            <header class="header">
-                <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem; margin-bottom: 1.5rem;">
-                    <div>
-                        <h1 style="font-size: 2rem; margin-bottom: 0.5rem;">📋 任务管理平台</h1>
-                        <p class="welcome-message">欢迎回来，{{ userInfo.full_name || userInfo.email }}！</p>
+    <!-- 已登录状态 - 带侧边栏布局 -->
+    <div v-else class="app-layout">
+        <!-- 左侧导航侧边栏 -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <div class="sidebar-logo">
+                    <div class="sidebar-logo-icon">📊</div>
+                    <span class="sidebar-logo-text">PaYiPa</span>
+                </div>
+            </div>
+
+            <nav class="sidebar-nav">
+                <!-- 基础功能 -->
+                <div class="nav-section">
+                    <div class="nav-section-title">基础功能</div>
+                    <div class="nav-item" :class="{ active: activeNav === 'task-management' }"
+                         @click="setActiveNav('task-management')">
+                        <span class="nav-item-icon">📋</span>
+                        <span class="nav-item-text">任务管理</span>
                     </div>
-                    <button @click="logout" class="btn btn-secondary">退出登录</button>
+                    <div class="nav-item" :class="{ active: activeNav === 'data-query' }"
+                         @click="setActiveNav('data-query')">
+                        <span class="nav-item-icon">🔍</span>
+                        <span class="nav-item-text">数据查询</span>
+                    </div>
+                </div>
+
+                <!-- 系统管理 - 仅管理员可见 -->
+                <div class="nav-section" v-if="userInfo.is_superuser">
+                    <div class="nav-section-title">系统管理</div>
+                    <div class="nav-item" @click="toggleSubmenu('system')">
+                        <span class="nav-item-icon">⚙️</span>
+                        <span class="nav-item-text">系统管理</span>
+                        <span class="nav-item-arrow" :class="{ expanded: expandedMenus.system }">▶</span>
+                    </div>
+                    <div class="nav-submenu" :class="{ expanded: expandedMenus.system }">
+                        <div class="nav-item" :class="{ active: activeNav === 'add-task-module' }"
+                             @click="setActiveNav('add-task-module')">
+                            <span class="nav-item-text">爬虫模块</span>
+                        </div>
+                        <div class="nav-item" :class="{ active: activeNav === 'user-management' }"
+                             @click="setActiveNav('user-management')">
+                            <span class="nav-item-text">用户管理</span>
+                        </div>
+                        <div class="nav-item" :class="{ active: activeNav === 'log-viewer' }"
+                             @click="setActiveNav('log-viewer')">
+                            <span class="nav-item-text">日志查看</span>
+                        </div>
+                    </div>
+                </div>
+            </nav>
+        </aside>
+
+        <!-- 右侧主内容区 -->
+        <div class="main-wrapper">
+            <!-- 顶部栏 -->
+            <header class="top-header">
+                <div class="user-info-section">
+                    <div class="login-time">
+                        <span class="login-time-icon">🕐</span>
+                        <span>登录时间: {{ loginTime }}</span>
+                    </div>
+                    <div class="user-profile">
+                        <div class="user-avatar">{{ userAvatar }}</div>
+                        <div class="user-details">
+                            <div class="user-name">{{ userInfo.full_name || userInfo.email }}</div>
+                            <div class="user-role">{{ userInfo.is_superuser ? '管理员' : '普通用户' }}</div>
+                        </div>
+                    </div>
+                    <button class="logout-btn" @click="logout">退出登录</button>
                 </div>
             </header>
 
-            <div class="task-controls">
-                <div class="search-filter">
-                    <input type="text" v-model="searchTerm" placeholder="🔍 搜索任务..." class="search-input">
-                    <select v-model="filterStatus" class="filter-select">
-                        <option value="all">全部任务</option>
-                        <option value="pending">待处理</option>
-                        <option value="in-progress">进行中</option>
-                        <option value="completed">已完成</option>
-                    </select>
+            <!-- 主内容区域 -->
+            <main class="main-content-area">
+                <div class="page-title">
+                    <h1>🎯 数据采集任务模块</h1>
+                    <p>选择数据采集模块开始您的数据监控任务</p>
                 </div>
 
-                <button @click="openAddTaskModal" class="btn btn-primary">+ 添加新任务</button>
-            </div>
-
-            <div class="stats-container">
-                <div class="stat-card">
-                    <h3>{{ stats.totalTasks }}</h3>
-                    <p>总任务数</p>
-                </div>
-                <div class="stat-card">
-                    <h3>{{ stats.pendingTasks }}</h3>
-                    <p>待处理</p>
-                </div>
-                <div class="stat-card">
-                    <h3>{{ stats.completedTasks }}</h3>
-                    <p>已完成</p>
-                </div>
-            </div>
-
-            <table class="tasks-table">
-                <thead>
-                <tr>
-                    <th style="width: 30%;">任务名称</th>
-                    <th style="width: 15%;">状态</th>
-                    <th style="width: 15%;">优先级</th>
-                    <th style="width: 20%;">截止日期</th>
-                    <th style="width: 20%;">操作</th>
-                </tr>
-                </thead>
-                <tbody>
-                <tr v-for="task in filteredTasks" :key="task.id">
-                    <td>
-                        <strong>{{ task.name }}</strong>
-                        <div style="font-size: 0.9rem; color: var(--light-text); margin-top: 0.25rem;"
-                             v-if="task.description">{{ task.description }}
-                        </div>
-                    </td>
-                    <td><span class="status-badge"
-                              :class="'status-' + task.status">{{ getStatusText(task.status) }}</span></td>
-                    <td><span :class="'priority-' + task.priority">{{ getPriorityText(task.priority) }}</span></td>
-                    <td>{{ task.dueDate || '-' }}</td>
-                    <td>
-                        <button @click="openEditTaskModal(task)" class="btn btn-secondary btn-sm">编辑</button>
-                        <button @click="deleteTask(task.id)" class="btn btn-danger btn-sm">删除</button>
-                    </td>
-                </tr>
-                <tr v-if="filteredTasks.length === 0">
-                    <td colspan="5" style="text-align: center; padding: 30px; color: var(--light-text);">
-                        <div style="font-size: 3rem; margin-bottom: 1rem;">📋</div>
-                        <h3>暂无任务</h3>
-                        <p>您可以点击"添加新任务"按钮来创建第一个任务</p>
-                    </td>
-                </tr>
-                </tbody>
-            </table>
-
-            <!-- 任务模态框 -->
-            <div v-if="showModal" class="modal" @click="closeTaskModal">
-                <div class="modal-content" @click.stop>
-                    <span class="close" @click="closeTaskModal">&times;</span>
-                    <h2>{{ modalTitle }}</h2>
-                    <form @submit.prevent="saveTask">
-                        <div class="form-group">
-                            <label for="taskName">任务名称 *</label>
-                            <input type="text" id="taskName" v-model="currentTask.name" required
-                                   placeholder="输入任务名称">
-                        </div>
-                        <div class="form-group">
-                            <label for="taskDescription">任务描述</label>
-                            <textarea id="taskDescription" v-model="currentTask.description"
-                                      placeholder="输入任务详细描述"></textarea>
-                        </div>
-                        <div class="form-row">
-                            <div class="form-group">
-                                <label for="taskStatus">状态 *</label>
-                                <select id="taskStatus" v-model="currentTask.status" required>
-                                    <option value="pending">待处理</option>
-                                    <option value="in-progress">进行中</option>
-                                    <option value="completed">已完成</option>
-                                </select>
+                <!-- 数据采集模块卡片 -->
+                <div class="collectors-grid">
+                    <div class="collector-card" v-for="collector in dataCollectors" :key="collector.id">
+                        <div class="collector-header">
+                            <div class="collector-icon" :class="collector.platform">
+                                {{ collector.icon }}
                             </div>
-                            <div class="form-group">
-                                <label for="taskPriority">优先级 *</label>
-                                <select id="taskPriority" v-model="currentTask.priority" required>
-                                    <option value="low">低</option>
-                                    <option value="medium">中</option>
-                                    <option value="high">高</option>
-                                </select>
+                            <div class="collector-title-section">
+                                <div class="collector-title">{{ collector.name }}</div>
+                                <div class="collector-platform">{{ collector.platformName }}</div>
+                            </div>
+                            <span class="collector-status" :class="collector.status">
+                                {{ getStatusText(collector.status) }}
+                            </span>
+                        </div>
+                        <div class="collector-desc">{{ collector.description }}</div>
+                        <div class="collector-stats">
+                            <div class="stat-item">
+                                <div class="stat-value">{{ collector.tasksCount }}</div>
+                                <div class="stat-label">运行任务</div>
+                            </div>
+                            <div class="stat-item">
+                                <div class="stat-value">{{ collector.dataCount }}</div>
+                                <div class="stat-label">采集数据</div>
+                            </div>
+                            <div class="stat-item">
+                                <div class="stat-value">{{ collector.successRate }}</div>
+                                <div class="stat-label">成功率</div>
                             </div>
                         </div>
-                        <div class="form-group">
-                            <label for="dueDate">截止日期</label>
-                            <input type="date" id="dueDate" v-model="currentTask.dueDate">
-                        </div>
-                        <div class="form-actions">
-                            <button type="submit" class="btn btn-success">保存</button>
-                            <button type="button" class="btn btn-secondary" @click="closeTaskModal">取消</button>
-                        </div>
-                    </form>
+                    </div>
                 </div>
-            </div>
+            </main>
         </div>
     </div>
 </div>
@@ -155,37 +571,168 @@
         setup() {
             const isLoggedIn = ref(false);
             const userInfo = ref({});
-            const tasks = ref([
-                { id: 1, name: '用户注册功能', description: '实现用户注册流程', status: 'completed', priority: 'high', dueDate: '2023-12-15' },
-                { id: 2, name: '登录验证', description: '添加多因素认证', status: 'in-progress', priority: 'medium', dueDate: '2023-12-20' },
-                { id: 3, name: '数据库优化', description: '优化查询性能', status: 'pending', priority: 'low', dueDate: '2023-12-25' },
-                { id: 4, name: 'API文档编写', description: '完善API文档', status: 'pending', priority: 'medium', dueDate: '2023-12-18' }
+            const activeNav = ref('task-management');
+            const loginTime = ref('');
+            const expandedMenus = ref({
+                system: false
+            });
+
+            // Mock 数据采集模块数据
+            const dataCollectors = ref([
+                {
+                    id: 1,
+                    name: 'Reddit 用户监控',
+                    platform: 'reddit',
+                    platformName: 'Reddit',
+                    icon: '🔴',
+                    description: '监控指定 Reddit 用户的发帖、评论、点赞等活动，实时追踪用户动态。',
+                    status: 'active',
+                    tasksCount: 12,
+                    dataCount: '5.2K',
+                    successRate: '98%'
+                },
+                {
+                    id: 2,
+                    name: 'Reddit 板块监控',
+                    platform: 'reddit',
+                    platformName: 'Reddit',
+                    icon: '🔴',
+                    description: '监控指定 Subreddit 的热门帖子、新帖子，分析板块趋势和热点话题。',
+                    status: 'active',
+                    tasksCount: 8,
+                    dataCount: '12.8K',
+                    successRate: '96%'
+                },
+                {
+                    id: 3,
+                    name: 'Facebook 用户监控',
+                    platform: 'facebook',
+                    platformName: 'Facebook',
+                    icon: '📘',
+                    description: '追踪 Facebook 用户的公开动态、发布内容及互动数据。',
+                    status: 'pending',
+                    tasksCount: 5,
+                    dataCount: '3.1K',
+                    successRate: '92%'
+                },
+                {
+                    id: 4,
+                    name: 'Twitter 话题监控',
+                    platform: 'twitter',
+                    platformName: 'Twitter/X',
+                    icon: '🐦',
+                    description: '实时监控 Twitter 热门话题、关键词和标签，追踪舆论趋势。',
+                    status: 'active',
+                    tasksCount: 15,
+                    dataCount: '28.5K',
+                    successRate: '94%'
+                },
+                {
+                    id: 5,
+                    name: 'Instagram 账号监控',
+                    platform: 'instagram',
+                    platformName: 'Instagram',
+                    icon: '📷',
+                    description: '监控 Instagram 公开账号的帖子、Stories 和 Reels 内容。',
+                    status: 'inactive',
+                    tasksCount: 0,
+                    dataCount: '0',
+                    successRate: '-'
+                },
+                {
+                    id: 6,
+                    name: 'YouTube 频道监控',
+                    platform: 'youtube',
+                    platformName: 'YouTube',
+                    icon: '▶️',
+                    description: '追踪 YouTube 频道的视频发布、观看量和评论数据变化。',
+                    status: 'active',
+                    tasksCount: 6,
+                    dataCount: '8.7K',
+                    successRate: '99%'
+                },
+                {
+                    id: 7,
+                    name: 'LinkedIn 公司监控',
+                    platform: 'linkedin',
+                    platformName: 'LinkedIn',
+                    icon: '💼',
+                    description: '监控企业 LinkedIn 页面的动态、招聘信息和公司更新。',
+                    status: 'pending',
+                    tasksCount: 3,
+                    dataCount: '1.2K',
+                    successRate: '88%'
+                },
+                {
+                    id: 8,
+                    name: 'Reddit 关键词监控',
+                    platform: 'reddit',
+                    platformName: 'Reddit',
+                    icon: '🔴',
+                    description: '全站搜索监控特定关键词，第一时间发现相关讨论和提及。',
+                    status: 'active',
+                    tasksCount: 20,
+                    dataCount: '45.3K',
+                    successRate: '97%'
+                },
+                {
+                    id: 9,
+                    name: 'Twitter 用户监控',
+                    platform: 'twitter',
+                    platformName: 'Twitter/X',
+                    icon: '🐦',
+                    description: '追踪指定 Twitter 用户的推文、转发和互动数据。',
+                    status: 'active',
+                    tasksCount: 18,
+                    dataCount: '32.1K',
+                    successRate: '95%'
+                }
             ]);
 
-            const showModal = ref(false);
-            const modalTitle = ref('');
-            const currentTask = ref({ id: null, name: '', description: '', status: 'pending', priority: 'medium', dueDate: '' });
-            const searchTerm = ref('');
-            const filterStatus = ref('all');
-
             // 计算属性
-            const filteredTasks = computed(() => {
-                return tasks.value.filter(task => {
-                    const matchesSearch = !searchTerm.value ||
-                        task.name.toLowerCase().includes(searchTerm.value.toLowerCase()) ||
-                        (task.description && task.description.toLowerCase().includes(searchTerm.value.toLowerCase()));
-                    const matchesFilter = filterStatus.value === 'all' || task.status === filterStatus.value;
-                    return matchesSearch && matchesFilter;
-                });
+            const userAvatar = computed(() => {
+                const name = userInfo.value.full_name || userInfo.value.email || '';
+                return name.charAt(0).toUpperCase();
             });
 
-            const stats = computed(() => {
-                return {
-                    totalTasks: tasks.value.length,
-                    pendingTasks: tasks.value.filter(t => t.status === 'pending').length,
-                    completedTasks: tasks.value.filter(t => t.status === 'completed').length
-                };
-            });
+            // 设置登录时间
+            const setLoginTime = () => {
+                const cached = localStorage.getItem('login_time');
+                if (cached) {
+                    loginTime.value = cached;
+                } else {
+                    const now = new Date();
+                    const timeStr = now.toLocaleString('zh-CN', {
+                        year: 'numeric',
+                        month: '2-digit',
+                        day: '2-digit',
+                        hour: '2-digit',
+                        minute: '2-digit'
+                    });
+                    loginTime.value = timeStr;
+                    localStorage.setItem('login_time', timeStr);
+                }
+            };
+
+            // 切换导航
+            const setActiveNav = (nav) => {
+                activeNav.value = nav;
+            };
+
+            // 切换子菜单
+            const toggleSubmenu = (menu) => {
+                expandedMenus.value[menu] = !expandedMenus.value[menu];
+            };
+
+            // 获取状态文本
+            const getStatusText = (status) => {
+                switch (status) {
+                    case 'active': return '运行中';
+                    case 'inactive': return '已停止';
+                    case 'pending': return '待配置';
+                    default: return status;
+                }
+            };
 
             // 检查登录状态
             const checkAuth = async () => {
@@ -208,9 +755,11 @@
                         const userData = await response.json();
                         userInfo.value = userData;
                         isLoggedIn.value = true;
+                        setLoginTime();
                     } else {
                         // Token无效，清除本地存储
                         localStorage.removeItem('access_token');
+                        localStorage.removeItem('login_time');
                         isLoggedIn.value = false;
                         window.location.href = '/login';
                     }
@@ -223,67 +772,9 @@
             // 登出
             const logout = () => {
                 localStorage.removeItem('access_token');
+                localStorage.removeItem('login_time');
                 isLoggedIn.value = false;
                 window.location.href = '/login';
-            };
-
-            // 任务管理方法
-            const openAddTaskModal = () => {
-                modalTitle.value = '添加新任务';
-                currentTask.value = { id: null, name: '', description: '', status: 'pending', priority: 'medium', dueDate: '' };
-                showModal.value = true;
-            };
-
-            const openEditTaskModal = (task) => {
-                modalTitle.value = '编辑任务';
-                currentTask.value = { ...task };
-                showModal.value = true;
-            };
-
-            const closeTaskModal = () => {
-                showModal.value = false;
-            };
-
-            const saveTask = () => {
-                if (currentTask.value.id) {
-                    // 编辑任务
-                    const index = tasks.value.findIndex(t => t.id === currentTask.value.id);
-                    if (index !== -1) {
-                        tasks.value[index] = { ...currentTask.value };
-                    }
-                } else {
-                    // 添加新任务
-                    const newId = tasks.value.length > 0 ? Math.max(...tasks.value.map(t => t.id)) + 1 : 1;
-                    tasks.value.push({
-                        ...currentTask.value,
-                        id: newId
-                    });
-                }
-                closeTaskModal();
-            };
-
-            const deleteTask = (id) => {
-                if (confirm('确定要删除这个任务吗？删除后无法恢复。')) {
-                    tasks.value = tasks.value.filter(task => task.id !== id);
-                }
-            };
-
-            const getStatusText = (status) => {
-                switch(status) {
-                    case 'pending': return '待处理';
-                    case 'in-progress': return '进行中';
-                    case 'completed': return '已完成';
-                    default: return status;
-                }
-            };
-
-            const getPriorityText = (priority) => {
-                switch(priority) {
-                    case 'low': return '低';
-                    case 'medium': return '中';
-                    case 'high': return '高';
-                    default: return priority;
-                }
             };
 
             onMounted(() => {
@@ -293,22 +784,15 @@
             return {
                 isLoggedIn,
                 userInfo,
-                tasks,
-                filteredTasks,
-                stats,
-                showModal,
-                modalTitle,
-                currentTask,
-                searchTerm,
-                filterStatus,
-                logout,
-                openAddTaskModal,
-                openEditTaskModal,
-                closeTaskModal,
-                saveTask,
-                deleteTask,
+                userAvatar,
+                activeNav,
+                loginTime,
+                expandedMenus,
+                dataCollectors,
+                setActiveNav,
+                toggleSubmenu,
                 getStatusText,
-                getPriorityText
+                logout
             };
         }
     }).mount('#app');
