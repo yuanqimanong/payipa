@@ -1,4 +1,5 @@
 import uuid
+from typing import Any
 
 from sqlmodel import Session, select
 
@@ -35,3 +36,20 @@ def check_repeat_task_name(session, task_name, user_id) -> Task:
     statement = select(Task).where(Task.task_name == task_name, Task.user_id == user_id)
     session_task = session.exec(statement).first()
     return session_task
+
+
+def update_task(session, db_task, user_in) -> Any:
+    task_data = user_in.model_dump(exclude_unset=True)
+    db_task.sqlmodel_update(task_data)
+    session.add(db_task)
+    session.commit()
+    session.refresh(db_task)
+    return db_task
+
+
+def update_status(session, db_task, user_in) -> Any:
+    db_task.sqlmodel_update({"status": user_in.value})
+    session.add(db_task)
+    session.commit()
+    session.refresh(db_task)
+    return db_task

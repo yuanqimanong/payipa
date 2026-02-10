@@ -1,5 +1,6 @@
 import uuid
 from datetime import datetime
+from enum import Enum
 from typing import Any
 
 from sqlalchemy import SMALLINT, DateTime
@@ -7,6 +8,15 @@ from sqlalchemy.dialects.postgresql import JSON
 from sqlmodel import Field, SQLModel
 
 from app.models.basic_model import get_datetime_utc
+
+
+class TaskStatus(Enum):
+    PENDING = 0
+    BEGIN = 1
+    IN_PROGRESS = 2
+    COMPLETED = 3
+    FAILED = 4
+    KILL = 5
 
 
 class TaskBase(SQLModel):
@@ -22,11 +32,17 @@ class TaskCreate(TaskBase):
     pass
 
 
+class TaskUpdate(SQLModel):
+    task_group: str
+    task_name: str
+    is_delete: bool
+
+
 class Task(TaskBase, table=True):
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     task_fingerprint: str = Field(max_length=32, unique=True, index=True)
 
-    status: int = Field(sa_type=SMALLINT, sa_column_kwargs={"comment": "任务状态"})
+    status: int = Field(default=0, sa_type=SMALLINT, sa_column_kwargs={"comment": "任务状态"})
     is_delete: bool = False
 
     created_at: datetime | None = Field(
