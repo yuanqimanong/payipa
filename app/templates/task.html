@@ -689,7 +689,8 @@
                     </div>
 
                     <!-- 提示信息 -->
-                    <div v-if="alertMessage" :class="['alert', alertType === 'success' ? 'alert-success' : 'alert-error']">
+                    <div v-if="alertMessage"
+                         :class="['alert', alertType === 'success' ? 'alert-success' : 'alert-error']">
                         {{ alertMessage }}
                     </div>
 
@@ -758,7 +759,8 @@
                     </div>
 
                     <!-- 提示信息 -->
-                    <div v-if="alertMessage" :class="['alert', alertType === 'success' ? 'alert-success' : 'alert-error']">
+                    <div v-if="alertMessage"
+                         :class="['alert', alertType === 'success' ? 'alert-success' : 'alert-error']">
                         {{ alertMessage }}
                     </div>
 
@@ -772,40 +774,40 @@
                         <div v-if="tasks.length > 0">
                             <table class="task-table">
                                 <thead>
-                                    <tr>
-                                        <th>任务名称</th>
-                                        <th>分组</th>
-                                        <th>平台</th>
-                                        <th>状态</th>
-                                        <th>创建时间</th>
-                                        <th>操作</th>
-                                    </tr>
+                                <tr>
+                                    <th>任务名称</th>
+                                    <th>分组</th>
+                                    <th>平台</th>
+                                    <th>状态</th>
+                                    <th>创建时间</th>
+                                    <th>操作</th>
+                                </tr>
                                 </thead>
                                 <tbody>
-                                    <tr v-for="task in tasks" :key="task.id">
-                                        <td class="task-name">{{ task.task_name }}</td>
-                                        <td><span class="task-group-badge">{{ task.task_group }}</span></td>
-                                        <td>{{ task.source_platform || '-' }}</td>
-                                        <td>
+                                <tr v-for="task in tasks" :key="task.id">
+                                    <td class="task-name">{{ task.task_name }}</td>
+                                    <td><span class="task-group-badge">{{ task.task_group }}</span></td>
+                                    <td>{{ task.source_platform || '-' }}</td>
+                                    <td>
                                             <span class="task-status" :class="getStatusClass(task.status)">
                                                 {{ getStatusText(task.status) }}
                                             </span>
-                                        </td>
-                                        <td>{{ formatDate(task.created_at) }}</td>
-                                        <td class="task-actions">
-                                            <button v-if="task.status === 0 || task.status === 5"
-                                                    class="action-btn start" @click="startTask(task.id)">
-                                                启动
-                                            </button>
-                                            <button v-if="task.status === 1 || task.status === 2"
-                                                    class="action-btn stop" @click="stopTask(task.id)">
-                                                停止
-                                            </button>
-                                            <button class="action-btn delete" @click="deleteTask(task.id)">
-                                                删除
-                                            </button>
-                                        </td>
-                                    </tr>
+                                    </td>
+                                    <td>{{ formatDate(task.created_at) }}</td>
+                                    <td class="task-actions">
+                                        <button v-if="task.status === 0 || task.status === 5"
+                                                class="action-btn start" @click="startTask(task.id)">
+                                            启动
+                                        </button>
+                                        <button v-if="task.status === 1 || task.status === 2"
+                                                class="action-btn stop" @click="stopTask(task.id)">
+                                            停止
+                                        </button>
+                                        <button class="action-btn delete" @click="deleteTask(task.id)">
+                                            删除
+                                        </button>
+                                    </td>
+                                </tr>
                                 </tbody>
                             </table>
                         </div>
@@ -1113,6 +1115,12 @@
             };
 
             onMounted(() => {
+                 // 读取 URL 参数设置默认导航
+                const urlParams = new URLSearchParams(window.location.search);
+                const navParam = urlParams.get('nav');
+                if (navParam === 'create-task' || navParam === 'view-tasks') {
+                    activeNav.value = navParam;
+                }
                 checkAuth();
             });
 
