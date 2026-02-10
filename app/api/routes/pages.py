@@ -24,3 +24,8 @@ async def home_page(request: Request):
 @router.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request):
     return serve_template("login")
+
+
+@router.get("/task", response_class=HTMLResponse)
+async def task_page(request: Request):
+    return serve_template("task")

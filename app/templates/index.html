@@ -462,11 +462,27 @@
                 <!-- 基础功能 -->
                 <div class="nav-section">
                     <div class="nav-section-title">基础功能</div>
-                    <div class="nav-item" :class="{ active: activeNav === 'task-management' }"
-                         @click="setActiveNav('task-management')">
+                    <!-- Dashboard (原任务管理) -->
+                    <div class="nav-item" :class="{ active: activeNav === 'dashboard' }"
+                         @click="setActiveNav('dashboard')">
+                        <span class="nav-item-icon">🏠</span>
+                        <span class="nav-item-text">Dashboard</span>
+                    </div>
+                    <!-- 任务管理 - 二级菜单 -->
+                    <div class="nav-item" @click="toggleSubmenu('task')">
                         <span class="nav-item-icon">📋</span>
                         <span class="nav-item-text">任务管理</span>
+                        <span class="nav-item-arrow" :class="{ expanded: expandedMenus.task }">▶</span>
                     </div>
+                    <div class="nav-submenu" :class="{ expanded: expandedMenus.task }">
+                        <a class="nav-item" href="/task">
+                            <span class="nav-item-text">新建任务</span>
+                        </a>
+                        <a class="nav-item" href="/task">
+                            <span class="nav-item-text">查看任务</span>
+                        </a>
+                    </div>
+                    <!-- 数据查询 -->
                     <div class="nav-item" :class="{ active: activeNav === 'data-query' }"
                          @click="setActiveNav('data-query')">
                         <span class="nav-item-icon">🔍</span>
