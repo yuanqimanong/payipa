@@ -3,7 +3,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any
 
-from sqlalchemy import SMALLINT, DateTime
+from sqlalchemy import SMALLINT, TEXT, DateTime
 from sqlalchemy.dialects.postgresql import JSON
 from sqlmodel import Field, SQLModel
 
@@ -15,8 +15,8 @@ class TaskStatus(Enum):
     BEGIN = 1
     IN_PROGRESS = 2
     COMPLETED = 3
-    FAILED = 4
-    KILL = 5
+    FAILED = -1
+    KILL = -2
 
 
 class TaskBase(SQLModel):
@@ -70,3 +70,30 @@ class TaskPublic(TaskBase):
 class TasksPublic(SQLModel):
     data: list[TaskPublic]
     count: int
+
+
+class TaskRunStatus(Enum):
+    INIT = 0
+    SUCCESS = 1
+    IN_PROGRESS = 2
+    FAILED = -1
+
+
+class TaskRun(SQLModel, table=True):
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    task_fingerprint: str = Field(max_length=32, unique=True, index=True)
+    source_platform: str = Field(default="", max_length=50, index=True, sa_column_kwargs={"comment": "资源平台"})
+    priority: int = Field(default=5, sa_type=SMALLINT, sa_column_kwargs={"comment": "任务优先级 数字越大越高"})
+    cron_expr: str = Field(default="", max_length=50, sa_column_kwargs={"comment": "CRON定时器"})
+    crawl_task: dict[str, Any] = Field(default={}, sa_type=JSON, sa_column_kwargs={"comment": "抓取任务"})
+    status: int = Field(default=0, sa_type=SMALLINT, sa_column_kwargs={"comment": "抓取任务状态"})
+    error_reason: str | None = Field(sa_type=TEXT, sa_column_kwargs={"comment": "抓取任务异常原因"})
+    enabled: bool = False
+    started_at: datetime | None = Field(
+        default_factory=get_datetime_utc,
+        sa_type=DateTime(timezone=True),  # type: ignore
+    )
+    finished_at: datetime | None = Field(
+        default_factory=get_datetime_utc,
+        sa_type=DateTime(timezone=True),  # type: ignore
+    )
