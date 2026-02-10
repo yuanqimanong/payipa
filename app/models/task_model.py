@@ -33,9 +33,9 @@ class TaskCreate(TaskBase):
 
 
 class TaskUpdate(SQLModel):
-    task_group: str
-    task_name: str
-    is_delete: bool
+    task_group: str | None = ""
+    task_name: str | None = ""
+    is_delete: bool | None = False
 
 
 class Task(TaskBase, table=True):
