@@ -69,12 +69,11 @@ def begin_task(*, session: SessionDep, task_id: uuid.UUID, current_user: Current
     """
 
     db_task = task_checker(current_user, session, task_id)
-    result = task_crud.create_task_run(session=session, db_task=db_task)
-    if result:
-        raise HTTPException(
-            status_code=400,
-            detail=f"启动 {db_task.task_name} 失败。",
-        )
+    try:
+        task_crud.create_task_run(session=session, db_task=db_task)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
     db_task = task_crud.update_status(session=session, db_task=db_task, user_in=TaskStatus.BEGIN)
     return db_task
 
@@ -86,7 +85,7 @@ def stop_task(*, session: SessionDep, task_id: uuid.UUID, current_user: CurrentU
     """
 
     db_task = task_checker(current_user, session, task_id)
-
+    task_crud.update_task_run(session=session, db_task=db_task, user_in={"status": TaskStatus.KILL.value})
     db_task = task_crud.update_status(session=session, db_task=db_task, user_in=TaskStatus.KILL)
     return db_task
 
@@ -98,8 +97,10 @@ def remove_task(*, session: SessionDep, task_id: uuid.UUID, current_user: Curren
     """
 
     db_task = task_checker(current_user, session, task_id)
-
     db_task.is_delete = True
+
+    task_crud.update_task_run(session=session, db_task=db_task, user_in={"status": TaskStatus.KILL.value})
+
     session.add(db_task)
     session.commit()
     session.refresh(db_task)

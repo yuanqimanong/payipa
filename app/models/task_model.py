@@ -72,13 +72,6 @@ class TasksPublic(SQLModel):
     count: int
 
 
-class TaskRunStatus(Enum):
-    INIT = 0
-    SUCCESS = 1
-    IN_PROGRESS = 2
-    FAILED = -1
-
-
 class TaskRun(SQLModel, table=True):
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     task_fingerprint: str = Field(max_length=32, unique=True, index=True)

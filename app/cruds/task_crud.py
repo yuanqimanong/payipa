@@ -63,12 +63,12 @@ def create_task_run(session, db_task: Task):
     db_rule = session.exec(rule_statement).first()
 
     if not db_rule or not task_content:
-        return False
+        raise Exception("抓取规则设置错误")
 
     crawl_rule = db_rule.crawl_rule["basic"]
     crawl_task = {k: v for k, v in task_content.items() if k in crawl_rule}
 
-    db_task_run = TaskRun(
+    new_task_run = TaskRun(
         task_fingerprint=db_task.task_fingerprint,
         source_platform=source_platform,
         priority=task_content["priority"],
@@ -76,7 +76,21 @@ def create_task_run(session, db_task: Task):
         crawl_task=crawl_task,
     )
 
+    task_run_statement = select(TaskRun).where(TaskRun.task_fingerprint == db_task.task_fingerprint)
+    db_task_run = session.exec(task_run_statement).first()
+    if db_task_run:
+        db_task_run.sqlmodel_update(new_task_run)
+    else:
+        db_task_run = new_task_run
     session.add(db_task_run)
     session.commit()
     session.refresh(db_task_run)
-    return True
+
+
+def update_task_run(session, db_task, user_in):
+    task_run_statement = select(TaskRun).where(TaskRun.task_fingerprint == db_task.task_fingerprint)
+    db_task_run = session.exec(task_run_statement).first()
+    db_task_run.sqlmodel_update(user_in)
+    session.add(db_task_run)
+    session.commit()
+    session.refresh(db_task_run)
