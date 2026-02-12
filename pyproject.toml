@@ -13,6 +13,7 @@ dependencies = [
     "pwdlib[argon2,bcrypt]>=0.3.0",
     "tenacity<9.0.0,>=8.2.3",
     "uuid>=1.30",
+    "pymysql>=1.1.2",
 ]
 
 [dependency-groups]

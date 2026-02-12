@@ -36,6 +36,8 @@ class Settings(BaseSettings):
             path=self.POSTGRES_DB,
         )
 
+    DATA_CENTER_URI: str
+
     FIRST_SUPERUSER: EmailStr
     FIRST_SUPERUSER_PASSWORD: str
 

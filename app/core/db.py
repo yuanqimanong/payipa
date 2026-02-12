@@ -6,6 +6,8 @@ from app.models.user_model import User, UserCreate
 
 engine = create_engine(str(settings.sqlalchemy_database_uri))
 
+data_center_engine = create_engine(settings.DATA_CENTER_URI, pool_pre_ping=True)
+
 
 def init_db(session: Session) -> None:
     # Tables should be created with Alembic migrations

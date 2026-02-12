@@ -10,7 +10,7 @@ from sqlmodel import Session
 
 from app.core import security
 from app.core.config import settings
-from app.core.db import engine
+from app.core.db import data_center_engine, engine
 from app.models.basic_model import TokenPayload
 from app.models.user_model import User
 
@@ -22,7 +22,13 @@ def get_db() -> Generator[Session, None, None]:
         yield session
 
 
+def get_data_center_db() -> Generator[Session, None, None]:
+    with Session(data_center_engine) as session:
+        yield session
+
+
 SessionDep = Annotated[Session, Depends(get_db)]
+DCSessionDep = Annotated[Session, Depends(get_data_center_db)]
 TokenDep = Annotated[str, Depends(reusable_oauth2)]
 
 

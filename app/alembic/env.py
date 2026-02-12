@@ -25,6 +25,7 @@ from app.core.config import settings # noqa
 import app.models.user_model
 import app.models.task_model
 import app.models.spider_model
+import app.models.data_model
 
 target_metadata = SQLModel.metadata
 

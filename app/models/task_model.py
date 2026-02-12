@@ -73,6 +73,8 @@ class TasksPublic(SQLModel):
 
 
 class TaskRun(SQLModel, table=True):
+    __tablename__ = "task_run"
+
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     task_fingerprint: str = Field(max_length=32, unique=True, index=True)
     source_platform: str = Field(default="", max_length=50, index=True, sa_column_kwargs={"comment": "资源平台"})
