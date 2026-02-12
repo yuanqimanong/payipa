@@ -407,6 +407,16 @@
             background: #f8f9fa;
         }
 
+        /* 已删除任务行样式 */
+        .task-table tr.deleted-row {
+            background: #fafafa;
+            opacity: 0.7;
+        }
+
+        .task-table tr.deleted-row:hover {
+            background: #f5f5f5;
+        }
+
         .task-name {
             font-weight: 600;
             color: #212529;
@@ -454,6 +464,25 @@
             color: #383d41;
         }
 
+        /* 删除状态标签 */
+        .delete-badge {
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: 500;
+        }
+
+        .delete-badge.deleted {
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        .delete-badge.normal {
+            background: #d4edda;
+            color: #155724;
+        }
+
         .task-actions {
             display: flex;
             gap: 8px;
@@ -496,6 +525,11 @@
         .action-btn.delete:hover {
             background: #dc3545;
             color: #fff;
+        }
+
+        .action-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
         }
 
         .empty-state {
@@ -754,8 +788,9 @@
                 <!-- 查看任务页面 -->
                 <div v-if="activeNav === 'view-tasks'">
                     <div class="page-title">
-                        <h1>📋 我的任务</h1>
-                        <p>查看和管理您创建的所有任务</p>
+                        <h1>📋 {{ userInfo.is_superuser ? '所有任务' : '我的任务' }}</h1>
+                        <p>{{ userInfo.is_superuser ? '查看和管理系统中的所有任务（包括已删除）' : '查看和管理您创建的所有任务'
+                            }}</p>
                     </div>
 
                     <!-- 提示信息 -->
@@ -779,33 +814,44 @@
                                     <th>分组</th>
                                     <th>平台</th>
                                     <th>状态</th>
+                                    <th v-if="userInfo.is_superuser">删除</th>
                                     <th>创建时间</th>
                                     <th>操作</th>
                                 </tr>
                                 </thead>
                                 <tbody>
-                                <tr :key="task.id" v-for="task in tasks">
+                                <tr :key="task.id" v-for="task in tasks" :class="{ 'deleted-row': task.is_delete }">
                                     <td class="task-name">{{ task.task_name }}</td>
                                     <td><span class="task-group-badge">{{ task.task_group }}</span></td>
                                     <td>{{ task.source_platform || '-' }}</td>
                                     <td>
-                                            <span :class="getStatusClass(task.status)" class="task-status">
-                                                {{ getStatusText(task.status) }}
-                                            </span>
+                                        <span :class="getStatusClass(task.status)" class="task-status">
+                                            {{ getStatusText(task.status) }}
+                                        </span>
+                                    </td>
+                                    <td v-if="userInfo.is_superuser">
+                                        <span :class="task.is_delete ? 'deleted' : 'normal'" class="delete-badge">
+                                            {{ task.is_delete ? '已删除' : '正常' }}
+                                        </span>
                                     </td>
                                     <td>{{ formatDate(task.created_at) }}</td>
                                     <td class="task-actions">
-                                        <button @click="startTask(task.id)"
-                                                class="action-btn start" v-if="task.status === 0 || task.status === 5">
-                                            启动
-                                        </button>
-                                        <button @click="stopTask(task.id)"
-                                                class="action-btn stop" v-if="task.status === 1 || task.status === 2">
-                                            停止
-                                        </button>
-                                        <button @click="deleteTask(task.id)" class="action-btn delete">
-                                            删除
-                                        </button>
+                                        <template v-if="!task.is_delete">
+                                            <button @click="startTask(task.id)"
+                                                    class="action-btn start"
+                                                    v-if="task.status === 0 || task.status === -2">
+                                                启动
+                                            </button>
+                                            <button @click="stopTask(task.id)"
+                                                    class="action-btn stop"
+                                                    v-if="task.status === 1 || task.status === 2">
+                                                停止
+                                            </button>
+                                            <button @click="deleteTask(task.id)" class="action-btn delete">
+                                                删除
+                                            </button>
+                                        </template>
+                                        <span v-else style="color: #999; font-size: 0.8rem;">-</span>
                                     </td>
                                 </tr>
                                 </tbody>
@@ -845,7 +891,7 @@
             const alertMessage = ref('');
             const alertType = ref('success');
 
-            // 新建任务��单
+            // 新建任务表单
             const taskForm = ref({
                 task_name: '',
                 task_group: '',
@@ -894,14 +940,15 @@
             };
 
             // 获取状态文本
+            // PENDING = 0, BEGIN = 1, IN_PROGRESS = 2, COMPLETED = 3, FAILED = -1, KILL = -2
             const getStatusText = (status) => {
                 const statusMap = {
                     0: '待启动',
                     1: '启动中',
                     2: '运行中',
                     3: '已完成',
-                    4: '失败',
-                    5: '已停止'
+                    '-1': '失败',
+                    '-2': '已停止'
                 };
                 return statusMap[status] || '未知';
             };
@@ -913,8 +960,8 @@
                     1: 'running',
                     2: 'running',
                     3: 'completed',
-                    4: 'failed',
-                    5: 'stopped'
+                    '-1': 'failed',
+                    '-2': 'stopped'
                 };
                 return classMap[status] || 'pending';
             };
@@ -949,18 +996,34 @@
                 }, 5000);
             };
 
-            // 获取任务列表
+            // 获取任务列表 - 根据用户权限调用不同接口
             const fetchTasks = async () => {
                 try {
-                    const response = await fetch('/api/v1/tasks/me', {
+                    // 管理员调用 /api/v1/tasks/ 获取所有任务（包括已删除）
+                    // 普通用户调用 /api/v1/tasks/me 获取自己的任务
+                    const apiUrl = userInfo.value.is_superuser
+                        ? '/api/v1/tasks/'
+                        : '/api/v1/tasks/me';
+
+                    const response = await fetch(apiUrl, {
                         headers: getAuthHeaders()
                     });
+
                     if (response.ok) {
                         const data = await response.json();
-                        tasks.value = data.data.filter(t => !t.is_delete);
+                        // 管理员显示所有任务（包括已删除），普通用户过滤已删除的
+                        if (userInfo.value.is_superuser) {
+                            tasks.value = data.data;
+                        } else {
+                            tasks.value = data.data.filter(t => !t.is_delete);
+                        }
+                    } else {
+                        const error = await response.json();
+                        showAlert(error.detail || '获取任务列表失败', 'error');
                     }
                 } catch (error) {
                     console.error('获取任务列表失败:', error);
+                    showAlert('获取任务列表失败', 'error');
                 }
             };
 
@@ -1093,6 +1156,7 @@
                         userInfo.value = userData;
                         isLoggedIn.value = true;
                         setLoginTime();
+                        // 用户信息获取成功后再获取任务列表
                         await fetchTasks();
                     } else {
                         localStorage.removeItem('access_token');
@@ -1115,7 +1179,7 @@
             };
 
             onMounted(() => {
-                 // 读取 URL 参数设置默认导航
+                // 读取 URL 参数设置默认导航
                 const urlParams = new URLSearchParams(window.location.search);
                 const navParam = urlParams.get('nav');
                 if (navParam === 'create-task' || navParam === 'view-tasks') {
