@@ -2,10 +2,10 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta content="width=device-width, initial-scale=1.0" name="viewport">
     <title>登录 - PayIPA</title>
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
-    <link rel="stylesheet" href="/static/css/style.css">
+    <link href="/static/css/style.css" rel="stylesheet">
 </head>
 <body>
 <div id="app">
@@ -19,26 +19,26 @@
             <form @submit.prevent="login">
                 <div class="form-group">
                     <label for="email">邮箱地址</label>
-                    <input type="email" id="email" v-model="email" required placeholder="请输入邮箱地址">
+                    <input id="email" placeholder="请输入邮箱地址" required type="email" v-model="email">
                 </div>
                 <div class="form-group">
                     <label for="password">密码</label>
-                    <input type="password" id="password" v-model="password" required placeholder="请输入密码"
-                           minlength="6">
+                    <input id="password" minlength="6" placeholder="请输入密码" required type="password"
+                           v-model="password">
                 </div>
 
-                <button type="submit" class="btn btn-primary" :disabled="loading"
-                        style="width: 100%; margin: 1.5rem 0; padding: 12px; font-size: 16px;">
+                <button :disabled="loading" class="btn btn-primary" style="width: 100%; margin: 1.5rem 0; padding: 12px; font-size: 16px;"
+                        type="submit">
                     {{ loading ? '登录中...' : '登录' }}
                 </button>
             </form>
 
-            <div v-if="errorMessage" class="alert alert-danger"
-                 style="background: #f8d7da; color: #721c24; padding: 12px; border-radius: var(--radius); margin: 1rem 0; border-left: 4px solid #f72585;">
+            <div class="alert alert-danger" style="background: #f8d7da; color: #721c24; padding: 12px; border-radius: var(--radius); margin: 1rem 0; border-left: 4px solid #f72585;"
+                 v-if="errorMessage">
                 {{ errorMessage }}
             </div>
-            <div v-if="successMessage" class="alert alert-success"
-                 style="background: #d4edda; color: #155724; padding: 12px; border-radius: var(--radius); margin: 1rem 0; border-left: 4px solid #28a745;">
+            <div class="alert alert-success" style="background: #d4edda; color: #155724; padding: 12px; border-radius: var(--radius); margin: 1rem 0; border-left: 4px solid #28a745;"
+                 v-if="successMessage">
                 {{ successMessage }}
             </div>
 

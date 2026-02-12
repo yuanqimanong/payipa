@@ -2,10 +2,10 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta content="width=device-width, initial-scale=1.0" name="viewport">
     <title>任务管理 - PaYiPa</title>
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
-    <link rel="stylesheet" href="/static/css/style.css">
+    <link href="/static/css/style.css" rel="stylesheet">
     <style>
         /* Layout Styles */
         .app-layout {
@@ -580,7 +580,7 @@
 <body>
 <div id="app">
     <!-- 未登录状态 -->
-    <div v-if="!isLoggedIn" class="container">
+    <div class="container" v-if="!isLoggedIn">
         <div class="login-prompt">
             <div class="header">
                 <h1 style="font-size: 2.5rem; margin-bottom: 1rem; color: var(--danger-color);">🔒</h1>
@@ -588,13 +588,13 @@
                 <p class="welcome-message" style="font-size: 1.1rem;">请先登录以访问此页面</p>
             </div>
             <div style="margin-top: 2rem;">
-                <a href="/login" class="btn btn-primary" style="padding: 12px 30px; font-size: 16px;">前往登录</a>
+                <a class="btn btn-primary" href="/login" style="padding: 12px 30px; font-size: 16px;">前往登录</a>
             </div>
         </div>
     </div>
 
     <!-- 已登录状态 - 带侧边栏布局 -->
-    <div v-else class="app-layout">
+    <div class="app-layout" v-else>
         <!-- 左侧导航侧边栏 -->
         <aside class="sidebar">
             <div class="sidebar-header">
@@ -614,18 +614,18 @@
                         <span class="nav-item-text">Dashboard</span>
                     </a>
                     <!-- 任务管理 - 二级菜单 -->
-                    <div class="nav-item" @click="toggleSubmenu('task')">
+                    <div @click="toggleSubmenu('task')" class="nav-item">
                         <span class="nav-item-icon">📋</span>
                         <span class="nav-item-text">任务管理</span>
-                        <span class="nav-item-arrow" :class="{ expanded: expandedMenus.task }">▶</span>
+                        <span :class="{ expanded: expandedMenus.task }" class="nav-item-arrow">▶</span>
                     </div>
-                    <div class="nav-submenu" :class="{ expanded: expandedMenus.task }">
-                        <div class="nav-item" :class="{ active: activeNav === 'create-task' }"
-                             @click="setActiveNav('create-task')">
+                    <div :class="{ expanded: expandedMenus.task }" class="nav-submenu">
+                        <div :class="{ active: activeNav === 'create-task' }" @click="setActiveNav('create-task')"
+                             class="nav-item">
                             <span class="nav-item-text">新建任务</span>
                         </div>
-                        <div class="nav-item" :class="{ active: activeNav === 'view-tasks' }"
-                             @click="setActiveNav('view-tasks')">
+                        <div :class="{ active: activeNav === 'view-tasks' }" @click="setActiveNav('view-tasks')"
+                             class="nav-item">
                             <span class="nav-item-text">查看任务</span>
                         </div>
                     </div>
@@ -639,12 +639,12 @@
                 <!-- 系统管理 - 仅管理员可见 -->
                 <div class="nav-section" v-if="userInfo.is_superuser">
                     <div class="nav-section-title">系统管理</div>
-                    <div class="nav-item" @click="toggleSubmenu('system')">
+                    <div @click="toggleSubmenu('system')" class="nav-item">
                         <span class="nav-item-icon">⚙️</span>
                         <span class="nav-item-text">系统管理</span>
-                        <span class="nav-item-arrow" :class="{ expanded: expandedMenus.system }">▶</span>
+                        <span :class="{ expanded: expandedMenus.system }" class="nav-item-arrow">▶</span>
                     </div>
-                    <div class="nav-submenu" :class="{ expanded: expandedMenus.system }">
+                    <div :class="{ expanded: expandedMenus.system }" class="nav-submenu">
                         <div class="nav-item">
                             <span class="nav-item-text">爬虫模块</span>
                         </div>
@@ -675,7 +675,7 @@
                             <div class="user-role">{{ userInfo.is_superuser ? '管理员' : '普通用户' }}</div>
                         </div>
                     </div>
-                    <button class="logout-btn" @click="logout">退出登录</button>
+                    <button @click="logout" class="logout-btn">退出登录</button>
                 </div>
             </header>
 
@@ -689,8 +689,8 @@
                     </div>
 
                     <!-- 提示信息 -->
-                    <div v-if="alertMessage"
-                         :class="['alert', alertType === 'success' ? 'alert-success' : 'alert-error']">
+                    <div :class="['alert', alertType === 'success' ? 'alert-success' : 'alert-error']"
+                         v-if="alertMessage">
                         {{ alertMessage }}
                     </div>
 
@@ -699,12 +699,12 @@
                             <div class="form-row">
                                 <div class="form-group">
                                     <label for="taskName">任务名称 *</label>
-                                    <input type="text" id="taskName" v-model="taskForm.task_name"
-                                           placeholder="请输入任务名称" required>
+                                    <input id="taskName" placeholder="请输入任务名称" required
+                                           type="text" v-model="taskForm.task_name">
                                 </div>
                                 <div class="form-group">
                                     <label for="taskGroup">任务分组 *</label>
-                                    <select id="taskGroup" v-model="taskForm.task_group" required>
+                                    <select id="taskGroup" required v-model="taskForm.task_group">
                                         <option value="">请选择分组</option>
                                         <option value="reddit">Reddit</option>
                                         <option value="twitter">Twitter/X</option>
@@ -719,33 +719,33 @@
                             <div class="form-row">
                                 <div class="form-group">
                                     <label for="sourcePlatform">数据来源平台</label>
-                                    <input type="text" id="sourcePlatform" v-model="taskForm.source_platform"
-                                           placeholder="例如: reddit.com">
+                                    <input id="sourcePlatform" placeholder="例如: reddit.com" type="text"
+                                           v-model="taskForm.source_platform">
                                 </div>
                                 <div class="form-group">
                                     <label for="targetUrl">目标URL</label>
-                                    <input type="text" id="targetUrl" v-model="taskForm.task_content.target_url"
-                                           placeholder="请输入目标URL">
+                                    <input id="targetUrl" placeholder="请输入目标URL" type="text"
+                                           v-model="taskForm.task_content.target_url">
                                 </div>
                             </div>
 
                             <div class="form-group">
                                 <label for="keywords">关键词（多个用逗号分隔）</label>
-                                <input type="text" id="keywords" v-model="taskForm.task_content.keywords"
-                                       placeholder="例如: 科技, AI, 机器学习">
+                                <input id="keywords" placeholder="例如: 科技, AI, 机器学习" type="text"
+                                       v-model="taskForm.task_content.keywords">
                             </div>
 
                             <div class="form-group">
                                 <label for="description">任务描述</label>
-                                <textarea id="description" v-model="taskForm.task_content.description"
-                                          placeholder="请输入任务描述"></textarea>
+                                <textarea id="description" placeholder="请输入任务描述"
+                                          v-model="taskForm.task_content.description"></textarea>
                             </div>
 
                             <div class="form-actions">
-                                <button type="submit" class="btn btn-primary" :disabled="isSubmitting">
+                                <button :disabled="isSubmitting" class="btn btn-primary" type="submit">
                                     {{ isSubmitting ? '创建中...' : '创建任务' }}
                                 </button>
-                                <button type="button" class="btn btn-secondary" @click="resetForm">重置</button>
+                                <button @click="resetForm" class="btn btn-secondary" type="button">重置</button>
                             </div>
                         </form>
                     </div>
@@ -759,8 +759,8 @@
                     </div>
 
                     <!-- 提示信息 -->
-                    <div v-if="alertMessage"
-                         :class="['alert', alertType === 'success' ? 'alert-success' : 'alert-error']">
+                    <div :class="['alert', alertType === 'success' ? 'alert-success' : 'alert-error']"
+                         v-if="alertMessage">
                         {{ alertMessage }}
                     </div>
 
@@ -784,26 +784,26 @@
                                 </tr>
                                 </thead>
                                 <tbody>
-                                <tr v-for="task in tasks" :key="task.id">
+                                <tr :key="task.id" v-for="task in tasks">
                                     <td class="task-name">{{ task.task_name }}</td>
                                     <td><span class="task-group-badge">{{ task.task_group }}</span></td>
                                     <td>{{ task.source_platform || '-' }}</td>
                                     <td>
-                                            <span class="task-status" :class="getStatusClass(task.status)">
+                                            <span :class="getStatusClass(task.status)" class="task-status">
                                                 {{ getStatusText(task.status) }}
                                             </span>
                                     </td>
                                     <td>{{ formatDate(task.created_at) }}</td>
                                     <td class="task-actions">
-                                        <button v-if="task.status === 0 || task.status === 5"
-                                                class="action-btn start" @click="startTask(task.id)">
+                                        <button @click="startTask(task.id)"
+                                                class="action-btn start" v-if="task.status === 0 || task.status === 5">
                                             启动
                                         </button>
-                                        <button v-if="task.status === 1 || task.status === 2"
-                                                class="action-btn stop" @click="stopTask(task.id)">
+                                        <button @click="stopTask(task.id)"
+                                                class="action-btn stop" v-if="task.status === 1 || task.status === 2">
                                             停止
                                         </button>
-                                        <button class="action-btn delete" @click="deleteTask(task.id)">
+                                        <button @click="deleteTask(task.id)" class="action-btn delete">
                                             删除
                                         </button>
                                     </td>
@@ -813,10 +813,10 @@
                         </div>
 
                         <!-- 空状态 -->
-                        <div v-else class="empty-state">
+                        <div class="empty-state" v-else>
                             <div class="empty-state-icon">📭</div>
                             <p>暂无任务，快去创建一个吧！</p>
-                            <button class="btn btn-primary" @click="setActiveNav('create-task')">新建任务</button>
+                            <button @click="setActiveNav('create-task')" class="btn btn-primary">新建任务</button>
                         </div>
                     </div>
                 </div>

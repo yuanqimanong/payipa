@@ -56,7 +56,7 @@ def update_task(*, session: SessionDep, task_id: uuid.UUID, user_in: TaskUpdate,
     Update a task.
     """
 
-    db_task = task_checker(current_user, session, task_id)
+    db_task = task_checker(session, current_user, task_id)
 
     db_task = task_crud.update_task(session=session, db_task=db_task, user_in=user_in)
     return db_task
@@ -68,7 +68,7 @@ def begin_task(*, session: SessionDep, task_id: uuid.UUID, current_user: Current
     Begin a task.
     """
 
-    db_task = task_checker(current_user, session, task_id)
+    db_task = task_checker(session, current_user, task_id)
     try:
         task_crud.create_task_run(session=session, db_task=db_task)
     except Exception as e:
@@ -84,7 +84,7 @@ def stop_task(*, session: SessionDep, task_id: uuid.UUID, current_user: CurrentU
     Stop a task.
     """
 
-    db_task = task_checker(current_user, session, task_id)
+    db_task = task_checker(session, current_user, task_id)
     task_crud.update_task_run(session=session, db_task=db_task, user_in={"status": TaskStatus.KILL.value})
     db_task = task_crud.update_status(session=session, db_task=db_task, user_in=TaskStatus.KILL)
     return db_task
@@ -96,7 +96,7 @@ def remove_task(*, session: SessionDep, task_id: uuid.UUID, current_user: Curren
     Remove a task.
     """
 
-    db_task = task_checker(current_user, session, task_id)
+    db_task = task_checker(session, current_user, task_id)
     db_task.is_delete = True
 
     task_crud.update_task_run(session=session, db_task=db_task, user_in={"status": TaskStatus.KILL.value})
@@ -107,7 +107,7 @@ def remove_task(*, session: SessionDep, task_id: uuid.UUID, current_user: Curren
     return Message(message="任务已成功删除")
 
 
-def task_checker(current_user: User, session: Session, task_id: UUID) -> type[Task] | None:
+def task_checker(session: Session, current_user: User, task_id: UUID) -> type[Task] | None:
     db_task = session.get(Task, task_id)
     if not db_task:
         raise HTTPException(

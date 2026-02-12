@@ -57,6 +57,18 @@ class DatasQueryConfigPublic(SQLModel):
     count: int
 
 
+class DataQueryPublic(SQLModel):
+    id: uuid.UUID
+    name: str
+    sql: str
+    created_at: datetime | None = None
+
+
+class DatasQueryPublic(SQLModel):
+    data: list[DataQueryPublic]
+    count: int
+
+
 class QueryDataPublic(SQLModel):
     id: int
     url: str
@@ -67,3 +79,14 @@ class QueryDataPublic(SQLModel):
 class QueryDatasPublic(SQLModel):
     data: list[QueryDataPublic]
     count: int
+
+
+class QueryDataPublicDetail(SQLModel):
+    id: int
+    url: str
+    cover_url: str
+    title: str
+    description: str
+    author: str
+    publish_time: datetime
+    content: str

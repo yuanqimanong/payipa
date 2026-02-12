@@ -1,15 +1,18 @@
-import uuid
 from typing import Any
-from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, HTTPException
 from sqlalchemy import MetaData, Table, inspect, text
-from sqlmodel import Session, col, func, select
+from sqlmodel import col, func, select
 
-from app.api.deps import CurrentUser, DCSessionDep, SessionDep, get_current_active_superuser
-from app.cruds import task_crud
-from app.models.basic_model import Message
-from app.models.data_model import DataQueryConfig, DatasQueryConfigPublic, QueryDatasPublic
+from app.api.deps import CurrentUser, DCSessionDep, SessionDep
+from app.models.data_model import (
+    DataQuery,
+    DataQueryConfig,
+    DatasQueryConfigPublic,
+    DatasQueryPublic,
+    QueryDataPublicDetail,
+    QueryDatasPublic,
+)
 
 router = APIRouter(prefix="/datas", tags=["datas"])
 
@@ -31,13 +34,22 @@ def read_configs(session: SessionDep, skip: int = 0, limit: int = 100) -> Any:
     return DatasQueryConfigPublic(data=data_query, count=count)
 
 
-@router.get("/{table_name}", response_model=QueryDatasPublic)
+@router.get("/table/{config_id}", response_model=QueryDatasPublic)
 def query_datas(
-    session: DCSessionDep, table_name: str, current_user: CurrentUser, skip: int = 0, limit: int = 100
+    session: SessionDep,
+    dc_session: DCSessionDep,
+    config_id: str,
+    current_user: CurrentUser,
+    skip: int = 0,
+    limit: int = 100,
 ) -> Any:
+    statement = select(DataQueryConfig).where(DataQueryConfig.id == config_id)
+    data_query = session.exec(statement).one()
+    table_name = data_query.table_name
+
     # 1. 安全检查：验证表是否存在
     # 使用 inspect 检查数据库中实际存在的表名，防止 SQL 注入和 404
-    engine = session.connection().engine
+    engine = dc_session.connection().engine
     inspector = inspect(engine)
     if table_name not in inspector.get_table_names():
         raise HTTPException(status_code=404, detail=f"Table '{table_name}' not found")
@@ -55,7 +67,7 @@ def query_datas(
     # 3.1 计算总数
     # 相当于: SELECT count(*) FROM table_name
     count_query = select(func.count()).select_from(table)
-    count = session.exec(count_query).one()
+    count = dc_session.exec(count_query).one()
 
     # 3.2 查询数据
     # 你指定了 id, url, title, publish_time，我们需要检查表里是否有这些字段
@@ -83,7 +95,7 @@ def query_datas(
     query = query.offset(skip).limit(limit)
 
     # 4. 执行查询
-    result = session.exec(query)
+    result = dc_session.exec(query)
 
     # 5. 格式化结果
     # session.exec 返回的是 Row 对象，类似于 NamedTuple
@@ -91,3 +103,56 @@ def query_datas(
     rows = result.mappings().all()
 
     return QueryDatasPublic(data=rows, count=count)
+
+
+@router.get("/sqls/{config_id}", response_model=DatasQueryPublic)
+def query_datas_sqls(
+    session: SessionDep, current_user: CurrentUser, config_id: str, skip: int = 0, limit: int = 100
+) -> Any:
+    count_statement = select(func.count()).select_from(DataQuery).where(DataQuery.config_id == config_id)
+    count = session.exec(count_statement).one()
+
+    statement = (
+        select(DataQuery)
+        .where(DataQuery.config_id == config_id)
+        .order_by(col(DataQuery.created_at).desc())
+        .offset(skip)
+        .limit(limit)
+    )
+    data_query = session.exec(statement).all()
+
+    return DatasQueryPublic(data=data_query, count=count)
+
+
+@router.get("/sql/{sql_id}", response_model=QueryDatasPublic)
+def query_datas_by_sql_id(
+    session: SessionDep,
+    dc_session: DCSessionDep,
+    sql_id: str,
+    current_user: CurrentUser,
+) -> Any:
+    statement = select(DataQuery).where(DataQuery.id == sql_id)
+    data_query = session.exec(statement).one()
+
+    sql_statement = text(data_query.sql)
+    result = dc_session.execute(sql_statement)
+    results = result.mappings().all()
+    return QueryDatasPublic(data=results, count=len(results))
+
+
+@router.get("/{config_id}/detail/{id}", response_model=QueryDataPublicDetail)
+def query_data_detail(
+    session: SessionDep,
+    dc_session: DCSessionDep,
+    config_id: str,
+    detail_id: int,
+    current_user: CurrentUser,
+) -> Any:
+    statement = select(DataQueryConfig).where(DataQueryConfig.id == config_id)
+    data_query = session.exec(statement).one()
+    table_name = data_query.table_name
+
+    sql_statement = text(f"SELECT * FROM {table_name} WHERE id = {detail_id};")
+    result = dc_session.execute(sql_statement)
+    results = result.mappings().one()
+    return QueryDataPublicDetail(**results)
