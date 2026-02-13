@@ -1,10 +1,12 @@
 from typing import Any
 
+import httpx
 from fastapi import APIRouter, HTTPException
 from sqlalchemy import MetaData, Table, inspect, text
 from sqlmodel import col, func, select
 
 from app.api.deps import CurrentUser, DCSessionDep, SessionDep
+from app.models.basic_model import Message
 from app.models.data_model import (
     DataQuery,
     DataQueryConfig,
@@ -156,3 +158,24 @@ def query_data_detail(
     result = dc_session.execute(sql_statement)
     results = result.mappings().one()
     return QueryDataPublicDetail(**results)
+
+
+@router.get("/{config_id}/detail/{detail_id}/send_ghost")
+async def query_data_detail(
+    session: SessionDep,
+    config_id: str,
+    detail_id: int,
+    current_user: CurrentUser,
+) -> Message:
+    statement = select(DataQueryConfig).where(DataQueryConfig.id == config_id)
+    data_query = session.exec(statement).one()
+    table_name = data_query.table_name
+
+    url = "http://192.168.14.60:22333/ghost_api/"
+    async with httpx.AsyncClient() as client:
+        response = await client.post(url, json={"table_name": table_name, "detail_id": detail_id}, timeout=15)
+
+        if response.status_code == 200:
+            return Message(message=f"Ghost 发送成功：{table_name} - {detail_id}")
+        else:
+            return Message(message=f"Ghost 发送失败：{response.text}")
