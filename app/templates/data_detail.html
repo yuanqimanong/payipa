@@ -927,7 +927,7 @@
                     sendingToGhost.value = true;
 
                     const response = await fetch(`/api/v1/datas/${configId}/detail/${detailId}/send_ghost`, {
-                        method: 'POST',
+                        method: 'GET',
                         headers: {
                             'Authorization': `Bearer ${token}`,
                             'Content-Type': 'application/json'
