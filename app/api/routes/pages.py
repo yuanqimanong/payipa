@@ -44,3 +44,8 @@ async def data_query_page(request: Request):
 @router.get("/data_detail", response_class=HTMLResponse)
 async def data_detail_page(request: Request):
     return serve_template("data_detail")
+
+
+@router.get("/aggregated_search", response_class=HTMLResponse)
+async def aggregated_search_page(request: Request):
+    return serve_template("aggregated_search")
