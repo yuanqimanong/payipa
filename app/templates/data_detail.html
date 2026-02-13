@@ -566,6 +566,30 @@
             border-top: 1px solid #eee;
             margin: 24px 0;
         }
+
+        /* Ghost Button */
+        .ghost-btn {
+            padding: 8px 16px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 6px;
+            font-size: 0.85rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            margin-left: auto;
+        }
+
+        .ghost-btn:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        }
+
+        .ghost-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
     </style>
 </head>
 <body>
@@ -713,6 +737,9 @@
                                 <span class="detail-meta-icon">🔢</span>
                                 <span>ID: {{ detailData.id }}</span>
                             </div>
+                            <button @click="sendToGhost" class="ghost-btn" :disabled="sendingToGhost">
+                                {{ sendingToGhost ? '推送中...' : '推送到 Ghost 草稿箱' }}
+                            </button>
                         </div>
                     </div>
 
@@ -759,6 +786,7 @@
                 task: false,
                 system: false
             });
+            const sendingToGhost = ref(false);
 
             // 从URL获取参数
             const urlParams = new URLSearchParams(window.location.search);
@@ -882,6 +910,45 @@
                 }
             };
 
+            // 推送到 Ghost 草稿箱
+            const sendToGhost = async () => {
+                // 确认对话框
+                if (!confirm('是否确认推送到 Ghost 草稿箱？')) {
+                    return;
+                }
+
+                const token = localStorage.getItem('access_token');
+                if (!token) {
+                    alert('未登录，请重新登录');
+                    return;
+                }
+
+                try {
+                    sendingToGhost.value = true;
+
+                    const response = await fetch(`/api/v1/datas/${configId}/detail/${detailId}/send_ghost`, {
+                        method: 'POST',
+                        headers: {
+                            'Authorization': `Bearer ${token}`,
+                            'Content-Type': 'application/json'
+                        }
+                    });
+
+                    if (response.ok) {
+                        const result = await response.json();
+                        alert('推送成功！');
+                    } else {
+                        const errorData = await response.json();
+                        alert(`推送失败: ${errorData.detail || '未知错误'}`);
+                    }
+                } catch (err) {
+                    console.error('推送到 Ghost 失败:', err);
+                    alert('网络错误，请稍后重试');
+                } finally {
+                    sendingToGhost.value = false;
+                }
+            };
+
             // 检查登录状态
             const checkAuth = async () => {
                 const token = localStorage.getItem('access_token');
@@ -944,6 +1011,8 @@
                 toggleSubmenu,
                 formatDate,
                 formatContent,
+                sendingToGhost,
+                sendToGhost,
                 handleImageError,
                 logout
             };
