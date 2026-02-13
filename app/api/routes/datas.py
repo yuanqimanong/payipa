@@ -140,7 +140,7 @@ def query_datas_by_sql_id(
     return QueryDatasPublic(data=results, count=len(results))
 
 
-@router.get("/{config_id}/detail/{id}", response_model=QueryDataPublicDetail)
+@router.get("/{config_id}/detail/{detail_id}", response_model=QueryDataPublicDetail)
 def query_data_detail(
     session: SessionDep,
     dc_session: DCSessionDep,
