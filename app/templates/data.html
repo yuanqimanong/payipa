@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta content="width=device-width, initial-scale=1.0" name="viewport">
-    <title>数据采集平台 - PaYiPa</title>
+    <title>数据查询 - PaYiPa</title>
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
     <link href="/static/css/style.css" rel="stylesheet">
     <style>
@@ -249,139 +249,121 @@
             font-size: 0.95rem;
         }
 
-        /* Data Collector Cards Grid */
-        .collectors-grid {
+        /* Data Config Cards Grid - 一行4个 */
+        .data-configs-grid {
             display: grid;
-            grid-template-columns: repeat(3, 1fr);
+            grid-template-columns: repeat(4, 1fr);
             gap: 24px;
         }
 
-        .collector-card {
+        .data-config-card {
             background: #fff;
             border-radius: 12px;
             padding: 24px;
             box-shadow: 0 4px 20px rgba(0, 0, 0, 0.06);
             transition: all 0.3s ease;
-            cursor: pointer;
             border: 1px solid transparent;
+            display: flex;
+            flex-direction: column;
         }
 
-        .collector-card:hover {
+        .data-config-card:hover {
             transform: translateY(-4px);
             box-shadow: 0 8px 30px rgba(0, 0, 0, 0.1);
             border-color: #4361ee;
         }
 
-        .collector-header {
+        .config-header {
             display: flex;
             align-items: center;
-            gap: 16px;
+            gap: 12px;
             margin-bottom: 16px;
         }
 
-        .collector-icon {
-            width: 56px;
-            height: 56px;
-            border-radius: 12px;
+        .config-icon {
+            width: 48px;
+            height: 48px;
+            background: linear-gradient(135deg, #4361ee 0%, #7c3aed 100%);
+            border-radius: 10px;
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 28px;
+            font-size: 24px;
         }
 
-        .collector-icon.reddit {
-            background: linear-gradient(135deg, #ff4500 0%, #ff6b35 100%);
-        }
-
-        .collector-icon.facebook {
-            background: linear-gradient(135deg, #1877f2 0%, #42a5f5 100%);
-        }
-
-        .collector-icon.twitter {
-            background: linear-gradient(135deg, #1da1f2 0%, #4fc3f7 100%);
-        }
-
-        .collector-icon.instagram {
-            background: linear-gradient(135deg, #e4405f 0%, #f77737 100%);
-        }
-
-        .collector-icon.youtube {
-            background: linear-gradient(135deg, #ff0000 0%, #ff5252 100%);
-        }
-
-        .collector-icon.linkedin {
-            background: linear-gradient(135deg, #0077b5 0%, #00a0dc 100%);
-        }
-
-        .collector-title-section {
+        .config-title {
             flex: 1;
-        }
-
-        .collector-title {
             font-size: 1.1rem;
             font-weight: 600;
             color: #212529;
-            margin-bottom: 4px;
         }
 
-        .collector-platform {
-            font-size: 0.8rem;
+        .config-info {
+            flex: 1;
             color: #6c757d;
+            font-size: 0.85rem;
+            margin-bottom: 16px;
         }
 
-        .collector-status {
-            padding: 4px 10px;
-            border-radius: 20px;
-            font-size: 0.75rem;
-            font-weight: 500;
+        .config-info p {
+            margin: 4px 0;
         }
 
-        .collector-status.active {
-            background: #d4edda;
-            color: #155724;
-        }
-
-        .collector-status.inactive {
-            background: #f8d7da;
-            color: #721c24;
-        }
-
-        .collector-status.pending {
-            background: #fff3cd;
-            color: #856404;
-        }
-
-        .collector-desc {
-            color: #6c757d;
-            font-size: 0.9rem;
-            margin-bottom: 20px;
-            line-height: 1.5;
-        }
-
-        .collector-stats {
-            display: flex;
-            justify-content: space-between;
+        .config-footer {
+            margin-top: auto;
             padding-top: 16px;
             border-top: 1px solid #eee;
         }
 
-        .stat-item {
+        .enter-btn {
+            width: 100%;
+            padding: 10px 20px;
+            background: linear-gradient(135deg, #4361ee 0%, #7c3aed 100%);
+            border: none;
+            border-radius: 8px;
+            color: #fff;
+            font-size: 0.9rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .enter-btn:hover {
+            transform: scale(1.02);
+            box-shadow: 0 4px 15px rgba(67, 97, 238, 0.4);
+        }
+
+        /* Loading State */
+        .loading-state {
             text-align: center;
-        }
-
-        .stat-value {
-            font-size: 1.25rem;
-            font-weight: 700;
-            color: #4361ee;
-        }
-
-        .stat-label {
-            font-size: 0.75rem;
+            padding: 60px 20px;
             color: #6c757d;
-            margin-top: 2px;
         }
 
-        /* Login Card Styles (Keep original) */
+        .loading-state-icon {
+            font-size: 3rem;
+            margin-bottom: 16px;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        /* Empty State */
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #6c757d;
+        }
+
+        .empty-state-icon {
+            font-size: 3rem;
+            margin-bottom: 16px;
+        }
+
+        /* Login Card Styles */
         .login-prompt {
             max-width: 500px;
             margin: 15vh auto;
@@ -393,8 +375,14 @@
         }
 
         /* Responsive Design */
-        @media (max-width: 1200px) {
-            .collectors-grid {
+        @media (max-width: 1400px) {
+            .data-configs-grid {
+                grid-template-columns: repeat(3, 1fr);
+            }
+        }
+
+        @media (max-width: 1100px) {
+            .data-configs-grid {
                 grid-template-columns: repeat(2, 1fr);
             }
         }
@@ -413,7 +401,7 @@
                 margin-left: 0;
             }
 
-            .collectors-grid {
+            .data-configs-grid {
                 grid-template-columns: 1fr;
             }
 
@@ -463,7 +451,7 @@
                 <div class="nav-section">
                     <div class="nav-section-title">基础功能</div>
                     <!-- Dashboard -->
-                    <a class="nav-item active" href="/index">
+                    <a class="nav-item" href="/index">
                         <span class="nav-item-icon">🏠</span>
                         <span class="nav-item-text">Dashboard</span>
                     </a>
@@ -481,8 +469,8 @@
                             <span class="nav-item-text">查看任务</span>
                         </a>
                     </div>
-                    <!-- 数��查询 -->
-                    <a class="nav-item" href="/data">
+                    <!-- 数据查询 -->
+                    <a class="nav-item active" href="/data">
                         <span class="nav-item-icon">🔍</span>
                         <span class="nav-item-text">数据查询</span>
                     </a>
@@ -513,7 +501,7 @@
 
         <!-- 右侧主内容区 -->
         <div class="main-wrapper">
-            <!-- 顶部栏 -->
+            <!-- 顶部��� -->
             <header class="top-header">
                 <div class="user-info-section">
                     <div class="login-time">
@@ -534,39 +522,34 @@
             <!-- 主内容区域 -->
             <main class="main-content-area">
                 <div class="page-title">
-                    <h1>🎯 数据采集任务模块</h1>
-                    <p>选择数据采集模块开始您的数据监控任务</p>
+                    <h1>🔍 数据查询</h1>
+                    <p>选择数据源进行数据查询和分析</p>
                 </div>
 
-                <!-- 数据采集模块卡片 -->
-                <div class="collectors-grid">
-                    <div :key="collector.id" class="collector-card" v-for="collector in dataCollectors">
-                        <div class="collector-header">
-                            <div :class="collector.platform" class="collector-icon">
-                                {{ collector.icon }}
-                            </div>
-                            <div class="collector-title-section">
-                                <div class="collector-title">{{ collector.name }}</div>
-                                <div class="collector-platform">{{ collector.platformName }}</div>
-                            </div>
-                            <span :class="collector.status" class="collector-status">
-                                {{ getStatusText(collector.status) }}
-                            </span>
+                <!-- Loading State -->
+                <div class="loading-state" v-if="loading">
+                    <div class="loading-state-icon">⏳</div>
+                    <p>正在加载数据配置...</p>
+                </div>
+
+                <!-- Empty State -->
+                <div class="empty-state" v-else-if="dataConfigs.length === 0">
+                    <div class="empty-state-icon">📭</div>
+                    <p>暂无可用的数据配置</p>
+                </div>
+
+                <!-- 数据配置卡片 - 一行4个 -->
+                <div class="data-configs-grid" v-else>
+                    <div :key="config.id" class="data-config-card" v-for="config in dataConfigs">
+                        <div class="config-header">
+                            <div class="config-icon">📊</div>
+                            <div class="config-title">{{ config.name }}</div>
                         </div>
-                        <div class="collector-desc">{{ collector.description }}</div>
-                        <div class="collector-stats">
-                            <div class="stat-item">
-                                <div class="stat-value">{{ collector.tasksCount }}</div>
-                                <div class="stat-label">运行任务</div>
-                            </div>
-                            <div class="stat-item">
-                                <div class="stat-value">{{ collector.dataCount }}</div>
-                                <div class="stat-label">采集数据</div>
-                            </div>
-                            <div class="stat-item">
-                                <div class="stat-value">{{ collector.successRate }}</div>
-                                <div class="stat-label">成功率</div>
-                            </div>
+                        <div class="config-info">
+                            <p>📅 创建时间: {{ formatDate(config.created_at) }}</p>
+                        </div>
+                        <div class="config-footer">
+                            <button @click="enterConfig(config.id)" class="enter-btn">进入</button>
                         </div>
                     </div>
                 </div>
@@ -583,122 +566,12 @@
             const isLoggedIn = ref(false);
             const userInfo = ref({});
             const loginTime = ref('');
+            const loading = ref(true);
+            const dataConfigs = ref([]);
             const expandedMenus = ref({
                 task: false,
                 system: false
             });
-
-            // Mock 数据采集模块数据
-            const dataCollectors = ref([
-                {
-                    id: 1,
-                    name: 'Reddit 用户监控',
-                    platform: 'reddit',
-                    platformName: 'Reddit',
-                    icon: '🔴',
-                    description: '监控指定 Reddit 用户的发帖、评论、点赞等活动，实时追踪用户动态。',
-                    status: 'active',
-                    tasksCount: 12,
-                    dataCount: '5.2K',
-                    successRate: '98%'
-                },
-                {
-                    id: 2,
-                    name: 'Reddit 板块监控',
-                    platform: 'reddit',
-                    platformName: 'Reddit',
-                    icon: '🔴',
-                    description: '监控指定 Subreddit 的热门帖子、新帖子，分析板块趋势和热点话题。',
-                    status: 'active',
-                    tasksCount: 8,
-                    dataCount: '12.8K',
-                    successRate: '96%'
-                },
-                {
-                    id: 3,
-                    name: 'Facebook 用户监控',
-                    platform: 'facebook',
-                    platformName: 'Facebook',
-                    icon: '📘',
-                    description: '追踪 Facebook 用户的公开动态、发布内容及互动数据。',
-                    status: 'pending',
-                    tasksCount: 5,
-                    dataCount: '3.1K',
-                    successRate: '92%'
-                },
-                {
-                    id: 4,
-                    name: 'Twitter 话题监控',
-                    platform: 'twitter',
-                    platformName: 'Twitter/X',
-                    icon: '🐦',
-                    description: '实时监控 Twitter 热门话题、关键词和标签，追踪舆论趋势。',
-                    status: 'active',
-                    tasksCount: 15,
-                    dataCount: '28.5K',
-                    successRate: '94%'
-                },
-                {
-                    id: 5,
-                    name: 'Instagram 账号监控',
-                    platform: 'instagram',
-                    platformName: 'Instagram',
-                    icon: '📷',
-                    description: '监控 Instagram 公开账号的帖子、Stories 和 Reels 内容。',
-                    status: 'inactive',
-                    tasksCount: 0,
-                    dataCount: '0',
-                    successRate: '-'
-                },
-                {
-                    id: 6,
-                    name: 'YouTube 频道监控',
-                    platform: 'youtube',
-                    platformName: 'YouTube',
-                    icon: '▶️',
-                    description: '追踪 YouTube 频道的视频发布、观看量和评论数据变化。',
-                    status: 'active',
-                    tasksCount: 6,
-                    dataCount: '8.7K',
-                    successRate: '99%'
-                },
-                {
-                    id: 7,
-                    name: 'LinkedIn 公司监控',
-                    platform: 'linkedin',
-                    platformName: 'LinkedIn',
-                    icon: '💼',
-                    description: '监控企业 LinkedIn 页面的动态、招聘信息和公司更新。',
-                    status: 'pending',
-                    tasksCount: 3,
-                    dataCount: '1.2K',
-                    successRate: '88%'
-                },
-                {
-                    id: 8,
-                    name: 'Reddit 关键词监控',
-                    platform: 'reddit',
-                    platformName: 'Reddit',
-                    icon: '🔴',
-                    description: '全站搜索监控特定关键词，第一时间发现相关讨论和提及。',
-                    status: 'active',
-                    tasksCount: 20,
-                    dataCount: '45.3K',
-                    successRate: '97%'
-                },
-                {
-                    id: 9,
-                    name: 'Twitter 用户监控',
-                    platform: 'twitter',
-                    platformName: 'Twitter/X',
-                    icon: '🐦',
-                    description: '追踪指定 Twitter 用户的推文、转发和互动数据。',
-                    status: 'active',
-                    tasksCount: 18,
-                    dataCount: '32.1K',
-                    successRate: '95%'
-                }
-            ]);
 
             // 计算属性
             const userAvatar = computed(() => {
@@ -730,13 +603,49 @@
                 expandedMenus.value[menu] = !expandedMenus.value[menu];
             };
 
-            // 获取状态文本
-            const getStatusText = (status) => {
-                switch (status) {
-                    case 'active': return '运行中';
-                    case 'inactive': return '已停止';
-                    case 'pending': return '待配置';
-                    default: return status;
+            // 格式化日期
+            const formatDate = (dateStr) => {
+                if (!dateStr) return '-';
+                const date = new Date(dateStr);
+                return date.toLocaleString('zh-CN', {
+                    year: 'numeric',
+                    month: '2-digit',
+                    day: '2-digit',
+                    hour: '2-digit',
+                    minute: '2-digit'
+                });
+            };
+
+            // 进入配置详情页
+            const enterConfig = (configId) => {
+                window.location.href = `/data_query?config_id=${configId}`;
+            };
+
+            // 加载数据配置列表
+            const loadDataConfigs = async () => {
+                const token = localStorage.getItem('access_token');
+                if (!token) return;
+
+                try {
+                    loading.value = true;
+                    const response = await fetch('/api/v1/datas/configs', {
+                        method: 'GET',
+                        headers: {
+                            'Authorization': `Bearer ${token}`,
+                            'Content-Type': 'application/json'
+                        }
+                    });
+
+                    if (response.ok) {
+                        const result = await response.json();
+                        dataConfigs.value = result.data || [];
+                    } else {
+                        console.error('加载数据配置失败');
+                    }
+                } catch (error) {
+                    console.error('加载数据配置失败:', error);
+                } finally {
+                    loading.value = false;
                 }
             };
 
@@ -762,8 +671,9 @@
                         userInfo.value = userData;
                         isLoggedIn.value = true;
                         setLoginTime();
+                        // 登录成功后加载数据配置
+                        await loadDataConfigs();
                     } else {
-                        // Token无效，清除本地存储
                         localStorage.removeItem('access_token');
                         localStorage.removeItem('login_time');
                         isLoggedIn.value = false;
@@ -792,10 +702,12 @@
                 userInfo,
                 userAvatar,
                 loginTime,
+                loading,
+                dataConfigs,
                 expandedMenus,
-                dataCollectors,
                 toggleSubmenu,
-                getStatusText,
+                formatDate,
+                enterConfig,
                 logout
             };
         }

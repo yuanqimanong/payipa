@@ -29,3 +29,18 @@ async def login_page(request: Request):
 @router.get("/task", response_class=HTMLResponse)
 async def task_page(request: Request):
     return serve_template("task")
+
+
+@router.get("/data", response_class=HTMLResponse)
+async def data_page(request: Request):
+    return serve_template("data")
+
+
+@router.get("/data_query", response_class=HTMLResponse)
+async def data_query_page(request: Request):
+    return serve_template("data_query")
+
+
+@router.get("/data_detail", response_class=HTMLResponse)
+async def data_detail_page(request: Request):
+    return serve_template("data_detail")
