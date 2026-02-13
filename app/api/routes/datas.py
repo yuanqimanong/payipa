@@ -1,3 +1,5 @@
+import json
+from json import JSONDecodeError
 from typing import Any
 
 import httpx
@@ -155,9 +157,16 @@ def query_data_detail(
     table_name = data_query.table_name
 
     sql_statement = text(f"SELECT * FROM {table_name} WHERE id = {detail_id};")
-    result = dc_session.execute(sql_statement)
-    results = result.mappings().one()
-    return QueryDataPublicDetail(**results)
+    result_statement = dc_session.execute(sql_statement)
+    result = result_statement.mappings().one()
+    result_dict = dict(result)
+    try:
+        content_json = json.loads(result_dict["content"])
+        result_dict["content"] = "\n".join([f"{cj['title']}:\n{cj['body']}" for cj in content_json])
+    except JSONDecodeError:
+        pass
+
+    return QueryDataPublicDetail(**result_dict)
 
 
 @router.get("/{config_id}/detail/{detail_id}/send_ghost")
