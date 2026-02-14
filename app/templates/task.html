@@ -685,9 +685,9 @@
                         <div class="nav-item">
                             <span class="nav-item-text">用户管理</span>
                         </div>
-                        <div class="nav-item">
+                        <a class="nav-item" href="/log_view">
                             <span class="nav-item-text">日志查看</span>
-                        </div>
+                        </a>
                     </div>
                 </div>
             </nav>
@@ -820,7 +820,7 @@
                                 </tr>
                                 </thead>
                                 <tbody>
-                                <tr :key="task.id" v-for="task in tasks" :class="{ 'deleted-row': task.is_delete }">
+                                <tr :class="{ 'deleted-row': task.is_delete }" :key="task.id" v-for="task in tasks">
                                     <td class="task-name">{{ task.task_name }}</td>
                                     <td><span class="task-group-badge">{{ task.task_group }}</span></td>
                                     <td>{{ task.source_platform || '-' }}</td>
@@ -851,7 +851,7 @@
                                                 删除
                                             </button>
                                         </template>
-                                        <span v-else style="color: #999; font-size: 0.8rem;">-</span>
+                                        <span style="color: #999; font-size: 0.8rem;" v-else>-</span>
                                     </td>
                                 </tr>
                                 </tbody>

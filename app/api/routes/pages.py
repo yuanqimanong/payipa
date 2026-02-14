@@ -49,3 +49,8 @@ async def data_detail_page(request: Request):
 @router.get("/aggregated_search", response_class=HTMLResponse)
 async def aggregated_search_page(request: Request):
     return serve_template("aggregated_search")
+
+
+@router.get("/log_view", response_class=HTMLResponse)
+async def log_view_page(request: Request):
+    return serve_template("log_view")

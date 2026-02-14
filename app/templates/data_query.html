@@ -704,9 +704,9 @@
                         <div class="nav-item">
                             <span class="nav-item-text">用户管理</span>
                         </div>
-                        <div class="nav-item">
+                        <a class="nav-item" href="/log_view">
                             <span class="nav-item-text">日志查看</span>
-                        </div>
+                        </a>
                     </div>
                 </div>
             </nav>
@@ -749,9 +749,9 @@
                         <div class="function-section">
                             <div class="function-section-title">📋 数据表查询</div>
                             <button
+                                    :class="{ active: activeQuery === 'all' }"
                                     @click="viewAllData"
                                     class="view-all-btn"
-                                    :class="{ active: activeQuery === 'all' }"
                             >
                                 <span>📊</span>
                                 <span>查看所有数据</span>
@@ -763,13 +763,13 @@
                             <div class="function-section-title">🔧 自定义SQL查询</div>
 
                             <!-- Loading State for SQL Cards -->
-                            <div class="loading-state" v-if="sqlLoading" style="padding: 20px;">
+                            <div class="loading-state" style="padding: 20px;" v-if="sqlLoading">
                                 <div class="loading-state-icon" style="font-size: 1.5rem;">⏳</div>
                                 <p style="font-size: 0.85rem;">加载中...</p>
                             </div>
 
                             <!-- Empty State for SQL Cards -->
-                            <div class="empty-state" v-else-if="sqlQueries.length === 0" style="padding: 20px;">
+                            <div class="empty-state" style="padding: 20px;" v-else-if="sqlQueries.length === 0">
                                 <div class="empty-state-icon" style="font-size: 1.5rem;">📭</div>
                                 <p style="font-size: 0.85rem;">暂无自定义SQL</p>
                             </div>
@@ -777,10 +777,10 @@
                             <!-- SQL Cards -->
                             <div class="sql-cards-grid" v-else>
                                 <div
-                                        :key="sql.id"
-                                        class="sql-card"
                                         :class="{ active: activeQuery === sql.id }"
+                                        :key="sql.id"
                                         @click="executeSql(sql.id)"
+                                        class="sql-card"
                                         v-for="sql in sqlQueries"
                                 >
                                     <div class="sql-card-title">{{ sql.name }}</div>
@@ -816,13 +816,13 @@
                             <table class="data-table">
                                 <thead>
                                 <tr>
-                                    <th v-for="col in tableColumns" :key="col">{{ col }}</th>
+                                    <th :key="col" v-for="col in tableColumns">{{ col }}</th>
                                     <th>操作</th>
                                 </tr>
                                 </thead>
                                 <tbody>
-                                <tr v-for="row in tableData" :key="row.id">
-                                    <td v-for="col in tableColumns" :key="col" :class="getCellClass(col)">
+                                <tr :key="row.id" v-for="row in tableData">
+                                    <td :class="getCellClass(col)" :key="col" v-for="col in tableColumns">
                                         <template v-if="col === 'url'">
                                             <a :href="row[col]" target="_blank">{{ row[col] }}</a>
                                         </template>
@@ -848,21 +848,21 @@
                                 totalCount) }} 条，共 {{ totalCount }} 条
                             </div>
                             <div class="pagination-controls">
-                                <select v-model="pageSize" @change="onPageSizeChange" class="page-size-select">
+                                <select @change="onPageSizeChange" class="page-size-select" v-model="pageSize">
                                     <option :value="10">10条/页</option>
                                     <option :value="20">20条/页</option>
                                     <option :value="50">50条/页</option>
                                     <option :value="100">100条/页</option>
                                 </select>
                                 <button
-                                        @click="goToPage(1)"
                                         :disabled="currentPage === 1"
+                                        @click="goToPage(1)"
                                         class="pagination-btn"
                                 >首页
                                 </button>
                                 <button
-                                        @click="goToPage(currentPage - 1)"
                                         :disabled="currentPage === 1"
+                                        @click="goToPage(currentPage - 1)"
                                         class="pagination-btn"
                                 >上一页
                                 </button>
@@ -870,14 +870,14 @@
                                     {{ currentPage }} / {{ totalPages }}
                                 </span>
                                 <button
-                                        @click="goToPage(currentPage + 1)"
                                         :disabled="currentPage === totalPages"
+                                        @click="goToPage(currentPage + 1)"
                                         class="pagination-btn"
                                 >下一页
                                 </button>
                                 <button
-                                        @click="goToPage(totalPages)"
                                         :disabled="currentPage === totalPages"
+                                        @click="goToPage(totalPages)"
                                         class="pagination-btn"
                                 >末页
                                 </button>

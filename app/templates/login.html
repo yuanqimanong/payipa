@@ -27,17 +27,20 @@
                            v-model="password">
                 </div>
 
-                <button :disabled="loading" class="btn btn-primary" style="width: 100%; margin: 1.5rem 0; padding: 12px; font-size: 16px;"
+                <button :disabled="loading" class="btn btn-primary"
+                        style="width: 100%; margin: 1.5rem 0; padding: 12px; font-size: 16px;"
                         type="submit">
                     {{ loading ? '登录中...' : '登录' }}
                 </button>
             </form>
 
-            <div class="alert alert-danger" style="background: #f8d7da; color: #721c24; padding: 12px; border-radius: var(--radius); margin: 1rem 0; border-left: 4px solid #f72585;"
+            <div class="alert alert-danger"
+                 style="background: #f8d7da; color: #721c24; padding: 12px; border-radius: var(--radius); margin: 1rem 0; border-left: 4px solid #f72585;"
                  v-if="errorMessage">
                 {{ errorMessage }}
             </div>
-            <div class="alert alert-success" style="background: #d4edda; color: #155724; padding: 12px; border-radius: var(--radius); margin: 1rem 0; border-left: 4px solid #28a745;"
+            <div class="alert alert-success"
+                 style="background: #d4edda; color: #155724; padding: 12px; border-radius: var(--radius); margin: 1rem 0; border-left: 4px solid #28a745;"
                  v-if="successMessage">
                 {{ successMessage }}
             </div>

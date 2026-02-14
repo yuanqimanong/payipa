@@ -89,6 +89,13 @@ body {
     box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1); /* 使用具体值而非变量 */
 }
 
+/* Navigation Item Active State */
+.nav-item.active {
+    background: linear-gradient(90deg, rgba(67, 97, 238, 0.2) 0%, rgba(124, 58, 237, 0.2) 100%);
+    color: #fff;
+    border-left: 3px solid #4361ee;
+}
+
 /* Form Elements */
 .form-group {
     margin-bottom: 1.5rem;

@@ -576,9 +576,9 @@
                         <div class="nav-item">
                             <span class="nav-item-text">用户管理</span>
                         </div>
-                        <div class="nav-item">
+                        <a class="nav-item" href="/log_view">
                             <span class="nav-item-text">日志查看</span>
-                        </div>
+                        </a>
                     </div>
                 </div>
             </nav>
@@ -612,7 +612,7 @@
                 </div>
 
                 <!-- 聚合搜索栏目 -->
-                <div class="aggregated-search-section" @click="goToAggregatedSearch">
+                <div @click="goToAggregatedSearch" class="aggregated-search-section">
                     <div class="search-header">
                         <div class="search-icon">🔍</div>
                         <div class="search-title-section">

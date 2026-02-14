@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta content="width=device-width, initial-scale=1.0" name="viewport">
-    <title>聚合搜索 - PaYiPa</title>
+    <title>日志查看 - PaYiPa</title>
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
     <link href="/static/css/style.css" rel="stylesheet">
     <style>
@@ -51,9 +51,12 @@
         }
 
         .sidebar-logo-text {
-            font-size: 1.25rem;
+            font-size: 22px;
             font-weight: 700;
-            letter-spacing: 0.5px;
+            background: linear-gradient(135deg, #fff 0%, #e0e0e0 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
         }
 
         .sidebar-nav {
@@ -63,55 +66,50 @@
         }
 
         .nav-section {
-            margin-bottom: 8px;
+            margin-bottom: 24px;
         }
 
         .nav-section-title {
-            padding: 8px 20px;
-            font-size: 0.7rem;
-            text-transform: uppercase;
-            letter-spacing: 1.5px;
-            color: rgba(255, 255, 255, 0.4);
+            padding: 0 20px 12px;
+            font-size: 12px;
             font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: #a0aec0;
         }
 
         .nav-item {
             display: flex;
             align-items: center;
             padding: 12px 20px;
-            color: rgba(255, 255, 255, 0.7);
+            color: #cbd5e0;
             text-decoration: none;
             cursor: pointer;
             transition: all 0.3s ease;
-            border-left: 3px solid transparent;
-            gap: 12px;
+            position: relative;
         }
 
         .nav-item:hover {
-            background: rgba(255, 255, 255, 0.05);
+            background: rgba(255, 255, 255, 0.1);
             color: #fff;
-        }
-
-        .nav-item.active {
-            background: rgba(67, 97, 238, 0.15);
-            color: #fff;
-            border-left-color: #4361ee;
         }
 
         .nav-item-icon {
-            width: 20px;
+            margin-right: 12px;
+            font-size: 18px;
+            width: 24px;
             text-align: center;
-            font-size: 1rem;
         }
 
         .nav-item-text {
             flex: 1;
-            font-size: 0.9rem;
+            font-size: 14px;
+            font-weight: 500;
         }
 
         .nav-item-arrow {
-            font-size: 0.7rem;
             transition: transform 0.3s ease;
+            font-size: 12px;
         }
 
         .nav-item-arrow.expanded {
@@ -119,21 +117,21 @@
         }
 
         .nav-submenu {
-            overflow: hidden;
             max-height: 0;
+            overflow: hidden;
             transition: max-height 0.3s ease;
         }
 
         .nav-submenu.expanded {
-            max-height: 200px;
+            max-height: 300px;
         }
 
         .nav-submenu .nav-item {
-            padding-left: 52px;
-            font-size: 0.85rem;
+            padding-left: 44px;
+            font-size: 13px;
         }
 
-        /* Main Content Styles */
+        /* Main Content Area */
         .main-wrapper {
             flex: 1;
             margin-left: 260px;
@@ -142,83 +140,77 @@
             min-height: 100vh;
         }
 
-        /* Top Header Styles */
+        /* Top Header */
         .top-header {
             background: #fff;
+            border-bottom: 1px solid #e2e8f0;
             padding: 16px 30px;
             display: flex;
             justify-content: flex-end;
-            align-items: center;
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
-            position: sticky;
-            top: 0;
-            z-index: 50;
         }
 
         .user-info-section {
             display: flex;
             align-items: center;
-            gap: 24px;
+            gap: 20px;
         }
 
         .login-time {
-            color: #6c757d;
-            font-size: 0.85rem;
             display: flex;
             align-items: center;
-            gap: 6px;
+            gap: 8px;
+            color: #64748b;
+            font-size: 14px;
         }
 
         .login-time-icon {
-            font-size: 1rem;
+            font-size: 16px;
         }
 
         .user-profile {
             display: flex;
             align-items: center;
             gap: 12px;
-            padding: 8px 16px;
-            background: #f8f9fa;
-            border-radius: 30px;
         }
 
         .user-avatar {
             width: 36px;
             height: 36px;
-            background: linear-gradient(135deg, #4361ee 0%, #7c3aed 100%);
             border-radius: 50%;
+            background: linear-gradient(135deg, #4361ee 0%, #7c3aed 100%);
             display: flex;
             align-items: center;
             justify-content: center;
-            color: #fff;
+            color: white;
             font-weight: 600;
-            font-size: 0.9rem;
+            font-size: 14px;
         }
 
         .user-details {
-            text-align: left;
+            display: flex;
+            flex-direction: column;
         }
 
         .user-name {
             font-weight: 600;
-            color: #212529;
-            font-size: 0.9rem;
+            color: #1e293b;
+            font-size: 14px;
         }
 
         .user-role {
-            font-size: 0.75rem;
-            color: #6c757d;
+            font-size: 12px;
+            color: #64748b;
         }
 
         .logout-btn {
             padding: 8px 16px;
-            background: transparent;
-            border: 1px solid #dee2e6;
+            background: #fff;
+            border: 1px solid #e2e8f0;
             border-radius: 6px;
-            color: #6c757d;
+            color: #64748b;
             cursor: pointer;
             transition: all 0.3s ease;
-            font-size: 0.85rem;
+            font-size: 14px;
         }
 
         .logout-btn:hover {
@@ -227,8 +219,8 @@
             color: #fff;
         }
 
-        /* Main Content Area */
-        .main-content-area {
+        /* Log View Content */
+        .log-view-container {
             flex: 1;
             padding: 30px;
             background: #f0f2f5;
@@ -266,13 +258,13 @@
             color: #fff;
         }
 
-        /* Search Container */
-        .search-container {
+        /* Iframe Container */
+        .iframe-wrapper {
             background: #fff;
             border-radius: 12px;
             overflow: hidden;
             box-shadow: 0 4px 20px rgba(0, 0, 0, 0.06);
-            height: calc(100vh - 180px);
+            height: calc(100vh - 200px);
         }
 
         .iframe-container {
@@ -281,74 +273,64 @@
             border: none;
         }
 
-        /* Login Card Styles */
-        .login-prompt {
-            max-width: 500px;
-            margin: 15vh auto;
-            text-align: center;
-            padding: 3rem;
-            background: white;
-            border-radius: 8px;
-            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+        /* Loading State */
+        .loading-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(255, 255, 255, 0.8);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+        }
+
+        .spinner {
+            width: 40px;
+            height: 40px;
+            border: 4px solid #e2e8f0;
+            border-top: 4px solid #4361ee;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
         }
 
         /* Responsive Design */
         @media (max-width: 768px) {
             .sidebar {
-                width: 0;
-                overflow: hidden;
+                width: 200px;
             }
-
-            .sidebar.mobile-open {
-                width: 260px;
-            }
-
+            
             .main-wrapper {
-                margin-left: 0;
+                margin-left: 200px;
             }
-
-            .top-header {
-                padding: 12px 16px;
+            
+            .log-view-container {
+                padding: 20px;
             }
-
-            .user-info-section {
-                gap: 12px;
-            }
-
-            .login-time {
-                display: none;
-            }
-
-            .search-container {
-                height: calc(100vh - 140px);
+            
+            .iframe-wrapper {
+                height: calc(100vh - 160px);
             }
         }
     </style>
 </head>
 <body>
+<!-- 预加载骨架屏，减少白屏时间 -->
 <div id="app">
-    <!-- 未登录状态 -->
-    <div class="container" v-if="!isLoggedIn">
-        <div class="login-prompt">
-            <div class="header">
-                <h1 style="font-size: 2.5rem; margin-bottom: 1rem; color: var(--danger-color);">🔒</h1>
-                <h2 style="font-size: 1.75rem; margin-bottom: 1rem; color: var(--dark-text);">需要登录</h2>
-                <p class="welcome-message" style="font-size: 1.1rem;">请先登录以访问此页面</p>
-            </div>
-            <div style="margin-top: 2rem;">
-                <a class="btn btn-primary" href="/login" style="padding: 12px 30px; font-size: 16px;">前往登录</a>
-            </div>
-        </div>
-    </div>
-
-    <!-- 已登录状态 - 带侧边栏布局 -->
-    <div class="app-layout" v-else>
-        <!-- 左侧导航侧边栏 -->
+    <div class="app-layout">
+        <!-- 侧边栏导航 -->
         <aside class="sidebar">
             <div class="sidebar-header">
                 <div class="sidebar-logo">
-                    <div class="sidebar-logo-icon">📊</div>
-                    <span class="sidebar-logo-text">PaYiPa</span>
+                    <div class="sidebar-logo-icon">🕷️</div>
+                    <div class="sidebar-logo-text">PaYiPa</div>
                 </div>
             </div>
 
@@ -360,11 +342,6 @@
                     <a class="nav-item" href="/index">
                         <span class="nav-item-icon">🏠</span>
                         <span class="nav-item-text">Dashboard</span>
-                    </a>
-                    <!-- 聚合搜索 -->
-                    <a class="nav-item active" href="/aggregated_search">
-                        <span class="nav-item-icon">🔍</span>
-                        <span class="nav-item-text">聚合搜索</span>
                     </a>
                     <!-- 任务管理 - 二级菜单 -->
                     <div @click="toggleSubmenu('task')" class="nav-item">
@@ -402,7 +379,7 @@
                         <div class="nav-item">
                             <span class="nav-item-text">用户管理</span>
                         </div>
-                        <a class="nav-item" href="/log_view">
+                        <a class="nav-item active" href="/log_view">
                             <span class="nav-item-text">日志查看</span>
                         </a>
                     </div>
@@ -430,25 +407,29 @@
                 </div>
             </header>
 
-            <!-- 主内容区域 -->
-            <main class="main-content-area">
+            <!-- 日志查看内容区 -->
+            <main class="log-view-container">
                 <div class="page-title">
                     <a class="back-btn" href="/index">
                         <span>←</span>
-                        <span>返回</span>
+                        <span>返回首页</span>
                     </a>
-                    <h1>🔍 聚合搜索</h1>
+                    <h1>📋 日志查看</h1>
                 </div>
 
-                <!-- 搜索容器 -->
-                <div class="search-container">
+                <div class="iframe-wrapper" v-loading="loading">
                     <iframe
-                            allowfullscreen
+                            @error="onIframeError"
+                            @load="onIframeLoad"
                             class="iframe-container"
                             frameborder="0"
-                            src="http://192.168.14.60:8888/">
-                        您的浏览器不支持 iframe
+                            src="http://192.168.14.60:22333/scheduler/">
                     </iframe>
+
+                    <!-- 加载提示 -->
+                    <div class="loading-overlay" v-if="loading">
+                        <div class="spinner"></div>
+                    </div>
                 </div>
             </main>
         </div>
@@ -467,6 +448,8 @@
                 task: false,
                 system: false
             });
+            // 初始化时设置加载状态，等待认证完成
+            const loading = ref(true);
 
             // 计算属性
             const userAvatar = computed(() => {
@@ -474,28 +457,19 @@
                 return name.charAt(0).toUpperCase();
             });
 
-            // 设置登录时间
-            const setLoginTime = () => {
-                const cached = localStorage.getItem('login_time');
-                if (cached) {
-                    loginTime.value = cached;
-                } else {
-                    const now = new Date();
-                    const timeStr = now.toLocaleString('zh-CN', {
-                        year: 'numeric',
-                        month: '2-digit',
-                        day: '2-digit',
-                        hour: '2-digit',
-                        minute: '2-digit'
-                    });
-                    loginTime.value = timeStr;
-                    localStorage.setItem('login_time', timeStr);
-                }
-            };
-
-            // 切换子菜单
+            // 展开/收起子菜单
             const toggleSubmenu = (menu) => {
                 expandedMenus.value[menu] = !expandedMenus.value[menu];
+            };
+
+            // iframe加载完成 - 仅用于调试，不改变loading状态
+            const onIframeLoad = () => {
+                console.log('iframe加载完成');
+            };
+
+            // iframe加载错误 - 仅用于调试，不改变loading状态
+            const onIframeError = () => {
+                console.error('iframe加载失败');
             };
 
             // 检查登录状态
@@ -503,33 +477,40 @@
                 const token = localStorage.getItem('access_token');
                 if (!token) {
                     isLoggedIn.value = false;
+                    window.location.href = '/login';
                     return;
                 }
 
                 try {
-                    const response = await fetch('/api/v1/login/test-token', {
-                        method: 'POST',
-                        headers: {
-                            'Authorization': `Bearer ${token}`,
-                            'Content-Type': 'application/json'
-                        }
-                    });
-
-                    if (response.ok) {
-                        const userData = await response.json();
-                        userInfo.value = userData;
+                    // 并行获取用户信息和设置登录时间
+                    const [userResponse, loginTimePromise] = await Promise.all([
+                        fetch('/api/v1/users/me', {
+                            headers: {
+                                'Authorization': `Bearer ${token}`
+                            }
+                        }),
+                        Promise.resolve(localStorage.getItem('login_time'))
+                    ]);
+                    
+                    if (userResponse.ok) {
+                        userInfo.value = await userResponse.json();
                         isLoggedIn.value = true;
-                        setLoginTime();
+                        
+                        // 设置登录时间
+                        if (loginTimePromise) {
+                            loginTime.value = new Date(parseInt(loginTimePromise)).toLocaleString('zh-CN');
+                        }
                     } else {
-                        // Token无效，清除本地存储
-                        localStorage.removeItem('access_token');
-                        localStorage.removeItem('login_time');
-                        isLoggedIn.value = false;
-                        window.location.href = '/login';
+                        throw new Error('认证失败');
                     }
                 } catch (error) {
                     console.error('认证检查失败:', error);
-                    isLoggedIn.value = false;
+                    localStorage.removeItem('access_token');
+                    localStorage.removeItem('login_time');
+                    window.location.href = '/login';
+                } finally {
+                    // 认证完成后关闭加载状态
+                    loading.value = false;
                 }
             };
 
@@ -542,6 +523,7 @@
             };
 
             onMounted(() => {
+                // 立即开始认证检查
                 checkAuth();
             });
 
@@ -551,7 +533,10 @@
                 userAvatar,
                 loginTime,
                 expandedMenus,
+                loading,
                 toggleSubmenu,
+                onIframeLoad,
+                onIframeError,
                 logout
             };
         }
@@ -559,4 +544,3 @@
 </script>
 </body>
 </html>
-</file_content>
