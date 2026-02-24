@@ -170,7 +170,7 @@ def query_data_detail(
 
 
 @router.get("/{config_id}/detail/{detail_id}/send_ghost")
-async def query_data_detail(
+async def query_data_detail_send_ghost(
     session: SessionDep,
     config_id: str,
     detail_id: int,
