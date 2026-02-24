@@ -183,7 +183,7 @@ async def query_data_detail_send_ghost(
     url = "http://127.0.0.1:22333/crawler/ghost_api"
     # url = "http://192.168.14.60:22333/crawler/ghost_api"
     async with httpx.AsyncClient() as client:
-        response = await client.post(url, json={"table_name": table_name, "record_id": detail_id}, timeout=15)
+        response = await client.post(url, json={"table_name": table_name, "record_id": detail_id}, timeout=300)
 
         if response.status_code == 200:
             return Message(message=f"Ghost 发送成功：{table_name} - {detail_id}")
