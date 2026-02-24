@@ -180,7 +180,8 @@ async def query_data_detail_send_ghost(
     data_query = session.exec(statement).one()
     table_name = data_query.table_name
 
-    url = "http://192.168.14.60:22333/crawler/ghost_api"
+    url = "http://127.0.0.1:22333/crawler/ghost_api"
+    # url = "http://192.168.14.60:22333/crawler/ghost_api"
     async with httpx.AsyncClient() as client:
         response = await client.post(url, json={"table_name": table_name, "record_id": detail_id}, timeout=15)
 
