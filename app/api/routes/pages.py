@@ -59,3 +59,8 @@ async def log_view_page(request: Request):
 @router.get("/users", response_class=HTMLResponse)
 async def users_page(request: Request):
     return serve_template("users")
+
+
+@router.get("/profile", response_class=HTMLResponse)
+async def profile_page(request: Request):
+    return serve_template("profile")
