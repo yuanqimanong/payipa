@@ -54,3 +54,8 @@ async def aggregated_search_page(request: Request):
 @router.get("/log_view", response_class=HTMLResponse)
 async def log_view_page(request: Request):
     return serve_template("log_view")
+
+
+@router.get("/users", response_class=HTMLResponse)
+async def users_page(request: Request):
+    return serve_template("users")
