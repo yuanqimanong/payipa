@@ -169,8 +169,8 @@ def query_data_detail(
     return QueryDataPublicDetail(**result_dict)
 
 
-@router.get("/{config_id}/detail/{detail_id}/send_ghost")
-async def query_data_detail_send_ghost(
+@router.get("/{config_id}/detail/{detail_id}/send_ghost_test")
+async def query_data_detail_send_ghost_test(
     session: SessionDep,
     config_id: str,
     detail_id: int,
@@ -183,7 +183,33 @@ async def query_data_detail_send_ghost(
     url = "http://127.0.0.1:22333/crawler/ghost_api"
     # url = "http://192.168.14.60:22333/crawler/ghost_api"
     async with httpx.AsyncClient() as client:
-        response = await client.post(url, json={"table_name": table_name, "record_id": detail_id}, timeout=300)
+        response = await client.post(
+            url, json={"table_name": table_name, "record_id": detail_id, "is_alpha": False}, timeout=300
+        )
+
+        if response.status_code == 200:
+            return Message(message=f"Ghost 发送成功：{table_name} - {detail_id}")
+        else:
+            return Message(message=f"Ghost 发送失败：{response.text}")
+
+
+@router.get("/{config_id}/detail/{detail_id}/send_ghost_alpha")
+async def query_data_detail_send_ghost_alpha(
+    session: SessionDep,
+    config_id: str,
+    detail_id: int,
+    current_user: CurrentUser,
+) -> Message:
+    statement = select(DataQueryConfig).where(DataQueryConfig.id == config_id)
+    data_query = session.exec(statement).one()
+    table_name = data_query.table_name
+
+    url = "http://127.0.0.1:22333/crawler/ghost_api"
+    # url = "http://192.168.14.60:22333/crawler/ghost_api"
+    async with httpx.AsyncClient() as client:
+        response = await client.post(
+            url, json={"table_name": table_name, "record_id": detail_id, "is_alpha": True}, timeout=300
+        )
 
         if response.status_code == 200:
             return Message(message=f"Ghost 发送成功：{table_name} - {detail_id}")
