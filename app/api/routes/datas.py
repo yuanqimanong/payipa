@@ -183,14 +183,17 @@ async def query_data_detail_send_ghost_test(
     url = "http://127.0.0.1:22333/crawler/ghost_api"
     # url = "http://192.168.14.60:22333/crawler/ghost_api"
     async with httpx.AsyncClient() as client:
-        response = await client.post(
-            url, json={"table_name": table_name, "record_id": detail_id, "is_alpha": False}, timeout=300
-        )
+        try:
+            response = await client.post(
+                url, json={"table_name": table_name, "record_id": detail_id, "is_alpha": False}, timeout=300
+            )
 
-        if response.status_code == 200:
-            return Message(message=f"Ghost 发送成功：{table_name} - {detail_id}")
-        else:
-            return Message(message=f"Ghost 发送失败：{response.text}")
+            if response.status_code == 200:
+                return Message(message=f"Ghost 发送成功：{table_name} - {detail_id}")
+            else:
+                raise HTTPException(status_code=502, detail=f"Ghost 服务返回错误: {response.text}")
+        except httpx.RequestError as e:
+            raise HTTPException(status_code=503, detail="无法连接到 Ghost 服务")
 
 
 @router.get("/{config_id}/detail/{detail_id}/send_ghost_alpha")
@@ -207,11 +210,14 @@ async def query_data_detail_send_ghost_alpha(
     url = "http://127.0.0.1:22333/crawler/ghost_api"
     # url = "http://192.168.14.60:22333/crawler/ghost_api"
     async with httpx.AsyncClient() as client:
-        response = await client.post(
-            url, json={"table_name": table_name, "record_id": detail_id, "is_alpha": True}, timeout=300
-        )
+        try:
+            response = await client.post(
+                url, json={"table_name": table_name, "record_id": detail_id, "is_alpha": True}, timeout=300
+            )
 
-        if response.status_code == 200:
-            return Message(message=f"Ghost 发送成功：{table_name} - {detail_id}")
-        else:
-            return Message(message=f"Ghost 发送失败：{response.text}")
+            if response.status_code == 200:
+                return Message(message=f"Ghost 发送成功：{table_name} - {detail_id}")
+            else:
+                raise HTTPException(status_code=502, detail=f"Ghost 服务返回错误: {response.text}")
+        except httpx.RequestError as e:
+            raise HTTPException(status_code=503, detail="无法连接到 Ghost 服务")

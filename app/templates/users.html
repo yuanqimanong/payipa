@@ -859,14 +859,14 @@
                 <!-- 用户操作控件 -->
                 <div class="user-controls">
                     <div class="search-filter">
-                        <input 
-                            v-model="searchQuery" 
-                            @input="handleSearch"
-                            type="text" 
-                            class="search-input" 
-                            placeholder="搜索用户名或邮箱..."
+                        <input
+                                @input="handleSearch"
+                                class="search-input"
+                                placeholder="搜索用户名或邮箱..."
+                                type="text"
+                                v-model="searchQuery"
                         >
-                        <select v-model="roleFilter" @change="filterUsers" class="filter-select">
+                        <select @change="filterUsers" class="filter-select" v-model="roleFilter">
                             <option value="">所有角色</option>
                             <option value="admin">管理员</option>
                             <option value="user">普通用户</option>
@@ -881,84 +881,84 @@
                 <!-- 用户表格 -->
                 <div class="users-table-container">
                     <!-- 空状态显示 -->
-                    <div v-if="filteredUsers.length === 0 && !loading" class="empty-state">
+                    <div class="empty-state" v-if="filteredUsers.length === 0 && !loading">
                         <div class="empty-state-content">
                             <div class="empty-state-icon">👥</div>
                             <h3>暂无用户数据</h3>
                             <p>还没有用户记录，点击"新建用户"按钮创建第一个用户。</p>
                         </div>
                     </div>
-                    
+
                     <!-- 加载状态 -->
-                    <div v-else-if="loading" class="loading-state">
+                    <div class="loading-state" v-else-if="loading">
                         <div class="loading-spinner"></div>
                         <p>正在加载用户数据...</p>
                     </div>
-                    
+
                     <!-- 用户表格 -->
-                    <table v-else class="users-table">
+                    <table class="users-table" v-else>
                         <thead>
-                            <tr>
-                                <th>用户信息</th>
-                                <th>角色</th>
-                                <th>状态</th>
-                                <th>创建时间</th>
-                                <th>操作</th>
-                            </tr>
+                        <tr>
+                            <th>用户信息</th>
+                            <th>角色</th>
+                            <th>状态</th>
+                            <th>创建时间</th>
+                            <th>操作</th>
+                        </tr>
                         </thead>
                         <tbody>
-                            <tr v-for="user in filteredUsers" :key="user.id">
-                                <td>
-                                    <div class="user-avatar-cell">
-                                        <div class="user-avatar-small">{{ getUserInitials(user) }}</div>
-                                        <div class="user-info-text">
-                                            <div class="user-full-name">{{ user.full_name || '未设置姓名' }}</div>
-                                            <div class="user-email">{{ user.email }}</div>
-                                        </div>
+                        <tr :key="user.id" v-for="user in filteredUsers">
+                            <td>
+                                <div class="user-avatar-cell">
+                                    <div class="user-avatar-small">{{ getUserInitials(user) }}</div>
+                                    <div class="user-info-text">
+                                        <div class="user-full-name">{{ user.full_name || '未设置姓名' }}</div>
+                                        <div class="user-email">{{ user.email }}</div>
                                     </div>
-                                </td>
-                                <td>
+                                </div>
+                            </td>
+                            <td>
                                     <span :class="['role-badge', user.is_superuser ? 'role-admin' : 'role-user']">
                                         {{ user.is_superuser ? '管理员' : '普通用户' }}
                                     </span>
-                                </td>
-                                <td>
-                                    <span class="status-badge status-active">活跃</span>
-                                </td>
-                                <td>{{ formatDate(user.created_at) }}</td>
-                                <td>
-                                    <div class="action-buttons">
-                                        <button @click="showEditModal(user)" class="btn-action btn-edit">编辑</button>
-                                        <button 
-                                            v-if="user.id !== userInfo.id" 
+                            </td>
+                            <td>
+                                <span class="status-badge status-active">活跃</span>
+                            </td>
+                            <td>{{ formatDate(user.created_at) }}</td>
+                            <td>
+                                <div class="action-buttons">
+                                    <button @click="showEditModal(user)" class="btn-action btn-edit">编辑</button>
+                                    <button
                                             @click="showDeleteConfirm(user)"
                                             class="btn-action btn-delete"
-                                        >
-                                            删除
-                                        </button>
-                                    </div>
-                                </td>
-                            </tr>
+                                            v-if="user.id !== userInfo.id"
+                                    >
+                                        删除
+                                    </button>
+                                </div>
+                            </td>
+                        </tr>
                         </tbody>
                     </table>
                 </div>
 
                 <!-- 分页 -->
                 <div class="pagination">
-                    <button 
-                        @click="prevPage" 
-                        :disabled="currentPage === 1"
-                        class="btn-pagination"
+                    <button
+                            :disabled="currentPage === 1"
+                            @click="prevPage"
+                            class="btn-pagination"
                     >
                         上一页
                     </button>
                     <span class="pagination-info">
                         第 {{ currentPage }} 页，共 {{ totalPages }} 页
                     </span>
-                    <button 
-                        @click="nextPage" 
-                        :disabled="currentPage === totalPages"
-                        class="btn-pagination"
+                    <button
+                            :disabled="currentPage === totalPages"
+                            @click="nextPage"
+                            class="btn-pagination"
                     >
                         下一页
                     </button>
@@ -968,67 +968,67 @@
     </div>
 
     <!-- 创建用户模态框 -->
-    <div v-if="showCreateUserModal" class="modal-overlay" @click="closeCreateModal">
-        <div class="modal-content" @click.stop>
+    <div @click="closeCreateModal" class="modal-overlay" v-if="showCreateUserModal">
+        <div @click.stop class="modal-content">
             <div class="modal-header">
                 <h2 class="modal-title">创建新用户</h2>
                 <button @click="closeCreateModal" class="modal-close">&times;</button>
             </div>
             <div class="modal-body">
-                <div v-if="createError" class="alert alert-error">
+                <div class="alert alert-error" v-if="createError">
                     {{ createError }}
                 </div>
                 <form @submit.prevent="createUser">
                     <div class="form-group">
                         <label class="form-label">邮箱 *</label>
-                        <input 
-                            v-model="newUser.email" 
-                            type="email" 
-                            class="form-input" 
-                            required
+                        <input
+                                class="form-input"
+                                required
+                                type="email"
+                                v-model="newUser.email"
                         >
                     </div>
                     <div class="form-group">
                         <label class="form-label">全名</label>
-                        <input 
-                            v-model="newUser.full_name" 
-                            type="text" 
-                            class="form-input"
+                        <input
+                                class="form-input"
+                                type="text"
+                                v-model="newUser.full_name"
                         >
                     </div>
                     <div class="form-group">
                         <label class="form-label">密码 *</label>
-                        <input 
-                            v-model="newUser.password" 
-                            type="password" 
-                            class="form-input" 
-                            required
+                        <input
+                                class="form-input"
+                                required
+                                type="password"
+                                v-model="newUser.password"
                         >
                     </div>
                     <div class="form-group">
                         <label class="form-label">确认密码 *</label>
-                        <input 
-                            v-model="newUser.confirmPassword" 
-                            type="password" 
-                            class="form-input" 
-                            required
+                        <input
+                                class="form-input"
+                                required
+                                type="password"
+                                v-model="newUser.confirmPassword"
                         >
                     </div>
                     <div class="form-group">
                         <div class="form-checkbox">
-                            <input 
-                                v-model="newUser.is_superuser" 
-                                type="checkbox" 
-                                id="is_superuser"
+                            <input
+                                    id="is_superuser"
+                                    type="checkbox"
+                                    v-model="newUser.is_superuser"
                             >
                             <label for="is_superuser">设为管理员</label>
                         </div>
                     </div>
                     <div class="form-actions">
-                        <button type="button" @click="closeCreateModal" class="btn-cancel">
+                        <button @click="closeCreateModal" class="btn-cancel" type="button">
                             取消
                         </button>
-                        <button type="submit" class="btn-submit" :disabled="creatingUser">
+                        <button :disabled="creatingUser" class="btn-submit" type="submit">
                             {{ creatingUser ? '创建中...' : '创建用户' }}
                         </button>
                     </div>
@@ -1038,49 +1038,49 @@
     </div>
 
     <!-- 编辑用户模态框 -->
-    <div v-if="showEditUserModal" class="modal-overlay" @click="closeEditModal">
-        <div class="modal-content" @click.stop>
+    <div @click="closeEditModal" class="modal-overlay" v-if="showEditUserModal">
+        <div @click.stop class="modal-content">
             <div class="modal-header">
                 <h2 class="modal-title">编辑用户</h2>
                 <button @click="closeEditModal" class="modal-close">&times;</button>
             </div>
             <div class="modal-body">
-                <div v-if="editError" class="alert alert-error">
+                <div class="alert alert-error" v-if="editError">
                     {{ editError }}
                 </div>
                 <form @submit.prevent="updateUser">
                     <div class="form-group">
                         <label class="form-label">邮箱 *</label>
-                        <input 
-                            v-model="editingUser.email" 
-                            type="email" 
-                            class="form-input" 
-                            required
+                        <input
+                                class="form-input"
+                                required
+                                type="email"
+                                v-model="editingUser.email"
                         >
                     </div>
                     <div class="form-group">
                         <label class="form-label">全名</label>
-                        <input 
-                            v-model="editingUser.full_name" 
-                            type="text" 
-                            class="form-input"
+                        <input
+                                class="form-input"
+                                type="text"
+                                v-model="editingUser.full_name"
                         >
                     </div>
                     <div class="form-group">
                         <div class="form-checkbox">
-                            <input 
-                                v-model="editingUser.is_superuser" 
-                                type="checkbox" 
-                                id="edit_is_superuser"
+                            <input
+                                    id="edit_is_superuser"
+                                    type="checkbox"
+                                    v-model="editingUser.is_superuser"
                             >
                             <label for="edit_is_superuser">设为管理员</label>
                         </div>
                     </div>
                     <div class="form-actions">
-                        <button type="button" @click="closeEditModal" class="btn-cancel">
+                        <button @click="closeEditModal" class="btn-cancel" type="button">
                             取消
                         </button>
-                        <button type="submit" class="btn-submit" :disabled="updatingUser">
+                        <button :disabled="updatingUser" class="btn-submit" type="submit">
                             {{ updatingUser ? '更新中...' : '更新用户' }}
                         </button>
                     </div>
@@ -1090,8 +1090,8 @@
     </div>
 
     <!-- 删除确认对话框 -->
-    <div v-if="showDeleteConfirmModal" class="modal-overlay" @click="closeDeleteConfirm">
-        <div class="modal-content" @click.stop style="max-width: 400px;">
+    <div @click="closeDeleteConfirm" class="modal-overlay" v-if="showDeleteConfirmModal">
+        <div @click.stop class="modal-content" style="max-width: 400px;">
             <div class="modal-header">
                 <h2 class="modal-title">确认删除</h2>
                 <button @click="closeDeleteConfirm" class="modal-close">&times;</button>
@@ -1102,10 +1102,10 @@
                     此操作不可撤销。
                 </p>
                 <div class="form-actions">
-                    <button type="button" @click="closeDeleteConfirm" class="btn-cancel">
+                    <button @click="closeDeleteConfirm" class="btn-cancel" type="button">
                         取消
                     </button>
-                    <button @click="deleteUser" class="btn-submit btn-danger" :disabled="deletingUser">
+                    <button :disabled="deletingUser" @click="deleteUser" class="btn-submit btn-danger">
                         {{ deletingUser ? '删除中...' : '确认删除' }}
                     </button>
                 </div>

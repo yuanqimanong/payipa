@@ -535,42 +535,42 @@
                             <h2>基本信息</h2>
                             <p>查看和更新您的个人信息</p>
                         </div>
-                        
-                        <div v-if="profileError" class="alert alert-error">
+
+                        <div class="alert alert-error" v-if="profileError">
                             {{ profileError }}
                         </div>
-                        <div v-if="profileSuccess" class="alert alert-success">
+                        <div class="alert alert-success" v-if="profileSuccess">
                             {{ profileSuccess }}
                         </div>
 
                         <form @submit.prevent="updateProfile">
                             <div class="form-group">
                                 <label class="form-label">邮箱地址</label>
-                                <input 
-                                    v-model="profileForm.email" 
-                                    type="email" 
-                                    class="form-input" 
-                                    required
-                                    readonly
+                                <input
+                                        class="form-input"
+                                        readonly
+                                        required
+                                        type="email"
+                                        v-model="profileForm.email"
                                 >
                                 <small style="color: #6c757d; font-size: 0.8rem;">邮箱地址不可修改</small>
                             </div>
-                            
+
                             <div class="form-group">
                                 <label class="form-label">全名</label>
-                                <input 
-                                    v-model="profileForm.full_name" 
-                                    type="text" 
-                                    class="form-input"
-                                    placeholder="请输入您的全名"
+                                <input
+                                        class="form-input"
+                                        placeholder="请输入您的全名"
+                                        type="text"
+                                        v-model="profileForm.full_name"
                                 >
                             </div>
 
                             <div class="form-actions">
-                                <button type="button" @click="resetProfileForm" class="btn-cancel">
+                                <button @click="resetProfileForm" class="btn-cancel" type="button">
                                     重置
                                 </button>
-                                <button type="submit" class="btn-submit" :disabled="updatingProfile">
+                                <button :disabled="updatingProfile" class="btn-submit" type="submit">
                                     {{ updatingProfile ? '更新中...' : '保存更改' }}
                                 </button>
                             </div>
@@ -583,54 +583,54 @@
                             <h2>修改密码</h2>
                             <p>定期更换密码以保障账户安全</p>
                         </div>
-                        
-                        <div v-if="passwordError" class="alert alert-error">
+
+                        <div class="alert alert-error" v-if="passwordError">
                             {{ passwordError }}
                         </div>
-                        <div v-if="passwordSuccess" class="alert alert-success">
+                        <div class="alert alert-success" v-if="passwordSuccess">
                             {{ passwordSuccess }}
                         </div>
 
                         <form @submit.prevent="updatePassword">
                             <div class="form-group">
                                 <label class="form-label">当前密码 *</label>
-                                <input 
-                                    v-model="passwordForm.current_password" 
-                                    type="password" 
-                                    class="form-input" 
-                                    required
-                                    placeholder="请输入当前密码"
+                                <input
+                                        class="form-input"
+                                        placeholder="请输入当前密码"
+                                        required
+                                        type="password"
+                                        v-model="passwordForm.current_password"
                                 >
                             </div>
-                            
+
                             <div class="form-group">
                                 <label class="form-label">新密码 *</label>
-                                <input 
-                                    v-model="passwordForm.new_password" 
-                                    type="password" 
-                                    class="form-input" 
-                                    required
-                                    placeholder="请输入新密码（至少8位）"
-                                    minlength="8"
+                                <input
+                                        class="form-input"
+                                        minlength="8"
+                                        placeholder="请输入新密码（至少8位）"
+                                        required
+                                        type="password"
+                                        v-model="passwordForm.new_password"
                                 >
                             </div>
-                            
+
                             <div class="form-group">
                                 <label class="form-label">确认新密码 *</label>
-                                <input 
-                                    v-model="passwordForm.confirm_password" 
-                                    type="password" 
-                                    class="form-input" 
-                                    required
-                                    placeholder="请再次输入新密码"
+                                <input
+                                        class="form-input"
+                                        placeholder="请再次输入新密码"
+                                        required
+                                        type="password"
+                                        v-model="passwordForm.confirm_password"
                                 >
                             </div>
 
                             <div class="form-actions">
-                                <button type="button" @click="resetPasswordForm" class="btn-cancel">
+                                <button @click="resetPasswordForm" class="btn-cancel" type="button">
                                     重置
                                 </button>
-                                <button type="submit" class="btn-submit" :disabled="updatingPassword">
+                                <button :disabled="updatingPassword" class="btn-submit" type="submit">
                                     {{ updatingPassword ? '修改中...' : '修改密码' }}
                                 </button>
                             </div>
@@ -644,22 +644,22 @@
                         <h2>账户信息</h2>
                         <p>您的账户基本信息</p>
                     </div>
-                    
+
                     <div class="user-info-item">
                         <span class="user-info-label">用户ID</span>
                         <span class="user-info-value">{{ userInfo.id }}</span>
                     </div>
-                    
+
                     <div class="user-info-item">
                         <span class="user-info-label">邮箱地址</span>
                         <span class="user-info-value">{{ userInfo.email }}</span>
                     </div>
-                    
+
                     <div class="user-info-item">
                         <span class="user-info-label">全名</span>
                         <span class="user-info-value">{{ userInfo.full_name || '未设置' }}</span>
                     </div>
-                    
+
                     <div class="user-info-item">
                         <span class="user-info-label">账户类型</span>
                         <span class="user-info-value">
@@ -668,12 +668,12 @@
                             </span>
                         </span>
                     </div>
-                    
+
                     <div class="user-info-item">
                         <span class="user-info-label">账户状态</span>
                         <span class="user-info-value" style="color: #155724;">活跃</span>
                     </div>
-                    
+
                     <div class="user-info-item">
                         <span class="user-info-label">创建时间</span>
                         <span class="user-info-value">{{ formatDate(userInfo.created_at) }}</span>
