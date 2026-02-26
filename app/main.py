@@ -12,9 +12,11 @@ def custom_generate_unique_id(route: APIRoute) -> str:
     return f"{route.tags[0]}-{route.name}"
 
 
+PROD = False
+
 app = FastAPI(
     title=settings.PROJECT_NAME,
-    openapi_url=f"{settings.API_VERSION_STR}/openapi.json",
+    openapi_url=f"{settings.API_VERSION_STR}/openapi.json" if not PROD else None,
     generate_unique_id_function=custom_generate_unique_id,
 )
 
@@ -33,5 +35,5 @@ app.include_router(pages_router)
 app.include_router(api_router, prefix=settings.API_VERSION_STR)
 
 if __name__ == "__main__":
-    uvicorn.run("app.main:app", host="127.0.0.1", port=80, workers=1, reload=True)
+    uvicorn.run("app.main:app", host="127.0.0.1", port=80, reload=True)
     # uvicorn.run("app.main:app", host="0.0.0.0", port=8081, workers=1)
