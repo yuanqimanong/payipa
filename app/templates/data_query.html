@@ -1101,7 +1101,7 @@
 
             // 查看详情
             const viewDetail = (id) => {
-                window.location.href = `/data_detail?config_id=${configId}&detail_id=${id}`;
+                window.open(`/data_detail?config_id=${configId}&detail_id=${id}`, '_blank');
             };
 
             // 分页相关

@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta content="width=device-width, initial-scale=1.0" name="viewport">
-    <title>聚合搜索 - PaYiPa</title>
+    <title>外部搜索 - PaYiPa</title>
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
     <link href="/static/css/style.css" rel="stylesheet">
     <style>
@@ -281,6 +281,68 @@
             border: none;
         }
 
+        /* Info Container Styles */
+        .info-container {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: calc(100vh - 180px);
+        }
+
+        .info-card {
+            background: #fff;
+            border-radius: 12px;
+            padding: 40px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.06);
+            text-align: center;
+            max-width: 500px;
+            width: 100%;
+        }
+
+        .info-icon {
+            font-size: 3rem;
+            margin-bottom: 20px;
+            color: #4361ee;
+        }
+
+        .info-card h2 {
+            color: #212529;
+            margin-bottom: 20px;
+            font-size: 1.5rem;
+        }
+
+        .info-message {
+            color: #6c757d;
+            margin-bottom: 30px;
+            line-height: 1.6;
+        }
+
+        .external-link-btn {
+            display: inline-block;
+            padding: 14px 28px;
+            background: linear-gradient(135deg, #4361ee 0%, #7c3aed 100%);
+            color: white;
+            text-decoration: none;
+            border-radius: 8px;
+            font-weight: 500;
+            font-size: 1rem;
+            transition: all 0.3s ease;
+            border: none;
+            cursor: pointer;
+            margin-bottom: 20px;
+        }
+
+        .external-link-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(67, 97, 238, 0.4);
+        }
+
+        .info-note {
+            color: #6c757d;
+            font-size: 0.85rem;
+            line-height: 1.5;
+        }
+
         /* Login Card Styles */
         .login-prompt {
             max-width: 500px;
@@ -362,7 +424,7 @@
                         <span class="nav-item-text">Dashboard</span>
                     </a>
                     <!-- 聚合搜索 -->
-                    <a class="nav-item active" href="/aggregated_search">
+                    <a class="nav-item active" href="https://search.rhscz.eu/" target="_blank">
                         <span class="nav-item-icon">🔍</span>
                         <span class="nav-item-text">聚合搜索</span>
                     </a>
@@ -437,18 +499,25 @@
                         <span>←</span>
                         <span>返回</span>
                     </a>
-                    <h1>🔍 聚合搜索</h1>
+                    <h1>🔍 外部搜索</h1>
                 </div>
 
-                <!-- 搜索容器 -->
-                <div class="search-container">
-                    <iframe
-                            allowfullscreen
-                            class="iframe-container"
-                            frameborder="0"
-                            src="http://192.168.14.60:8888/">
-                        您的浏览器不支持 iframe
-                    </iframe>
+                <!-- 提示信息 -->
+                <div class="info-container">
+                    <div class="info-card">
+                        <div class="info-icon">🔍</div>
+                        <h2>即将跳转到外部搜索网站</h2>
+                        <p class="info-message">
+                            点击下方按钮将打开 <strong>https://search.rhscz.eu/</strong> 搜索网站。
+                            该网站将在新窗口中打开，不影响您当前的操作。
+                        </p>
+                        <a href="https://search.rhscz.eu/" target="_blank" class="external-link-btn">
+                            🌐 打开外部搜索网站
+                        </a>
+                        <p class="info-note">
+                            提示：您也可以直接点击"https://searx.space/"节点快速访问
+                        </p>
+                    </div>
                 </div>
             </main>
         </div>
