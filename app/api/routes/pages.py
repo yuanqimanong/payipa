@@ -64,3 +64,8 @@ async def users_page(request: Request):
 @router.get("/profile", response_class=HTMLResponse)
 async def profile_page(request: Request):
     return serve_template("profile")
+
+
+@router.get("/ai_comment", response_class=HTMLResponse)
+async def ai_comment_page(request: Request):
+    return serve_template("ai_comment")
