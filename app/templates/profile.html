@@ -7,249 +7,7 @@
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
     <link href="/static/css/style.css" rel="stylesheet">
     <style>
-        /* 复用现有布局样式 */
-        .app-layout {
-            display: flex;
-            min-height: 100vh;
-        }
-
-        /* Sidebar Styles */
-        .sidebar {
-            width: 260px;
-            background: linear-gradient(180deg, #1a1f36 0%, #252b47 100%);
-            color: #fff;
-            display: flex;
-            flex-direction: column;
-            position: fixed;
-            height: 100vh;
-            left: 0;
-            top: 0;
-            z-index: 100;
-            box-shadow: 4px 0 15px rgba(0, 0, 0, 0.1);
-        }
-
-        .sidebar-header {
-            padding: 24px 20px;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-        }
-
-        .sidebar-logo {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-        }
-
-        .sidebar-logo-icon {
-            width: 40px;
-            height: 40px;
-            background: linear-gradient(135deg, #4361ee 0%, #7c3aed 100%);
-            border-radius: 10px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 20px;
-        }
-
-        .sidebar-logo-text {
-            font-size: 1.25rem;
-            font-weight: 700;
-            letter-spacing: 0.5px;
-        }
-
-        .sidebar-nav {
-            flex: 1;
-            padding: 20px 0;
-            overflow-y: auto;
-        }
-
-        .nav-section {
-            margin-bottom: 8px;
-        }
-
-        .nav-section-title {
-            padding: 8px 20px;
-            font-size: 0.7rem;
-            text-transform: uppercase;
-            letter-spacing: 1.5px;
-            color: rgba(255, 255, 255, 0.4);
-            font-weight: 600;
-        }
-
-        .nav-item {
-            display: flex;
-            align-items: center;
-            padding: 12px 20px;
-            color: rgba(255, 255, 255, 0.7);
-            text-decoration: none;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            border-left: 3px solid transparent;
-            gap: 12px;
-        }
-
-        .nav-item:hover {
-            background: rgba(255, 255, 255, 0.05);
-            color: #fff;
-        }
-
-        .nav-item.active {
-            background: rgba(67, 97, 238, 0.15);
-            color: #fff;
-            border-left-color: #4361ee;
-        }
-
-        .nav-item-icon {
-            width: 20px;
-            text-align: center;
-            font-size: 1rem;
-        }
-
-        .nav-item-text {
-            flex: 1;
-            font-size: 0.9rem;
-        }
-
-        .nav-item-arrow {
-            font-size: 0.7rem;
-            transition: transform 0.3s ease;
-        }
-
-        .nav-item-arrow.expanded {
-            transform: rotate(90deg);
-        }
-
-        .nav-submenu {
-            overflow: hidden;
-            max-height: 0;
-            transition: max-height 0.3s ease;
-        }
-
-        .nav-submenu.expanded {
-            max-height: 200px;
-        }
-
-        .nav-submenu .nav-item {
-            padding-left: 52px;
-            font-size: 0.85rem;
-        }
-
-        /* Main Content Styles */
-        .main-wrapper {
-            flex: 1;
-            margin-left: 260px;
-            display: flex;
-            flex-direction: column;
-            min-height: 100vh;
-        }
-
-        /* Top Header Styles */
-        .top-header {
-            background: #fff;
-            padding: 16px 30px;
-            display: flex;
-            justify-content: flex-end;
-            align-items: center;
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
-            position: sticky;
-            top: 0;
-            z-index: 50;
-        }
-
-        .user-info-section {
-            display: flex;
-            align-items: center;
-            gap: 24px;
-        }
-
-        .login-time {
-            color: #6c757d;
-            font-size: 0.85rem;
-            display: flex;
-            align-items: center;
-            gap: 6px;
-        }
-
-        .login-time-icon {
-            font-size: 1rem;
-        }
-
-        .user-profile {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            padding: 8px 16px;
-            background: #f8f9fa;
-            border-radius: 30px;
-        }
-
-        .user-avatar {
-            width: 36px;
-            height: 36px;
-            background: linear-gradient(135deg, #4361ee 0%, #7c3aed 100%);
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: #fff;
-            font-weight: 600;
-            font-size: 0.9rem;
-        }
-
-        .user-details {
-            text-align: left;
-        }
-
-        .user-name {
-            font-weight: 600;
-            color: #212529;
-            font-size: 0.9rem;
-        }
-
-        .user-role {
-            font-size: 0.75rem;
-            color: #6c757d;
-        }
-
-        .logout-btn {
-            padding: 8px 16px;
-            background: transparent;
-            border: 1px solid #dee2e6;
-            border-radius: 6px;
-            color: #6c757d;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            font-size: 0.85rem;
-        }
-
-        .logout-btn:hover {
-            background: #f72585;
-            border-color: #f72585;
-            color: #fff;
-        }
-
-        /* Main Content Area */
-        .main-content-area {
-            flex: 1;
-            padding: 30px;
-            background: #f0f2f5;
-        }
-
-        .page-title {
-            margin-bottom: 30px;
-        }
-
-        .page-title h1 {
-            font-size: 1.75rem;
-            color: #212529;
-            margin-bottom: 8px;
-        }
-
-        .page-title p {
-            color: #6c757d;
-            font-size: 0.95rem;
-        }
-
-        /* Profile Settings Styles */
+        /* 个人设置样式 */
         .profile-container {
             display: grid;
             grid-template-columns: 1fr 1fr;
@@ -258,7 +16,7 @@
         }
 
         .profile-card {
-            background: #fff;
+            background: #ffffff;
             border-radius: 12px;
             padding: 24px;
             box-shadow: 0 4px 20px rgba(0, 0, 0, 0.06);
@@ -267,17 +25,17 @@
         .profile-card-header {
             margin-bottom: 20px;
             padding-bottom: 16px;
-            border-bottom: 1px solid #eee;
+            border-bottom: 1px solid #e5e7eb;
         }
 
         .profile-card-header h2 {
             font-size: 1.25rem;
-            color: #212529;
+            color: #111827;
             margin: 0 0 8px 0;
         }
 
         .profile-card-header p {
-            color: #6c757d;
+            color: #6b7280;
             font-size: 0.9rem;
             margin: 0;
         }
@@ -290,22 +48,34 @@
             display: block;
             margin-bottom: 8px;
             font-weight: 600;
-            color: #212529;
+            color: #111827;
         }
 
         .form-input {
             width: 100%;
-            padding: 12px 15px;
-            border: 1px solid #dee2e6;
+            padding: 12px 16px;
+            border: 1px solid #d1d5db;
             border-radius: 8px;
             font-size: 15px;
-            transition: all 0.3s ease;
+            transition: all 0.2s ease;
+            box-sizing: border-box;
         }
 
         .form-input:focus {
             outline: none;
-            border-color: #4361ee;
-            box-shadow: 0 0 0 3px rgba(67, 97, 238, 0.2);
+            border-color: #2563eb;
+            box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+        }
+
+        .form-input[readonly] {
+            background: #f3f4f6;
+            color: #6b7280;
+        }
+
+        .form-hint {
+            color: #6b7280;
+            font-size: 0.8rem;
+            margin-top: 4px;
         }
 
         .form-actions {
@@ -314,11 +84,11 @@
             justify-content: flex-end;
             margin-top: 24px;
             padding-top: 20px;
-            border-top: 1px solid #eee;
+            border-top: 1px solid #e5e7eb;
         }
 
         .btn-submit {
-            background: linear-gradient(135deg, #4361ee 0%, #7c3aed 100%);
+            background: linear-gradient(135deg, #2563eb 0%, #7c3aed 100%);
             color: white;
             border: none;
             padding: 12px 24px;
@@ -326,55 +96,62 @@
             font-size: 14px;
             font-weight: 500;
             cursor: pointer;
-            transition: all 0.3s ease;
+            transition: all 0.2s ease;
         }
 
         .btn-submit:hover {
             transform: translateY(-2px);
-            box-shadow: 0 4px 15px rgba(67, 97, 238, 0.4);
+            box-shadow: 0 4px 15px rgba(37, 99, 235, 0.4);
+        }
+
+        .btn-submit:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
         }
 
         .btn-cancel {
-            background: #f8f9fa;
-            color: #6c757d;
-            border: 1px solid #dee2e6;
+            background: #f3f4f6;
+            color: #6b7280;
+            border: 1px solid #d1d5db;
             padding: 12px 24px;
             border-radius: 8px;
             font-size: 14px;
             font-weight: 500;
             cursor: pointer;
-            transition: all 0.3s ease;
+            transition: all 0.2s ease;
         }
 
         .btn-cancel:hover {
-            background: #e9ecef;
+            background: #e5e7eb;
         }
 
-        /* Alert Styles */
+        /* 提示框 */
         .alert {
             padding: 12px 16px;
             border-radius: 8px;
             margin-bottom: 20px;
+            font-size: 14px;
         }
 
         .alert-error {
-            background: #f8d7da;
-            color: #721c24;
-            border-left: 4px solid #f72585;
+            background: #fef2f2;
+            color: #dc2626;
+            border-left: 4px solid #dc2626;
         }
 
         .alert-success {
-            background: #d4edda;
-            color: #155724;
-            border-left: 4px solid #28a745;
+            background: #f0fdf4;
+            color: #16a34a;
+            border-left: 4px solid #16a34a;
         }
 
-        /* User Info Display */
+        /* 账户信息展示 */
         .user-info-item {
             display: flex;
             justify-content: space-between;
             padding: 12px 0;
-            border-bottom: 1px solid #eee;
+            border-bottom: 1px solid #e5e7eb;
         }
 
         .user-info-item:last-child {
@@ -383,28 +160,15 @@
 
         .user-info-label {
             font-weight: 600;
-            color: #212529;
+            color: #111827;
         }
 
         .user-info-value {
-            color: #6c757d;
+            color: #6b7280;
         }
 
-        /* Responsive Design */
+        /* 响应式 */
         @media (max-width: 768px) {
-            .sidebar {
-                width: 0;
-                overflow: hidden;
-            }
-
-            .sidebar.mobile-open {
-                width: 260px;
-            }
-
-            .main-wrapper {
-                margin-left: 0;
-            }
-
             .profile-container {
                 grid-template-columns: 1fr;
             }
@@ -418,120 +182,17 @@
 <body>
 <div id="app">
     <!-- 未登录状态 -->
-    <div class="container" v-if="!isLoggedIn">
-        <div class="login-prompt">
-            <div class="header">
-                <h1 style="font-size: 2.5rem; margin-bottom: 1rem; color: var(--danger-color);">🔒</h1>
-                <h2 style="font-size: 1.75rem; margin-bottom: 1rem; color: var(--dark-text);">需要登录</h2>
-                <p class="welcome-message" style="font-size: 1.1rem;">请先登录以访问此页面</p>
-            </div>
-            <div style="margin-top: 2rem;">
-                <a class="btn btn-primary" href="/login" style="padding: 12px 30px; font-size: 16px;">前往登录</a>
-            </div>
-        </div>
-    </div>
+    <login-prompt v-if="!isLoggedIn"></login-prompt>
 
-    <!-- 已登录状态 - 带侧边栏布局 -->
+    <!-- 已登录状态 -->
     <div class="app-layout" v-else>
-        <!-- 左侧导航侧边栏 -->
-        <aside class="sidebar">
-            <div class="sidebar-header">
-                <div class="sidebar-logo">
-                    <div class="sidebar-logo-icon">📊</div>
-                    <span class="sidebar-logo-text">PaYiPa</span>
-                </div>
-            </div>
+        <app-sidebar active-page="profile" v-bind:user-info="userInfo"></app-sidebar>
 
-            <nav class="sidebar-nav">
-                <!-- 基础功能 -->
-                <div class="nav-section">
-                    <div class="nav-section-title">基础功能</div>
-                    <a class="nav-item" href="/index">
-                        <span class="nav-item-icon">🏠</span>
-                        <span class="nav-item-text">Dashboard</span>
-                    </a>
-                    <div @click="toggleSubmenu('task')" class="nav-item">
-                        <span class="nav-item-icon">📋</span>
-                        <span class="nav-item-text">任务管理</span>
-                        <span :class="{ expanded: expandedMenus.task }" class="nav-item-arrow">▶</span>
-                    </div>
-                    <div :class="{ expanded: expandedMenus.task }" class="nav-submenu">
-                        <a class="nav-item" href="/task?nav=create-task">
-                            <span class="nav-item-text">新建任务</span>
-                        </a>
-                        <a class="nav-item" href="/task?nav=view-tasks">
-                            <span class="nav-item-text">查看任务</span>
-                        </a>
-                    </div>
-                    <a class="nav-item" href="/data">
-                        <span class="nav-item-icon">🔍</span>
-                        <span class="nav-item-text">数据查询</span>
-                    </a>
-                    <!-- AI 评论 -->
-                    <a class="nav-item" href="/ai_comment">
-                        <span class="nav-item-icon">🤖</span>
-                        <span class="nav-item-text">AI 评论</span>
-                    </a>
-                </div>
-
-                <!-- 系统管理 - 仅管理员可见 -->
-                <div class="nav-section" v-if="userInfo.is_superuser">
-                    <div class="nav-section-title">系统管理</div>
-                    <div @click="toggleSubmenu('system')" class="nav-item">
-                        <span class="nav-item-icon">⚙️</span>
-                        <span class="nav-item-text">系统管理</span>
-                        <span :class="{ expanded: expandedMenus.system }" class="nav-item-arrow">▶</span>
-                    </div>
-                    <div :class="{ expanded: expandedMenus.system }" class="nav-submenu">
-                        <div class="nav-item">
-                            <span class="nav-item-text">爬虫模块</span>
-                        </div>
-                        <a class="nav-item" href="/users">
-                            <span class="nav-item-text">用户管理</span>
-                        </a>
-                        <a class="nav-item" href="/log_view">
-                            <span class="nav-item-text">日志查看</span>
-                        </a>
-                    </div>
-                </div>
-
-                <!-- 个人设置 - 所有用户可见 -->
-                <div class="nav-section">
-                    <div class="nav-section-title">个人中心</div>
-                    <a class="nav-item active" href="/profile">
-                        <span class="nav-item-icon">👤</span>
-                        <span class="nav-item-text">个人设置</span>
-                    </a>
-                </div>
-            </nav>
-        </aside>
-
-        <!-- 右侧主内容区 -->
         <div class="main-wrapper">
-            <!-- 顶部栏 -->
-            <header class="top-header">
-                <div class="user-info-section">
-                    <div class="login-time">
-                        <span class="login-time-icon">🕐</span>
-                        <span>登录时间: {{ loginTime }}</span>
-                    </div>
-                    <div class="user-profile">
-                        <div class="user-avatar">{{ userAvatar }}</div>
-                        <div class="user-details">
-                            <div class="user-name">{{ userInfo.full_name || userInfo.email }}</div>
-                            <div class="user-role">{{ userInfo.is_superuser ? '管理员' : '普通用户' }}</div>
-                        </div>
-                    </div>
-                    <button @click="logout" class="logout-btn">退出登录</button>
-                </div>
-            </header>
+            <app-header v-bind:login-time="loginTime" v-bind:user-info="userInfo"></app-header>
 
-            <!-- 主内容区域 -->
-            <main class="main-content-area">
-                <div class="page-title">
-                    <h1>👤 个人设置</h1>
-                    <p>管理您的个人信息和账户安全设置</p>
-                </div>
+            <main class="main-content">
+                <page-header icon="👤" subtitle="管理您的个人信息和账户安全设置" title="个人设置"></page-header>
 
                 <div class="profile-container">
                     <!-- 个人信息卡片 -->
@@ -548,34 +209,22 @@
                             {{ profileSuccess }}
                         </div>
 
-                        <form @submit.prevent="updateProfile">
+                        <form v-on:submit.prevent="updateProfile">
                             <div class="form-group">
                                 <label class="form-label">邮箱地址</label>
-                                <input
-                                        class="form-input"
-                                        readonly
-                                        required
-                                        type="email"
-                                        v-model="profileForm.email"
-                                >
-                                <small style="color: #6c757d; font-size: 0.8rem;">邮箱地址不可修改</small>
+                                <input class="form-input" readonly type="email" v-model="profileForm.email">
+                                <div class="form-hint">邮箱地址不可修改</div>
                             </div>
 
                             <div class="form-group">
                                 <label class="form-label">全名</label>
-                                <input
-                                        class="form-input"
-                                        placeholder="请输入您的全名"
-                                        type="text"
-                                        v-model="profileForm.full_name"
-                                >
+                                <input class="form-input" placeholder="请输入您的全名" type="text"
+                                       v-model="profileForm.full_name">
                             </div>
 
                             <div class="form-actions">
-                                <button @click="resetProfileForm" class="btn-cancel" type="button">
-                                    重置
-                                </button>
-                                <button :disabled="updatingProfile" class="btn-submit" type="submit">
+                                <button class="btn-cancel" type="button" v-on:click="resetProfileForm">重置</button>
+                                <button class="btn-submit" type="submit" v-bind:disabled="updatingProfile">
                                     {{ updatingProfile ? '更新中...' : '保存更改' }}
                                 </button>
                             </div>
@@ -596,46 +245,28 @@
                             {{ passwordSuccess }}
                         </div>
 
-                        <form @submit.prevent="updatePassword">
+                        <form v-on:submit.prevent="updatePassword">
                             <div class="form-group">
                                 <label class="form-label">当前密码 *</label>
-                                <input
-                                        class="form-input"
-                                        placeholder="请输入当前密码"
-                                        required
-                                        type="password"
-                                        v-model="passwordForm.current_password"
-                                >
+                                <input class="form-input" placeholder="请输入当前密码" required type="password"
+                                       v-model="passwordForm.current_password">
                             </div>
 
                             <div class="form-group">
                                 <label class="form-label">新密码 *</label>
-                                <input
-                                        class="form-input"
-                                        minlength="8"
-                                        placeholder="请输入新密码（至少8位）"
-                                        required
-                                        type="password"
-                                        v-model="passwordForm.new_password"
-                                >
+                                <input class="form-input" minlength="8" placeholder="请输入新密码（至少8位）" required
+                                       type="password" v-model="passwordForm.new_password">
                             </div>
 
                             <div class="form-group">
                                 <label class="form-label">确认新密码 *</label>
-                                <input
-                                        class="form-input"
-                                        placeholder="请再次输入新密码"
-                                        required
-                                        type="password"
-                                        v-model="passwordForm.confirm_password"
-                                >
+                                <input class="form-input" placeholder="请再次输入新密码" required type="password"
+                                       v-model="passwordForm.confirm_password">
                             </div>
 
                             <div class="form-actions">
-                                <button @click="resetPasswordForm" class="btn-cancel" type="button">
-                                    重置
-                                </button>
-                                <button :disabled="updatingPassword" class="btn-submit" type="submit">
+                                <button class="btn-cancel" type="button" v-on:click="resetPasswordForm">重置</button>
+                                <button class="btn-submit" type="submit" v-bind:disabled="updatingPassword">
                                     {{ updatingPassword ? '修改中...' : '修改密码' }}
                                 </button>
                             </div>
@@ -667,16 +298,15 @@
 
                     <div class="user-info-item">
                         <span class="user-info-label">账户类型</span>
-                        <span class="user-info-value">
-                            <span :style="{ color: userInfo.is_superuser ? '#1a73e8' : '#388e3c' }">
-                                {{ userInfo.is_superuser ? '管理员' : '普通用户' }}
-                            </span>
+                        <span class="user-info-value"
+                              v-bind:style="{ color: userInfo.is_superuser ? '#2563eb' : '#16a34a' }">
+                            {{ userInfo.is_superuser ? '管理员' : '普通用户' }}
                         </span>
                     </div>
 
                     <div class="user-info-item">
                         <span class="user-info-label">账户状态</span>
-                        <span class="user-info-value" style="color: #155724;">活跃</span>
+                        <span class="user-info-value" style="color: #16a34a;">活跃</span>
                     </div>
 
                     <div class="user-info-item">
@@ -689,111 +319,45 @@
     </div>
 </div>
 
+<script src="/static/js/common.js"></script>
+<script src="/static/js/components.js"></script>
 <script>
-    const { createApp, ref, computed, onMounted } = Vue;
+    var createApp = Vue.createApp;
+    var ref = Vue.ref;
+    var onMounted = Vue.onMounted;
 
-    createApp({
-        setup() {
-            // 响应式数据
-            const isLoggedIn = ref(false);
-            const userInfo = ref({});
-            const loginTime = ref('');
-            const expandedMenus = ref({
-                task: false,
-                system: false
-            });
+    var app = createApp({
+        setup: function() {
+            var isLoggedIn = ref(false);
+            var userInfo = ref({});
+            var loginTime = ref('');
 
             // 表单数据
-            const profileForm = ref({
+            var profileForm = ref({
                 email: '',
                 full_name: ''
             });
 
-            const passwordForm = ref({
+            var passwordForm = ref({
                 current_password: '',
                 new_password: '',
                 confirm_password: ''
             });
 
             // 状态标志
-            const updatingProfile = ref(false);
-            const updatingPassword = ref(false);
+            var updatingProfile = ref(false);
+            var updatingPassword = ref(false);
 
             // 错误和成功消息
-            const profileError = ref('');
-            const profileSuccess = ref('');
-            const passwordError = ref('');
-            const passwordSuccess = ref('');
+            var profileError = ref('');
+            var profileSuccess = ref('');
+            var passwordError = ref('');
+            var passwordSuccess = ref('');
 
-            // 计算属性
-            const userAvatar = computed(() => {
-                const name = userInfo.value.full_name || userInfo.value.email || '';
-                return name.charAt(0).toUpperCase();
-            });
-
-            // 方法定义
-            const setLoginTime = () => {
-                const cached = localStorage.getItem('login_time');
-                if (cached) {
-                    loginTime.value = cached;
-                } else {
-                    const now = new Date();
-                    const timeStr = now.toLocaleString('zh-CN', {
-                        year: 'numeric',
-                        month: '2-digit',
-                        day: '2-digit',
-                        hour: '2-digit',
-                        minute: '2-digit'
-                    });
-                    loginTime.value = timeStr;
-                    localStorage.setItem('login_time', timeStr);
-                }
-            };
-
-            const toggleSubmenu = (menu) => {
-                expandedMenus.value[menu] = !expandedMenus.value[menu];
-            };
-
-            const checkAuth = async () => {
-                const token = localStorage.getItem('access_token');
-                if (!token) {
-                    isLoggedIn.value = false;
-                    return;
-                }
-
-                try {
-                    const response = await fetch('/api/v1/login/test-token', {
-                        method: 'POST',
-                        headers: {
-                            'Authorization': `Bearer ${token}`,
-                            'Content-Type': 'application/json'
-                        }
-                    });
-
-                    if (response.ok) {
-                        const userData = await response.json();
-                        userInfo.value = userData;
-                        isLoggedIn.value = true;
-                        setLoginTime();
-                        
-                        // 初始化表单数据
-                        profileForm.value.email = userData.email;
-                        profileForm.value.full_name = userData.full_name || '';
-                    } else {
-                        localStorage.removeItem('access_token');
-                        localStorage.removeItem('login_time');
-                        isLoggedIn.value = false;
-                        window.location.href = '/login';
-                    }
-                } catch (error) {
-                    console.error('认证检查失败:', error);
-                    isLoggedIn.value = false;
-                }
-            };
-
-            const formatDate = (dateString) => {
+            // 格式化日期
+            var formatDate = function(dateString) {
                 if (!dateString) return '-';
-                const date = new Date(dateString);
+                var date = new Date(dateString);
                 return date.toLocaleString('zh-CN', {
                     year: 'numeric',
                     month: '2-digit',
@@ -803,34 +367,25 @@
                 });
             };
 
-            const updateProfile = async () => {
+            // 更新个人信息
+            var updateProfile = async function() {
                 updatingProfile.value = true;
                 profileError.value = '';
                 profileSuccess.value = '';
 
                 try {
-                    const token = localStorage.getItem('access_token');
-                    const response = await fetch('/api/v1/users/me', {
-                        method: 'PATCH',
-                        headers: {
-                            'Authorization': `Bearer ${token}`,
-                            'Content-Type': 'application/json'
-                        },
-                        body: JSON.stringify({
-                            full_name: profileForm.value.full_name
-                        })
+                    var response = await PaYiPa.Api.patch('/api/v1/users/me', {
+                        full_name: profileForm.value.full_name
                     });
 
                     if (response.ok) {
-                        const updatedUser = await response.json();
+                        var updatedUser = await response.json();
                         userInfo.value = updatedUser;
                         profileSuccess.value = '个人信息更新成功';
-                        
-                        // 更新表单数据
                         profileForm.value.email = updatedUser.email;
                         profileForm.value.full_name = updatedUser.full_name || '';
                     } else {
-                        const errorData = await response.json();
+                        var errorData = await response.json();
                         profileError.value = errorData.detail || '更新失败';
                     }
                 } catch (error) {
@@ -840,8 +395,8 @@
                 }
             };
 
-            const updatePassword = async () => {
-                // 验证密码确认
+            // 更新密码
+            var updatePassword = async function() {
                 if (passwordForm.value.new_password !== passwordForm.value.confirm_password) {
                     passwordError.value = '两次输入的新密码不一致';
                     return;
@@ -857,25 +412,17 @@
                 passwordSuccess.value = '';
 
                 try {
-                    const token = localStorage.getItem('access_token');
-                    const response = await fetch('/api/v1/users/me/password', {
-                        method: 'PATCH',
-                        headers: {
-                            'Authorization': `Bearer ${token}`,
-                            'Content-Type': 'application/json'
-                        },
-                        body: JSON.stringify({
-                            current_password: passwordForm.value.current_password,
-                            new_password: passwordForm.value.new_password
-                        })
+                    var response = await PaYiPa.Api.patch('/api/v1/users/me/password', {
+                        current_password: passwordForm.value.current_password,
+                        new_password: passwordForm.value.new_password
                     });
 
                     if (response.ok) {
-                        const result = await response.json();
+                        var result = await response.json();
                         passwordSuccess.value = result.message || '密码修改成功';
                         resetPasswordForm();
                     } else {
-                        const errorData = await response.json();
+                        var errorData = await response.json();
                         passwordError.value = errorData.detail || '密码修改失败';
                     }
                 } catch (error) {
@@ -885,13 +432,14 @@
                 }
             };
 
-            const resetProfileForm = () => {
+            // 重置表单
+            var resetProfileForm = function() {
                 profileForm.value.full_name = userInfo.value.full_name || '';
                 profileError.value = '';
                 profileSuccess.value = '';
             };
 
-            const resetPasswordForm = () => {
+            var resetPasswordForm = function() {
                 passwordForm.value.current_password = '';
                 passwordForm.value.new_password = '';
                 passwordForm.value.confirm_password = '';
@@ -899,52 +447,42 @@
                 passwordSuccess.value = '';
             };
 
-            const logout = () => {
-                localStorage.removeItem('access_token');
-                localStorage.removeItem('login_time');
-                isLoggedIn.value = false;
-                window.location.href = '/login';
-            };
+            onMounted(async function() {
+                var result = await PaYiPa.Auth.checkAuth();
+                isLoggedIn.value = result.isLoggedIn;
+                userInfo.value = result.userInfo || {};
 
-            // 生命周期钩子
-            onMounted(() => {
-                checkAuth();
+                if (result.isLoggedIn) {
+                    loginTime.value = PaYiPa.Auth.getLoginTime();
+                    // 初始化表单数据
+                    profileForm.value.email = result.userInfo.email;
+                    profileForm.value.full_name = result.userInfo.full_name || '';
+                }
             });
 
-            // 返回所有需要在模板中使用的数据和方法
             return {
-                // 响应式数据
-                isLoggedIn,
-                userInfo,
-                userAvatar,
-                loginTime,
-                expandedMenus,
-                
-                // 表单数据
-                profileForm,
-                passwordForm,
-                
-                // 状态标志
-                updatingProfile,
-                updatingPassword,
-                
-                // 错误和成功消息
-                profileError,
-                profileSuccess,
-                passwordError,
-                passwordSuccess,
-                
-                // 方法
-                toggleSubmenu,
-                formatDate,
-                updateProfile,
-                updatePassword,
-                resetProfileForm,
-                resetPasswordForm,
-                logout
+                isLoggedIn: isLoggedIn,
+                userInfo: userInfo,
+                loginTime: loginTime,
+                profileForm: profileForm,
+                passwordForm: passwordForm,
+                updatingProfile: updatingProfile,
+                updatingPassword: updatingPassword,
+                profileError: profileError,
+                profileSuccess: profileSuccess,
+                passwordError: passwordError,
+                passwordSuccess: passwordSuccess,
+                formatDate: formatDate,
+                updateProfile: updateProfile,
+                updatePassword: updatePassword,
+                resetProfileForm: resetProfileForm,
+                resetPasswordForm: resetPasswordForm
             };
         }
-    }).mount('#app');
+    });
+
+    PaYiPaComponents.registerComponents(app);
+    app.mount('#app');
 </script>
 </body>
 </html>

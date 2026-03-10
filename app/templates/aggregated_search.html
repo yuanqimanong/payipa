@@ -7,505 +7,99 @@
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
     <link href="/static/css/style.css" rel="stylesheet">
     <style>
-        /* Layout Styles */
-        .app-layout {
-            display: flex;
-            min-height: 100vh;
-        }
-
-        /* Sidebar Styles */
-        .sidebar {
-            width: 260px;
-            background: linear-gradient(180deg, #1a1f36 0%, #252b47 100%);
-            color: #fff;
-            display: flex;
-            flex-direction: column;
-            position: fixed;
-            height: 100vh;
-            left: 0;
-            top: 0;
-            z-index: 100;
-            box-shadow: 4px 0 15px rgba(0, 0, 0, 0.1);
-        }
-
-        .sidebar-header {
-            padding: 24px 20px;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-        }
-
-        .sidebar-logo {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-        }
-
-        .sidebar-logo-icon {
-            width: 40px;
-            height: 40px;
-            background: linear-gradient(135deg, #4361ee 0%, #7c3aed 100%);
-            border-radius: 10px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 20px;
-        }
-
-        .sidebar-logo-text {
-            font-size: 1.25rem;
-            font-weight: 700;
-            letter-spacing: 0.5px;
-        }
-
-        .sidebar-nav {
-            flex: 1;
-            padding: 20px 0;
-            overflow-y: auto;
-        }
-
-        .nav-section {
-            margin-bottom: 8px;
-        }
-
-        .nav-section-title {
-            padding: 8px 20px;
-            font-size: 0.7rem;
-            text-transform: uppercase;
-            letter-spacing: 1.5px;
-            color: rgba(255, 255, 255, 0.4);
-            font-weight: 600;
-        }
-
-        .nav-item {
-            display: flex;
-            align-items: center;
-            padding: 12px 20px;
-            color: rgba(255, 255, 255, 0.7);
-            text-decoration: none;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            border-left: 3px solid transparent;
-            gap: 12px;
-        }
-
-        .nav-item:hover {
-            background: rgba(255, 255, 255, 0.05);
-            color: #fff;
-        }
-
-        .nav-item.active {
-            background: rgba(67, 97, 238, 0.15);
-            color: #fff;
-            border-left-color: #4361ee;
-        }
-
-        .nav-item-icon {
-            width: 20px;
-            text-align: center;
-            font-size: 1rem;
-        }
-
-        .nav-item-text {
-            flex: 1;
-            font-size: 0.9rem;
-        }
-
-        .nav-item-arrow {
-            font-size: 0.7rem;
-            transition: transform 0.3s ease;
-        }
-
-        .nav-item-arrow.expanded {
-            transform: rotate(90deg);
-        }
-
-        .nav-submenu {
-            overflow: hidden;
-            max-height: 0;
-            transition: max-height 0.3s ease;
-        }
-
-        .nav-submenu.expanded {
-            max-height: 200px;
-        }
-
-        .nav-submenu .nav-item {
-            padding-left: 52px;
-            font-size: 0.85rem;
-        }
-
-        /* Main Content Styles */
-        .main-wrapper {
-            flex: 1;
-            margin-left: 260px;
-            display: flex;
-            flex-direction: column;
-            min-height: 100vh;
-        }
-
-        /* Top Header Styles */
-        .top-header {
-            background: #fff;
-            padding: 16px 30px;
-            display: flex;
-            justify-content: flex-end;
-            align-items: center;
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
-            position: sticky;
-            top: 0;
-            z-index: 50;
-        }
-
-        .user-info-section {
-            display: flex;
-            align-items: center;
-            gap: 24px;
-        }
-
-        .login-time {
-            color: #6c757d;
-            font-size: 0.85rem;
-            display: flex;
-            align-items: center;
-            gap: 6px;
-        }
-
-        .login-time-icon {
-            font-size: 1rem;
-        }
-
-        .user-profile {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            padding: 8px 16px;
-            background: #f8f9fa;
-            border-radius: 30px;
-        }
-
-        .user-avatar {
-            width: 36px;
-            height: 36px;
-            background: linear-gradient(135deg, #4361ee 0%, #7c3aed 100%);
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: #fff;
-            font-weight: 600;
-            font-size: 0.9rem;
-        }
-
-        .user-details {
-            text-align: left;
-        }
-
-        .user-name {
-            font-weight: 600;
-            color: #212529;
-            font-size: 0.9rem;
-        }
-
-        .user-role {
-            font-size: 0.75rem;
-            color: #6c757d;
-        }
-
-        .logout-btn {
-            padding: 8px 16px;
-            background: transparent;
-            border: 1px solid #dee2e6;
-            border-radius: 6px;
-            color: #6c757d;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            font-size: 0.85rem;
-        }
-
-        .logout-btn:hover {
-            background: #f72585;
-            border-color: #f72585;
-            color: #fff;
-        }
-
-        /* Main Content Area */
-        .main-content-area {
-            flex: 1;
-            padding: 30px;
-            background: #f0f2f5;
-        }
-
-        .page-title {
-            margin-bottom: 20px;
-            display: flex;
-            align-items: center;
-            gap: 16px;
-        }
-
-        .page-title h1 {
-            font-size: 1.75rem;
-            color: #212529;
-            margin: 0;
-        }
-
-        .back-btn {
-            padding: 8px 16px;
-            background: #fff;
-            border: 1px solid #dee2e6;
-            border-radius: 6px;
-            color: #6c757d;
-            text-decoration: none;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            transition: all 0.3s ease;
-        }
-
-        .back-btn:hover {
-            background: #4361ee;
-            border-color: #4361ee;
-            color: #fff;
-        }
-
-        /* Search Container */
-        .search-container {
-            background: #fff;
-            border-radius: 12px;
-            overflow: hidden;
-            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.06);
-            height: calc(100vh - 180px);
-        }
-
-        .iframe-container {
-            width: 100%;
-            height: 100%;
-            border: none;
-        }
-
-        /* Info Container Styles */
+        /* 信息卡片 */
         .info-container {
             display: flex;
             justify-content: center;
             align-items: center;
-            height: calc(100vh - 180px);
+            min-height: calc(100vh - 200px);
         }
 
         .info-card {
-            background: #fff;
-            border-radius: 12px;
-            padding: 40px;
-            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.06);
+            background: #ffffff;
+            border-radius: 16px;
+            padding: 48px;
+            box-shadow: 0 4px 24px rgba(0, 0, 0, 0.08);
             text-align: center;
             max-width: 500px;
             width: 100%;
         }
 
         .info-icon {
-            font-size: 3rem;
-            margin-bottom: 20px;
-            color: #4361ee;
+            font-size: 4rem;
+            margin-bottom: 24px;
         }
 
         .info-card h2 {
-            color: #212529;
-            margin-bottom: 20px;
+            color: #111827;
+            margin-bottom: 16px;
             font-size: 1.5rem;
+            font-weight: 600;
         }
 
         .info-message {
-            color: #6c757d;
-            margin-bottom: 30px;
-            line-height: 1.6;
+            color: #6b7280;
+            margin-bottom: 32px;
+            line-height: 1.7;
+            font-size: 15px;
+        }
+
+        .info-message strong {
+            color: #2563eb;
         }
 
         .external-link-btn {
-            display: inline-block;
-            padding: 14px 28px;
-            background: linear-gradient(135deg, #4361ee 0%, #7c3aed 100%);
-            color: white;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 14px 32px;
+            background: linear-gradient(135deg, #2563eb 0%, #7c3aed 100%);
+            color: #ffffff;
             text-decoration: none;
-            border-radius: 8px;
-            font-weight: 500;
+            border-radius: 10px;
+            font-weight: 600;
             font-size: 1rem;
-            transition: all 0.3s ease;
+            transition: all 0.2s ease;
             border: none;
             cursor: pointer;
-            margin-bottom: 20px;
+            margin-bottom: 24px;
         }
 
         .external-link-btn:hover {
             transform: translateY(-2px);
-            box-shadow: 0 6px 20px rgba(67, 97, 238, 0.4);
+            box-shadow: 0 8px 24px rgba(37, 99, 235, 0.4);
         }
 
         .info-note {
-            color: #6c757d;
-            font-size: 0.85rem;
-            line-height: 1.5;
+            color: #9ca3af;
+            font-size: 13px;
+            line-height: 1.6;
         }
 
-        /* Login Card Styles */
-        .login-prompt {
-            max-width: 500px;
-            margin: 15vh auto;
-            text-align: center;
-            padding: 3rem;
-            background: white;
-            border-radius: 8px;
-            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+        .info-note a {
+            color: #2563eb;
+            text-decoration: none;
         }
 
-        /* Responsive Design */
-        @media (max-width: 768px) {
-            .sidebar {
-                width: 0;
-                overflow: hidden;
-            }
-
-            .sidebar.mobile-open {
-                width: 260px;
-            }
-
-            .main-wrapper {
-                margin-left: 0;
-            }
-
-            .top-header {
-                padding: 12px 16px;
-            }
-
-            .user-info-section {
-                gap: 12px;
-            }
-
-            .login-time {
-                display: none;
-            }
-
-            .search-container {
-                height: calc(100vh - 140px);
-            }
+        .info-note a:hover {
+            text-decoration: underline;
         }
     </style>
 </head>
 <body>
 <div id="app">
     <!-- 未登录状态 -->
-    <div class="container" v-if="!isLoggedIn">
-        <div class="login-prompt">
-            <div class="header">
-                <h1 style="font-size: 2.5rem; margin-bottom: 1rem; color: var(--danger-color);">🔒</h1>
-                <h2 style="font-size: 1.75rem; margin-bottom: 1rem; color: var(--dark-text);">需要登录</h2>
-                <p class="welcome-message" style="font-size: 1.1rem;">请先登录以访问此页面</p>
-            </div>
-            <div style="margin-top: 2rem;">
-                <a class="btn btn-primary" href="/login" style="padding: 12px 30px; font-size: 16px;">前往登录</a>
-            </div>
-        </div>
-    </div>
+    <login-prompt v-if="!isLoggedIn"></login-prompt>
 
-    <!-- 已登录状态 - 带侧边栏布局 -->
+    <!-- 已登录状态 -->
     <div class="app-layout" v-else>
-        <!-- 左侧导航侧边栏 -->
-        <aside class="sidebar">
-            <div class="sidebar-header">
-                <div class="sidebar-logo">
-                    <div class="sidebar-logo-icon">📊</div>
-                    <span class="sidebar-logo-text">PaYiPa</span>
-                </div>
-            </div>
+        <app-sidebar active-page="dashboard" v-bind:user-info="userInfo"></app-sidebar>
 
-            <nav class="sidebar-nav">
-                <!-- 基础功能 -->
-                <div class="nav-section">
-                    <div class="nav-section-title">基础功能</div>
-                    <!-- Dashboard -->
-                    <a class="nav-item" href="/index">
-                        <span class="nav-item-icon">🏠</span>
-                        <span class="nav-item-text">Dashboard</span>
-                    </a>
-                    <!-- 聚合搜索 -->
-                    <a class="nav-item active" href="https://search.rhscz.eu/" target="_blank">
-                        <span class="nav-item-icon">🔍</span>
-                        <span class="nav-item-text">聚合搜索</span>
-                    </a>
-                    <!-- 任务管理 - 二级菜单 -->
-                    <div @click="toggleSubmenu('task')" class="nav-item">
-                        <span class="nav-item-icon">📋</span>
-                        <span class="nav-item-text">任务管理</span>
-                        <span :class="{ expanded: expandedMenus.task }" class="nav-item-arrow">▶</span>
-                    </div>
-                    <div :class="{ expanded: expandedMenus.task }" class="nav-submenu">
-                        <a class="nav-item" href="/task?nav=create-task">
-                            <span class="nav-item-text">新建任务</span>
-                        </a>
-                        <a class="nav-item" href="/task?nav=view-tasks">
-                            <span class="nav-item-text">查看任务</span>
-                        </a>
-                    </div>
-                    <!-- 数据查询 -->
-                    <a class="nav-item" href="/data">
-                        <span class="nav-item-icon">🔍</span>
-                        <span class="nav-item-text">数据查询</span>
-                    </a>
-                    <!-- AI 评论 -->
-                    <a class="nav-item" href="/ai_comment">
-                        <span class="nav-item-icon">🤖</span>
-                        <span class="nav-item-text">AI 评论</span>
-                    </a>
-                </div>
-
-                <!-- 系统管理 - 仅管理员可见 -->
-                <div class="nav-section" v-if="userInfo.is_superuser">
-                    <div class="nav-section-title">系统管理</div>
-                    <div @click="toggleSubmenu('system')" class="nav-item">
-                        <span class="nav-item-icon">⚙️</span>
-                        <span class="nav-item-text">系统管理</span>
-                        <span :class="{ expanded: expandedMenus.system }" class="nav-item-arrow">▶</span>
-                    </div>
-                    <div :class="{ expanded: expandedMenus.system }" class="nav-submenu">
-                        <div class="nav-item">
-                            <span class="nav-item-text">爬虫模块</span>
-                        </div>
-                        <div class="nav-item">
-                            <span class="nav-item-text">用户管理</span>
-                        </div>
-                        <a class="nav-item" href="/log_view">
-                            <span class="nav-item-text">日志查看</span>
-                        </a>
-                    </div>
-                </div>
-            </nav>
-        </aside>
-
-        <!-- 右侧主内容区 -->
         <div class="main-wrapper">
-            <!-- 顶部栏 -->
-            <header class="top-header">
-                <div class="user-info-section">
-                    <div class="login-time">
-                        <span class="login-time-icon">🕐</span>
-                        <span>登录时间: {{ loginTime }}</span>
-                    </div>
-                    <div class="user-profile">
-                        <div class="user-avatar">{{ userAvatar }}</div>
-                        <div class="user-details">
-                            <div class="user-name">{{ userInfo.full_name || userInfo.email }}</div>
-                            <div class="user-role">{{ userInfo.is_superuser ? '管理员' : '普通用户' }}</div>
-                        </div>
-                    </div>
-                    <button @click="logout" class="logout-btn">退出登录</button>
-                </div>
-            </header>
+            <app-header v-bind:login-time="loginTime" v-bind:user-info="userInfo"></app-header>
 
-            <!-- 主内容区域 -->
-            <main class="main-content-area">
-                <div class="page-title">
-                    <a class="back-btn" href="/index">
-                        <span>←</span>
-                        <span>返回</span>
-                    </a>
-                    <h1>🔍 外部搜索</h1>
-                </div>
+            <main class="main-content">
+                <page-header back-url="/index" icon="🔍" title="外部搜索"></page-header>
 
                 <!-- 提示信息 -->
                 <div class="info-container">
@@ -513,14 +107,16 @@
                         <div class="info-icon">🔍</div>
                         <h2>即将跳转到外部搜索网站</h2>
                         <p class="info-message">
-                            点击下方按钮将打开 <strong>https://search.rhscz.eu/</strong> 搜索网站。
+                            点击下方按钮将打开 <strong>https://search.rhscz.eu/</strong> 搜索网站。<br>
                             该网站将在新窗口中打开，不影响您当前的操作。
                         </p>
                         <a class="external-link-btn" href="https://search.rhscz.eu/" target="_blank">
-                            🌐 打开外部搜索网站
+                            <span>🌐</span>
+                            <span>打开外部搜索网站</span>
                         </a>
                         <p class="info-note">
-                            提示：您也可以直接点击"https://searx.space/"节点快速访问
+                            提示：您也可以直接访问 <a href="https://searx.space/"
+                                                     target="_blank">https://searx.space/</a> 选择其他节点
                         </p>
                     </div>
                 </div>
@@ -529,108 +125,38 @@
     </div>
 </div>
 
+<script src="/static/js/common.js"></script>
+<script src="/static/js/components.js"></script>
 <script>
-    const { createApp, ref, computed, onMounted } = Vue;
+    var createApp = Vue.createApp;
+    var ref = Vue.ref;
+    var onMounted = Vue.onMounted;
 
-    createApp({
-        setup() {
-            const isLoggedIn = ref(false);
-            const userInfo = ref({});
-            const loginTime = ref('');
-            const expandedMenus = ref({
-                task: false,
-                system: false
-            });
+    var app = createApp({
+        setup: function() {
+            var isLoggedIn = ref(false);
+            var userInfo = ref({});
+            var loginTime = ref('');
 
-            // 计算属性
-            const userAvatar = computed(() => {
-                const name = userInfo.value.full_name || userInfo.value.email || '';
-                return name.charAt(0).toUpperCase();
-            });
-
-            // 设置登录时间
-            const setLoginTime = () => {
-                const cached = localStorage.getItem('login_time');
-                if (cached) {
-                    loginTime.value = cached;
-                } else {
-                    const now = new Date();
-                    const timeStr = now.toLocaleString('zh-CN', {
-                        year: 'numeric',
-                        month: '2-digit',
-                        day: '2-digit',
-                        hour: '2-digit',
-                        minute: '2-digit'
-                    });
-                    loginTime.value = timeStr;
-                    localStorage.setItem('login_time', timeStr);
+            onMounted(async function() {
+                var result = await PaYiPa.Auth.checkAuth();
+                isLoggedIn.value = result.isLoggedIn;
+                userInfo.value = result.userInfo || {};
+                if (result.isLoggedIn) {
+                    loginTime.value = PaYiPa.Auth.getLoginTime();
                 }
-            };
-
-            // 切换子菜单
-            const toggleSubmenu = (menu) => {
-                expandedMenus.value[menu] = !expandedMenus.value[menu];
-            };
-
-            // 检查登录状态
-            const checkAuth = async () => {
-                const token = localStorage.getItem('access_token');
-                if (!token) {
-                    isLoggedIn.value = false;
-                    return;
-                }
-
-                try {
-                    const response = await fetch('/api/v1/login/test-token', {
-                        method: 'POST',
-                        headers: {
-                            'Authorization': `Bearer ${token}`,
-                            'Content-Type': 'application/json'
-                        }
-                    });
-
-                    if (response.ok) {
-                        const userData = await response.json();
-                        userInfo.value = userData;
-                        isLoggedIn.value = true;
-                        setLoginTime();
-                    } else {
-                        // Token无效，清除本地存储
-                        localStorage.removeItem('access_token');
-                        localStorage.removeItem('login_time');
-                        isLoggedIn.value = false;
-                        window.location.href = '/login';
-                    }
-                } catch (error) {
-                    console.error('认证检查失败:', error);
-                    isLoggedIn.value = false;
-                }
-            };
-
-            // 登出
-            const logout = () => {
-                localStorage.removeItem('access_token');
-                localStorage.removeItem('login_time');
-                isLoggedIn.value = false;
-                window.location.href = '/login';
-            };
-
-            onMounted(() => {
-                checkAuth();
             });
 
             return {
-                isLoggedIn,
-                userInfo,
-                userAvatar,
-                loginTime,
-                expandedMenus,
-                toggleSubmenu,
-                logout
+                isLoggedIn: isLoggedIn,
+                userInfo: userInfo,
+                loginTime: loginTime
             };
         }
-    }).mount('#app');
+    });
+
+    PaYiPaComponents.registerComponents(app);
+    app.mount('#app');
 </script>
 </body>
 </html>
-</file_content>
