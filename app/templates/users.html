@@ -1057,7 +1057,7 @@
                     userInfo.value = result.userInfo || {};
 
                     if (result.isLoggedIn) {
-                        loginTime.value = localStorage.getItem('login_time') || '';
+                        loginTime.value = PaYiPa.Auth.getLoginTime();
 
                         // 检查是否是管理员
                         if (result.userInfo && !result.userInfo.is_superuser) {

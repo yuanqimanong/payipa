@@ -870,7 +870,7 @@
                     userInfo.value = result.userInfo || {};
 
                     if (result.isLoggedIn) {
-                        loginTime.value = localStorage.getItem('login_time') || '';
+                        loginTime.value = PaYiPa.Auth.getLoginTime();
                         console.log('[Init] User logged in, fetching tasks...');
                         await fetchTasks();
                     } else {
