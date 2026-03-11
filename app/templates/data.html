@@ -1,122 +1,122 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-    <meta charset="UTF-8">
-    <meta content="width=device-width, initial-scale=1.0" name="viewport">
+    <meta charset="UTF-8"/>
+    <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
     <title>数据查询 - PaYiPa</title>
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
-    <link href="/static/css/style.css" rel="stylesheet">
+    <link href="/static/css/style.css" rel="stylesheet"/>
     <style>
         /* 页面特有样式 */
         .configs-grid {
-            display: grid;
-            grid-template-columns: repeat(4, 1fr);
-            gap: 20px;
+          display: grid;
+          grid-template-columns: repeat(4, 1fr);
+          gap: 20px;
         }
 
         .config-card {
-            background: #ffffff;
-            border-radius: 10px;
-            padding: 24px;
-            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-            display: flex;
-            flex-direction: column;
-            border: 1px solid #e5e7eb;
-            transition: all 0.2s ease;
+          background: #ffffff;
+          border-radius: 10px;
+          padding: 24px;
+          box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+          display: flex;
+          flex-direction: column;
+          border: 1px solid #e5e7eb;
+          transition: all 0.2s ease;
         }
 
         .config-card:hover {
-            border-color: #2563eb;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-            transform: translateY(-2px);
+          border-color: #2563eb;
+          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+          transform: translateY(-2px);
         }
 
         .config-header {
-            display: flex;
-            align-items: center;
-            gap: 14px;
-            margin-bottom: 16px;
+          display: flex;
+          align-items: center;
+          gap: 14px;
+          margin-bottom: 16px;
         }
 
         .config-icon {
-            width: 48px;
-            height: 48px;
-            background: linear-gradient(135deg, #2563eb, #7c3aed);
-            border-radius: 10px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 22px;
-            flex-shrink: 0;
+          width: 48px;
+          height: 48px;
+          background: linear-gradient(135deg, #2563eb, #7c3aed);
+          border-radius: 10px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 22px;
+          flex-shrink: 0;
         }
 
         .config-title {
-            flex: 1;
-            font-size: 1rem;
-            font-weight: 600;
-            color: #111827;
-            line-height: 1.4;
+          flex: 1;
+          font-size: 1rem;
+          font-weight: 600;
+          color: #111827;
+          line-height: 1.4;
         }
 
         .config-info {
-            flex: 1;
-            color: #6b7280;
-            font-size: 13px;
-            margin-bottom: 16px;
+          flex: 1;
+          color: #6b7280;
+          font-size: 13px;
+          margin-bottom: 16px;
         }
 
         .config-info p {
-            margin: 4px 0;
-            display: flex;
-            align-items: center;
-            gap: 6px;
+          margin: 4px 0;
+          display: flex;
+          align-items: center;
+          gap: 6px;
         }
 
         .config-footer {
-            margin-top: auto;
-            padding-top: 16px;
-            border-top: 1px solid #e5e7eb;
+          margin-top: auto;
+          padding-top: 16px;
+          border-top: 1px solid #e5e7eb;
         }
 
         .enter-btn {
-            width: 100%;
-            padding: 10px 16px;
-            background: linear-gradient(135deg, #2563eb, #1d4ed8);
-            border: none;
-            border-radius: 8px;
-            color: #ffffff;
-            font-size: 14px;
-            font-weight: 500;
-            cursor: pointer;
-            transition: all 0.2s ease;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 6px;
+          width: 100%;
+          padding: 10px 16px;
+          background: linear-gradient(135deg, #2563eb, #1d4ed8);
+          border: none;
+          border-radius: 8px;
+          color: #ffffff;
+          font-size: 14px;
+          font-weight: 500;
+          cursor: pointer;
+          transition: all 0.2s ease;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 6px;
         }
 
         .enter-btn:hover {
-            transform: translateY(-1px);
-            box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3);
+          transform: translateY(-1px);
+          box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3);
         }
 
         /* 响应式 */
         @media (max-width: 1400px) {
-            .configs-grid {
-                grid-template-columns: repeat(3, 1fr);
-            }
+          .configs-grid {
+            grid-template-columns: repeat(3, 1fr);
+          }
         }
 
         @media (max-width: 1100px) {
-            .configs-grid {
-                grid-template-columns: repeat(2, 1fr);
-            }
+          .configs-grid {
+            grid-template-columns: repeat(2, 1fr);
+          }
         }
 
         @media (max-width: 768px) {
-            .configs-grid {
-                grid-template-columns: 1fr;
-            }
+          .configs-grid {
+            grid-template-columns: 1fr;
+          }
         }
     </style>
 </head>
@@ -143,11 +143,7 @@
 
                 <!-- 配置卡片列表 -->
                 <div class="configs-grid" v-else>
-                    <div
-                            class="config-card"
-                            v-bind:key="config.id"
-                            v-for="config in dataConfigs"
-                    >
+                    <div class="config-card" v-bind:key="config.id" v-for="config in dataConfigs">
                         <div class="config-header">
                             <div class="config-icon">📊</div>
                             <div class="config-title">{{ config.name }}</div>
@@ -163,10 +159,7 @@
                             </p>
                         </div>
                         <div class="config-footer">
-                            <button
-                                    class="enter-btn"
-                                    v-on:click="enterConfig(config.id)"
-                            >
+                            <button class="enter-btn" v-on:click="enterConfig(config.id)">
                                 <span>进入查询</span>
                                 <span>→</span>
                             </button>
@@ -186,58 +179,58 @@
     var onMounted = Vue.onMounted;
 
     var app = createApp({
-        setup: function() {
-            var isLoggedIn = ref(false);
-            var userInfo = ref({});
-            var loginTime = ref('');
-            var loading = ref(true);
-            var dataConfigs = ref([]);
+      setup: function () {
+        var isLoggedIn = ref(false);
+        var userInfo = ref({});
+        var loginTime = ref("");
+        var loading = ref(true);
+        var dataConfigs = ref([]);
 
-            var formatDate = function(dateStr) {
-                return PaYiPa.Utils.formatDate(dateStr);
-            };
+        var formatDate = function (dateStr) {
+          return PaYiPa.Utils.formatDate(dateStr);
+        };
 
-            var enterConfig = function(configId) {
-                window.location.href = '/data_query?config_id=' + configId;
-            };
+        var enterConfig = function (configId) {
+          window.location.href = "/data_query?config_id=" + configId;
+        };
 
-            var loadDataConfigs = async function() {
-                try {
-                    loading.value = true;
-                    var result = await PaYiPa.API.get('/api/v1/datas/configs');
-                    dataConfigs.value = (result && result.data) ? result.data : [];
-                } catch (e) {
-                    console.error('加载数据配置失败:', e);
-                    dataConfigs.value = [];
-                } finally {
-                    loading.value = false;
-                }
-            };
+        var loadDataConfigs = async function () {
+          try {
+            loading.value = true;
+            var result = await PaYiPa.API.get("/api/v1/datas/configs");
+            dataConfigs.value = result && result.data ? result.data : [];
+          } catch (e) {
+            console.error("加载数据配置失败:", e);
+            dataConfigs.value = [];
+          } finally {
+            loading.value = false;
+          }
+        };
 
-            onMounted(async function() {
-                var result = await PaYiPa.Auth.checkAuth();
-                isLoggedIn.value = result.isLoggedIn;
-                userInfo.value = result.userInfo || {};
-                if (result.isLoggedIn) {
-                    loginTime.value = PaYiPa.Auth.getLoginTime();
-                    await loadDataConfigs();
-                }
-            });
+        onMounted(async function () {
+          var result = await PaYiPa.Auth.checkAuth();
+          isLoggedIn.value = result.isLoggedIn;
+          userInfo.value = result.userInfo || {};
+          if (result.isLoggedIn) {
+            loginTime.value = PaYiPa.Auth.getLoginTime();
+            await loadDataConfigs();
+          }
+        });
 
-            return {
-                isLoggedIn: isLoggedIn,
-                userInfo: userInfo,
-                loginTime: loginTime,
-                loading: loading,
-                dataConfigs: dataConfigs,
-                formatDate: formatDate,
-                enterConfig: enterConfig
-            };
-        }
+        return {
+          isLoggedIn: isLoggedIn,
+          userInfo: userInfo,
+          loginTime: loginTime,
+          loading: loading,
+          dataConfigs: dataConfigs,
+          formatDate: formatDate,
+          enterConfig: enterConfig,
+        };
+      },
     });
 
     PaYiPaComponents.registerComponents(app);
-    app.mount('#app');
+    app.mount("#app");
 </script>
 </body>
 </html>

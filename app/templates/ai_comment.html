@@ -1,68 +1,72 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-    <meta charset="UTF-8">
-    <meta content="width=device-width, initial-scale=1.0" name="viewport">
+    <meta charset="UTF-8"/>
+    <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
     <title>AI 评论 - PaYiPa</title>
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
-    <link href="/static/css/style.css" rel="stylesheet">
+    <link href="/static/css/style.css" rel="stylesheet"/>
     <style>
         /* iframe 容器 */
         .iframe-wrapper {
-            background: #ffffff;
-            border-radius: 12px;
-            overflow: hidden;
-            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
-            height: calc(100vh - 180px);
-            position: relative;
+          background: #ffffff;
+          border-radius: 12px;
+          overflow: hidden;
+          box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+          height: calc(100vh - 180px);
+          position: relative;
         }
 
         .iframe-container {
-            width: 100%;
-            height: 100%;
-            border: none;
+          width: 100%;
+          height: 100%;
+          border: none;
         }
 
         /* 加载状态 */
         .loading-overlay {
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background: rgba(255, 255, 255, 0.9);
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            z-index: 10;
+          position: absolute;
+          top: 0;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          background: rgba(255, 255, 255, 0.9);
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          z-index: 10;
         }
 
         .spinner {
-            width: 48px;
-            height: 48px;
-            border: 4px solid #e5e7eb;
-            border-top: 4px solid #2563eb;
-            border-radius: 50%;
-            animation: spin 1s linear infinite;
-            margin-bottom: 16px;
+          width: 48px;
+          height: 48px;
+          border: 4px solid #e5e7eb;
+          border-top: 4px solid #2563eb;
+          border-radius: 50%;
+          animation: spin 1s linear infinite;
+          margin-bottom: 16px;
         }
 
         .loading-text {
-            color: #6b7280;
-            font-size: 14px;
+          color: #6b7280;
+          font-size: 14px;
         }
 
         @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
+          0% {
+            transform: rotate(0deg);
+          }
+          100% {
+            transform: rotate(360deg);
+          }
         }
 
         /* 响应式 */
         @media (max-width: 768px) {
-            .iframe-wrapper {
-                height: calc(100vh - 140px);
-            }
+          .iframe-wrapper {
+            height: calc(100vh - 140px);
+          }
         }
     </style>
 </head>
@@ -82,13 +86,8 @@
                 <page-header back-url="/index" icon="🤖" title="AI 评论"></page-header>
 
                 <div class="iframe-wrapper">
-                    <iframe
-                            class="iframe-container"
-                            frameborder="0"
-                            src="http://192.168.14.60:23333/index"
-                            v-on:error="onIframeError"
-                            v-on:load="onIframeLoad"
-                    ></iframe>
+                    <iframe class="iframe-container" frameborder="0" src="http://192.168.14.60:23333/index"
+                            v-on:error="onIframeError" v-on:load="onIframeLoad"></iframe>
 
                     <!-- 加载提示 -->
                     <div class="loading-overlay" v-if="loading">
@@ -109,51 +108,51 @@
     var onMounted = Vue.onMounted;
 
     var app = createApp({
-        setup: function() {
-            var isLoggedIn = ref(false);
-            var userInfo = ref({});
-            var loginTime = ref('');
-            var loading = ref(true);
+      setup: function () {
+        var isLoggedIn = ref(false);
+        var userInfo = ref({});
+        var loginTime = ref("");
+        var loading = ref(true);
 
-            var onIframeLoad = function() {
-                console.log('iframe 加载完成');
-                loading.value = false;
-            };
+        var onIframeLoad = function () {
+          console.log("iframe 加载完成");
+          loading.value = false;
+        };
 
-            var onIframeError = function() {
-                console.error('iframe 加载失败');
-                loading.value = false;
-            };
+        var onIframeError = function () {
+          console.error("iframe 加载失败");
+          loading.value = false;
+        };
 
-            onMounted(async function() {
-                var result = await PaYiPa.Auth.checkAuth();
-                isLoggedIn.value = result.isLoggedIn;
-                userInfo.value = result.userInfo || {};
-                if (result.isLoggedIn) {
-                    loginTime.value = PaYiPa.Auth.getLoginTime();
-                }
+        onMounted(async function () {
+          var result = await PaYiPa.Auth.checkAuth();
+          isLoggedIn.value = result.isLoggedIn;
+          userInfo.value = result.userInfo || {};
+          if (result.isLoggedIn) {
+            loginTime.value = PaYiPa.Auth.getLoginTime();
+          }
 
-                // 设置超时，防止 iframe 加载过久
-                setTimeout(function() {
-                    if (loading.value) {
-                        loading.value = false;
-                    }
-                }, 5000);
-            });
+          // 设置超时，防止 iframe 加载过久
+          setTimeout(function () {
+            if (loading.value) {
+              loading.value = false;
+            }
+          }, 5000);
+        });
 
-            return {
-                isLoggedIn: isLoggedIn,
-                userInfo: userInfo,
-                loginTime: loginTime,
-                loading: loading,
-                onIframeLoad: onIframeLoad,
-                onIframeError: onIframeError
-            };
-        }
+        return {
+          isLoggedIn: isLoggedIn,
+          userInfo: userInfo,
+          loginTime: loginTime,
+          loading: loading,
+          onIframeLoad: onIframeLoad,
+          onIframeError: onIframeError,
+        };
+      },
     });
 
     PaYiPaComponents.registerComponents(app);
-    app.mount('#app');
+    app.mount("#app");
 </script>
 </body>
 </html>

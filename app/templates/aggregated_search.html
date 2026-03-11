@@ -1,88 +1,88 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-    <meta charset="UTF-8">
-    <meta content="width=device-width, initial-scale=1.0" name="viewport">
+    <meta charset="UTF-8"/>
+    <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
     <title>外部搜索 - PaYiPa</title>
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
-    <link href="/static/css/style.css" rel="stylesheet">
+    <link href="/static/css/style.css" rel="stylesheet"/>
     <style>
         /* 信息卡片 */
         .info-container {
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            min-height: calc(100vh - 200px);
+          display: flex;
+          justify-content: center;
+          align-items: center;
+          min-height: calc(100vh - 200px);
         }
 
         .info-card {
-            background: #ffffff;
-            border-radius: 16px;
-            padding: 48px;
-            box-shadow: 0 4px 24px rgba(0, 0, 0, 0.08);
-            text-align: center;
-            max-width: 500px;
-            width: 100%;
+          background: #ffffff;
+          border-radius: 16px;
+          padding: 48px;
+          box-shadow: 0 4px 24px rgba(0, 0, 0, 0.08);
+          text-align: center;
+          max-width: 500px;
+          width: 100%;
         }
 
         .info-icon {
-            font-size: 4rem;
-            margin-bottom: 24px;
+          font-size: 4rem;
+          margin-bottom: 24px;
         }
 
         .info-card h2 {
-            color: #111827;
-            margin-bottom: 16px;
-            font-size: 1.5rem;
-            font-weight: 600;
+          color: #111827;
+          margin-bottom: 16px;
+          font-size: 1.5rem;
+          font-weight: 600;
         }
 
         .info-message {
-            color: #6b7280;
-            margin-bottom: 32px;
-            line-height: 1.7;
-            font-size: 15px;
+          color: #6b7280;
+          margin-bottom: 32px;
+          line-height: 1.7;
+          font-size: 15px;
         }
 
         .info-message strong {
-            color: #2563eb;
+          color: #2563eb;
         }
 
         .external-link-btn {
-            display: inline-flex;
-            align-items: center;
-            gap: 8px;
-            padding: 14px 32px;
-            background: linear-gradient(135deg, #2563eb 0%, #7c3aed 100%);
-            color: #ffffff;
-            text-decoration: none;
-            border-radius: 10px;
-            font-weight: 600;
-            font-size: 1rem;
-            transition: all 0.2s ease;
-            border: none;
-            cursor: pointer;
-            margin-bottom: 24px;
+          display: inline-flex;
+          align-items: center;
+          gap: 8px;
+          padding: 14px 32px;
+          background: linear-gradient(135deg, #2563eb 0%, #7c3aed 100%);
+          color: #ffffff;
+          text-decoration: none;
+          border-radius: 10px;
+          font-weight: 600;
+          font-size: 1rem;
+          transition: all 0.2s ease;
+          border: none;
+          cursor: pointer;
+          margin-bottom: 24px;
         }
 
         .external-link-btn:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 8px 24px rgba(37, 99, 235, 0.4);
+          transform: translateY(-2px);
+          box-shadow: 0 8px 24px rgba(37, 99, 235, 0.4);
         }
 
         .info-note {
-            color: #9ca3af;
-            font-size: 13px;
-            line-height: 1.6;
+          color: #9ca3af;
+          font-size: 13px;
+          line-height: 1.6;
         }
 
         .info-note a {
-            color: #2563eb;
-            text-decoration: none;
+          color: #2563eb;
+          text-decoration: none;
         }
 
         .info-note a:hover {
-            text-decoration: underline;
+          text-decoration: underline;
         }
     </style>
 </head>
@@ -107,17 +107,15 @@
                         <div class="info-icon">🔍</div>
                         <h2>即将跳转到外部搜索网站</h2>
                         <p class="info-message">
-                            点击下方按钮将打开 <strong>https://search.rhscz.eu/</strong> 搜索网站。<br>
+                            点击下方按钮将打开 <strong>https://search.rhscz.eu/</strong> 搜索网站。<br/>
                             该网站将在新窗口中打开，不影响您当前的操作。
                         </p>
                         <a class="external-link-btn" href="https://search.rhscz.eu/" target="_blank">
                             <span>🌐</span>
                             <span>打开外部搜索网站</span>
                         </a>
-                        <p class="info-note">
-                            提示：您也可以直接访问 <a href="https://searx.space/"
-                                                     target="_blank">https://searx.space/</a> 选择其他节点
-                        </p>
+                        <p class="info-note">提示：您也可以直接访问 <a href="https://searx.space/" target="_blank">https://searx.space/</a>
+                            选择其他节点</p>
                     </div>
                 </div>
             </main>
@@ -133,30 +131,30 @@
     var onMounted = Vue.onMounted;
 
     var app = createApp({
-        setup: function() {
-            var isLoggedIn = ref(false);
-            var userInfo = ref({});
-            var loginTime = ref('');
+      setup: function () {
+        var isLoggedIn = ref(false);
+        var userInfo = ref({});
+        var loginTime = ref("");
 
-            onMounted(async function() {
-                var result = await PaYiPa.Auth.checkAuth();
-                isLoggedIn.value = result.isLoggedIn;
-                userInfo.value = result.userInfo || {};
-                if (result.isLoggedIn) {
-                    loginTime.value = PaYiPa.Auth.getLoginTime();
-                }
-            });
+        onMounted(async function () {
+          var result = await PaYiPa.Auth.checkAuth();
+          isLoggedIn.value = result.isLoggedIn;
+          userInfo.value = result.userInfo || {};
+          if (result.isLoggedIn) {
+            loginTime.value = PaYiPa.Auth.getLoginTime();
+          }
+        });
 
-            return {
-                isLoggedIn: isLoggedIn,
-                userInfo: userInfo,
-                loginTime: loginTime
-            };
-        }
+        return {
+          isLoggedIn: isLoggedIn,
+          userInfo: userInfo,
+          loginTime: loginTime,
+        };
+      },
     });
 
     PaYiPaComponents.registerComponents(app);
-    app.mount('#app');
+    app.mount("#app");
 </script>
 </body>
 </html>

@@ -1,444 +1,470 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-    <meta charset="UTF-8">
-    <meta content="width=device-width, initial-scale=1.0" name="viewport">
+    <meta charset="UTF-8"/>
+    <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
     <title>用户管理 - PaYiPa</title>
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
-    <link href="/static/css/style.css" rel="stylesheet">
+    <link href="/static/css/style.css" rel="stylesheet"/>
     <style>
         /* 用户管理控件 */
         .user-controls {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            flex-wrap: wrap;
-            gap: 1rem;
-            margin-bottom: 24px;
-            background: #ffffff;
-            padding: 20px;
-            border-radius: 12px;
-            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.06);
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          flex-wrap: wrap;
+          gap: 1rem;
+          margin-bottom: 24px;
+          background: #ffffff;
+          padding: 20px;
+          border-radius: 12px;
+          box-shadow: 0 4px 20px rgba(0, 0, 0, 0.06);
         }
 
         .search-filter {
-            display: flex;
-            gap: 1rem;
-            flex-wrap: wrap;
-            align-items: center;
+          display: flex;
+          gap: 1rem;
+          flex-wrap: wrap;
+          align-items: center;
         }
 
         .search-input {
-            min-width: 250px;
-            padding: 10px 15px;
-            border: 1px solid #d1d5db;
-            border-radius: 8px;
-            font-size: 14px;
+          min-width: 250px;
+          padding: 10px 15px;
+          border: 1px solid #d1d5db;
+          border-radius: 8px;
+          font-size: 14px;
         }
 
         .search-input:focus {
-            outline: none;
-            border-color: #2563eb;
-            box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.2);
+          outline: none;
+          border-color: #2563eb;
+          box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.2);
         }
 
         .filter-select {
-            min-width: 150px;
-            padding: 10px 15px;
-            border: 1px solid #d1d5db;
-            border-radius: 8px;
-            font-size: 14px;
-            background: white;
+          min-width: 150px;
+          padding: 10px 15px;
+          border: 1px solid #d1d5db;
+          border-radius: 8px;
+          font-size: 14px;
+          background: white;
         }
 
         .btn-create {
-            background: linear-gradient(135deg, #2563eb 0%, #7c3aed 100%);
-            color: white;
-            border: none;
-            padding: 10px 20px;
-            border-radius: 8px;
-            font-size: 14px;
-            font-weight: 500;
-            cursor: pointer;
-            transition: all 0.2s ease;
-            display: flex;
-            align-items: center;
-            gap: 8px;
+          background: linear-gradient(135deg, #2563eb 0%, #7c3aed 100%);
+          color: white;
+          border: none;
+          padding: 10px 20px;
+          border-radius: 8px;
+          font-size: 14px;
+          font-weight: 500;
+          cursor: pointer;
+          transition: all 0.2s ease;
+          display: flex;
+          align-items: center;
+          gap: 8px;
         }
 
         .btn-create:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 4px 15px rgba(37, 99, 235, 0.4);
+          transform: translateY(-2px);
+          box-shadow: 0 4px 15px rgba(37, 99, 235, 0.4);
         }
 
         /* 用户表格 */
         .users-table-container {
-            background: #ffffff;
-            border-radius: 12px;
-            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.06);
-            overflow: hidden;
+          background: #ffffff;
+          border-radius: 12px;
+          box-shadow: 0 4px 20px rgba(0, 0, 0, 0.06);
+          overflow: hidden;
         }
 
         .users-table {
-            width: 100%;
-            border-collapse: collapse;
+          width: 100%;
+          border-collapse: collapse;
         }
 
         .users-table th {
-            background-color: #f9fafb;
-            padding: 16px 20px;
-            text-align: left;
-            font-weight: 600;
-            color: #111827;
-            text-transform: uppercase;
-            font-size: 0.8rem;
-            letter-spacing: 0.5px;
-            border-bottom: 1px solid #d1d5db;
+          background-color: #f9fafb;
+          padding: 16px 20px;
+          text-align: left;
+          font-weight: 600;
+          color: #111827;
+          text-transform: uppercase;
+          font-size: 0.8rem;
+          letter-spacing: 0.5px;
+          border-bottom: 1px solid #d1d5db;
         }
 
         .users-table td {
-            padding: 16px 20px;
-            border-bottom: 1px solid #e5e7eb;
+          padding: 16px 20px;
+          border-bottom: 1px solid #e5e7eb;
         }
 
         .users-table tr:last-child td {
-            border-bottom: none;
+          border-bottom: none;
         }
 
         .users-table tr:hover {
-            background-color: #f9fafb;
+          background-color: #f9fafb;
         }
 
         .user-avatar-cell {
-            display: flex;
-            align-items: center;
-            gap: 12px;
+          display: flex;
+          align-items: center;
+          gap: 12px;
         }
 
         .user-avatar-small {
-            width: 40px;
-            height: 40px;
-            border-radius: 50%;
-            background: linear-gradient(135deg, #2563eb 0%, #7c3aed 100%);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: white;
-            font-weight: 600;
-            font-size: 0.9rem;
+          width: 40px;
+          height: 40px;
+          border-radius: 50%;
+          background: linear-gradient(135deg, #2563eb 0%, #7c3aed 100%);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          color: white;
+          font-weight: 600;
+          font-size: 0.9rem;
         }
 
         .user-info-text {
-            display: flex;
-            flex-direction: column;
+          display: flex;
+          flex-direction: column;
         }
 
         .user-full-name {
-            font-weight: 600;
-            color: #111827;
-            font-size: 0.95rem;
+          font-weight: 600;
+          color: #111827;
+          font-size: 0.95rem;
         }
 
         .user-email {
-            color: #6b7280;
-            font-size: 0.85rem;
+          color: #6b7280;
+          font-size: 0.85rem;
         }
 
         .role-badge {
-            display: inline-block;
-            padding: 4px 12px;
-            border-radius: 20px;
-            font-size: 0.8rem;
-            font-weight: 500;
+          display: inline-block;
+          padding: 4px 12px;
+          border-radius: 20px;
+          font-size: 0.8rem;
+          font-weight: 500;
         }
 
-        .role-admin { background-color: #dbeafe; color: #1e40af; }
-        .role-user { background-color: #dcfce7; color: #166534; }
+        .role-admin {
+          background-color: #dbeafe;
+          color: #1e40af;
+        }
+        .role-user {
+          background-color: #dcfce7;
+          color: #166534;
+        }
 
         .status-badge {
-            display: inline-block;
-            padding: 4px 12px;
-            border-radius: 20px;
-            font-size: 0.8rem;
-            font-weight: 500;
+          display: inline-block;
+          padding: 4px 12px;
+          border-radius: 20px;
+          font-size: 0.8rem;
+          font-weight: 500;
         }
 
-        .status-active { background-color: #d1fae5; color: #065f46; }
-        .status-inactive { background-color: #fee2e2; color: #991b1b; }
+        .status-active {
+          background-color: #d1fae5;
+          color: #065f46;
+        }
+        .status-inactive {
+          background-color: #fee2e2;
+          color: #991b1b;
+        }
 
         .action-buttons {
-            display: flex;
-            gap: 8px;
+          display: flex;
+          gap: 8px;
         }
 
         .btn-action {
-            padding: 6px 12px;
-            border: none;
-            border-radius: 6px;
-            font-size: 0.85rem;
-            cursor: pointer;
-            transition: all 0.2s ease;
+          padding: 6px 12px;
+          border: none;
+          border-radius: 6px;
+          font-size: 0.85rem;
+          cursor: pointer;
+          transition: all 0.2s ease;
         }
 
-        .btn-edit { background: #dbeafe; color: #1e40af; }
-        .btn-edit:hover { background: #bfdbfe; }
-        .btn-delete { background: #fee2e2; color: #dc2626; }
-        .btn-delete:hover { background: #fecaca; }
+        .btn-edit {
+          background: #dbeafe;
+          color: #1e40af;
+        }
+        .btn-edit:hover {
+          background: #bfdbfe;
+        }
+        .btn-delete {
+          background: #fee2e2;
+          color: #dc2626;
+        }
+        .btn-delete:hover {
+          background: #fecaca;
+        }
 
         /* 分页 */
         .pagination {
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            gap: 12px;
-            margin-top: 24px;
-            padding: 20px;
+          display: flex;
+          justify-content: center;
+          align-items: center;
+          gap: 12px;
+          margin-top: 24px;
+          padding: 20px;
         }
 
         .pagination button {
-            padding: 8px 16px;
-            border: 1px solid #d1d5db;
-            background: white;
-            border-radius: 6px;
-            cursor: pointer;
-            transition: all 0.2s ease;
+          padding: 8px 16px;
+          border: 1px solid #d1d5db;
+          background: white;
+          border-radius: 6px;
+          cursor: pointer;
+          transition: all 0.2s ease;
         }
 
         .pagination button:hover:not(:disabled) {
-            background: #2563eb;
-            color: white;
-            border-color: #2563eb;
+          background: #2563eb;
+          color: white;
+          border-color: #2563eb;
         }
 
         .pagination button:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
+          opacity: 0.5;
+          cursor: not-allowed;
         }
 
         .pagination-info {
-            color: #6b7280;
-            font-size: 0.9rem;
+          color: #6b7280;
+          font-size: 0.9rem;
         }
 
         /* 模态框 */
         .modal-overlay {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background-color: rgba(0, 0, 0, 0.5);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            z-index: 1000;
+          position: fixed;
+          top: 0;
+          left: 0;
+          width: 100%;
+          height: 100%;
+          background-color: rgba(0, 0, 0, 0.5);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          z-index: 1000;
         }
 
         .modal-content {
-            background: white;
-            border-radius: 12px;
-            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
-            width: 90%;
-            max-width: 500px;
-            max-height: 90vh;
-            overflow-y: auto;
-            position: relative;
+          background: white;
+          border-radius: 12px;
+          box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+          width: 90%;
+          max-width: 500px;
+          max-height: 90vh;
+          overflow-y: auto;
+          position: relative;
         }
 
         .modal-header {
-            padding: 24px 24px 0;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
+          padding: 24px 24px 0;
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
         }
 
         .modal-title {
-            font-size: 1.5rem;
-            font-weight: 600;
-            color: #111827;
+          font-size: 1.5rem;
+          font-weight: 600;
+          color: #111827;
         }
 
         .modal-close {
-            font-size: 1.8rem;
-            cursor: pointer;
-            color: #9ca3af;
-            background: none;
-            border: none;
+          font-size: 1.8rem;
+          cursor: pointer;
+          color: #9ca3af;
+          background: none;
+          border: none;
         }
 
         .modal-close:hover {
-            color: #111827;
+          color: #111827;
         }
 
         .modal-body {
-            padding: 24px;
+          padding: 24px;
         }
 
         .form-group {
-            margin-bottom: 20px;
+          margin-bottom: 20px;
         }
 
         .form-label {
-            display: block;
-            margin-bottom: 8px;
-            font-weight: 600;
-            color: #111827;
+          display: block;
+          margin-bottom: 8px;
+          font-weight: 600;
+          color: #111827;
         }
 
         .form-input {
-            width: 100%;
-            padding: 12px 15px;
-            border: 1px solid #d1d5db;
-            border-radius: 8px;
-            font-size: 15px;
-            transition: all 0.2s ease;
-            box-sizing: border-box;
+          width: 100%;
+          padding: 12px 15px;
+          border: 1px solid #d1d5db;
+          border-radius: 8px;
+          font-size: 15px;
+          transition: all 0.2s ease;
+          box-sizing: border-box;
         }
 
         .form-input:focus {
-            outline: none;
-            border-color: #2563eb;
-            box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.2);
+          outline: none;
+          border-color: #2563eb;
+          box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.2);
         }
 
         .form-checkbox {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            margin-top: 8px;
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          margin-top: 8px;
         }
 
         .form-checkbox input {
-            width: 18px;
-            height: 18px;
+          width: 18px;
+          height: 18px;
         }
 
         .form-actions {
-            display: flex;
-            gap: 12px;
-            justify-content: flex-end;
-            margin-top: 24px;
-            padding-top: 20px;
-            border-top: 1px solid #e5e7eb;
+          display: flex;
+          gap: 12px;
+          justify-content: flex-end;
+          margin-top: 24px;
+          padding-top: 20px;
+          border-top: 1px solid #e5e7eb;
         }
 
         .btn-submit {
-            background: linear-gradient(135deg, #2563eb 0%, #7c3aed 100%);
-            color: white;
-            border: none;
-            padding: 12px 24px;
-            border-radius: 8px;
-            font-size: 14px;
-            font-weight: 500;
-            cursor: pointer;
-            transition: all 0.2s ease;
+          background: linear-gradient(135deg, #2563eb 0%, #7c3aed 100%);
+          color: white;
+          border: none;
+          padding: 12px 24px;
+          border-radius: 8px;
+          font-size: 14px;
+          font-weight: 500;
+          cursor: pointer;
+          transition: all 0.2s ease;
         }
 
         .btn-submit:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 4px 15px rgba(37, 99, 235, 0.4);
+          transform: translateY(-2px);
+          box-shadow: 0 4px 15px rgba(37, 99, 235, 0.4);
         }
 
         .btn-submit:disabled {
-            opacity: 0.6;
-            cursor: not-allowed;
-            transform: none;
+          opacity: 0.6;
+          cursor: not-allowed;
+          transform: none;
         }
 
         .btn-cancel {
-            background: #f3f4f6;
-            color: #6b7280;
-            border: 1px solid #d1d5db;
-            padding: 12px 24px;
-            border-radius: 8px;
-            font-size: 14px;
-            font-weight: 500;
-            cursor: pointer;
-            transition: all 0.2s ease;
+          background: #f3f4f6;
+          color: #6b7280;
+          border: 1px solid #d1d5db;
+          padding: 12px 24px;
+          border-radius: 8px;
+          font-size: 14px;
+          font-weight: 500;
+          cursor: pointer;
+          transition: all 0.2s ease;
         }
 
         .btn-cancel:hover {
-            background: #e5e7eb;
+          background: #e5e7eb;
         }
 
         /* 提示框 */
         .alert {
-            padding: 12px 20px;
-            border-radius: 8px;
-            margin-bottom: 20px;
-            font-size: 0.9rem;
+          padding: 12px 20px;
+          border-radius: 8px;
+          margin-bottom: 20px;
+          font-size: 0.9rem;
         }
 
         .alert-success {
-            background: #d1fae5;
-            color: #065f46;
-            border: 1px solid #a7f3d0;
+          background: #d1fae5;
+          color: #065f46;
+          border: 1px solid #a7f3d0;
         }
 
         .alert-error {
-            background: #fee2e2;
-            color: #991b1b;
-            border: 1px solid #fecaca;
+          background: #fee2e2;
+          color: #991b1b;
+          border: 1px solid #fecaca;
         }
 
         /* 空状态 */
         .empty-state {
-            text-align: center;
-            padding: 60px 20px;
-            color: #6b7280;
+          text-align: center;
+          padding: 60px 20px;
+          color: #6b7280;
         }
 
         .empty-state-icon {
-            font-size: 3rem;
-            margin-bottom: 16px;
+          font-size: 3rem;
+          margin-bottom: 16px;
         }
 
         /* 加载状态 */
         .loading-state {
-            text-align: center;
-            padding: 60px 20px;
-            color: #6b7280;
+          text-align: center;
+          padding: 60px 20px;
+          color: #6b7280;
         }
 
         .loading-spinner {
-            width: 40px;
-            height: 40px;
-            border: 4px solid #e5e7eb;
-            border-top: 4px solid #2563eb;
-            border-radius: 50%;
-            animation: spin 1s linear infinite;
-            margin: 0 auto 16px;
+          width: 40px;
+          height: 40px;
+          border: 4px solid #e5e7eb;
+          border-top: 4px solid #2563eb;
+          border-radius: 50%;
+          animation: spin 1s linear infinite;
+          margin: 0 auto 16px;
         }
 
         @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
+          0% {
+            transform: rotate(0deg);
+          }
+          100% {
+            transform: rotate(360deg);
+          }
         }
 
         /* 响应式 */
         @media (max-width: 768px) {
-            .user-controls {
-                flex-direction: column;
-                align-items: stretch;
-            }
+          .user-controls {
+            flex-direction: column;
+            align-items: stretch;
+          }
 
-            .search-filter {
-                flex-direction: column;
-            }
+          .search-filter {
+            flex-direction: column;
+          }
 
-            .search-input,
-            .filter-select {
-                width: 100%;
-            }
+          .search-input,
+          .filter-select {
+            width: 100%;
+          }
 
-            .users-table th,
-            .users-table td {
-                padding: 12px;
-            }
+          .users-table th,
+          .users-table td {
+            padding: 12px;
+          }
 
-            .action-buttons {
-                flex-direction: column;
-            }
+          .action-buttons {
+            flex-direction: column;
+          }
         }
     </style>
 </head>
@@ -448,7 +474,7 @@
     <login-prompt v-if="!isLoggedIn && !isLoading"></login-prompt>
 
     <!-- 加载中状态 -->
-    <div class="loading-state" style="min-height: 100vh; display: flex; align-items: center; justify-content: center;"
+    <div class="loading-state" style="min-height: 100vh; display: flex; align-items: center; justify-content: center"
          v-if="isLoading">
         <div>
             <div class="loading-spinner"></div>
@@ -468,20 +494,14 @@
 
                 <!-- 提示信息 -->
                 <div v-bind:class="['alert', alertType === 'success' ? 'alert-success' : 'alert-error']"
-                     v-if="alertMessage">
-                    {{ alertMessage }}
+                     v-if="alertMessage">{{ alertMessage }}
                 </div>
 
                 <!-- 搜索和筛选 -->
                 <div class="user-controls">
                     <div class="search-filter">
-                        <input
-                                class="search-input"
-                                placeholder="搜索用户邮箱或姓名..."
-                                type="text"
-                                v-model="searchQuery"
-                                v-on:input="filterUsers"
-                        >
+                        <input class="search-input" placeholder="搜索用户邮箱或姓名..." type="text"
+                               v-model="searchQuery" v-on:input="filterUsers"/>
                         <select class="filter-select" v-model="roleFilter" v-on:change="filterUsers">
                             <option value="">全部角色</option>
                             <option value="admin">管理员</option>
@@ -493,9 +513,7 @@
                             <option value="inactive">禁用</option>
                         </select>
                     </div>
-                    <button class="btn-create" v-on:click="openCreateModal">
-                        <span>➕</span> 新建用户
-                    </button>
+                    <button class="btn-create" v-on:click="openCreateModal"><span>➕</span> 新建用户</button>
                 </div>
 
                 <!-- 用户列表 -->
@@ -520,9 +538,7 @@
                         <tr v-bind:key="user.id" v-for="user in paginatedUsers">
                             <td>
                                 <div class="user-avatar-cell">
-                                    <div class="user-avatar-small">
-                                        {{ getInitials(user.full_name || user.email) }}
-                                    </div>
+                                    <div class="user-avatar-small">{{ getInitials(user.full_name || user.email) }}</div>
                                     <div class="user-info-text">
                                         <span class="user-full-name">{{ user.full_name || '未设置' }}</span>
                                         <span class="user-email">{{ user.email }}</span>
@@ -530,26 +546,18 @@
                                 </div>
                             </td>
                             <td>
-                                <span class="role-badge" v-bind:class="user.is_superuser ? 'role-admin' : 'role-user'">
-                                    {{ user.is_superuser ? '管理员' : '普通用户' }}
-                                </span>
+                                <span class="role-badge" v-bind:class="user.is_superuser ? 'role-admin' : 'role-user'"> {{ user.is_superuser ? '管理员' : '普通用户' }} </span>
                             </td>
                             <td>
                                 <span class="status-badge"
-                                      v-bind:class="user.is_active ? 'status-active' : 'status-inactive'">
-                                    {{ user.is_active ? '活跃' : '禁用' }}
-                                </span>
+                                      v-bind:class="user.is_active ? 'status-active' : 'status-inactive'"> {{ user.is_active ? '活跃' : '禁用' }} </span>
                             </td>
                             <td>{{ formatDate(user.created_at) }}</td>
                             <td>
                                 <div class="action-buttons">
                                     <button class="btn-action btn-edit" v-on:click="openEditModal(user)">编辑</button>
-                                    <button
-                                            class="btn-action btn-delete"
-                                            v-if="user.id !== userInfo.id"
-                                            v-on:click="deleteUser(user)"
-                                    >
-                                        删除
+                                    <button class="btn-action btn-delete" v-if="user.id !== userInfo.id"
+                                            v-on:click="deleteUser(user)">删除
                                     </button>
                                 </div>
                             </td>
@@ -582,44 +590,29 @@
                             <form v-on:submit.prevent="createUser">
                                 <div class="form-group">
                                     <label class="form-label">邮箱地址 *</label>
-                                    <input
-                                            class="form-input"
-                                            placeholder="请输入邮箱地址"
-                                            required
-                                            type="email"
-                                            v-model="createForm.email"
-                                    >
+                                    <input class="form-input" placeholder="请输入邮箱地址" required type="email"
+                                           v-model="createForm.email"/>
                                 </div>
                                 <div class="form-group">
                                     <label class="form-label">全名</label>
-                                    <input
-                                            class="form-input"
-                                            placeholder="请输入全名"
-                                            type="text"
-                                            v-model="createForm.full_name"
-                                    >
+                                    <input class="form-input" placeholder="请输入全名" type="text"
+                                           v-model="createForm.full_name"/>
                                 </div>
                                 <div class="form-group">
                                     <label class="form-label">密码 *</label>
-                                    <input
-                                            class="form-input"
-                                            minlength="8"
-                                            placeholder="请输入密码（至少8位）"
-                                            required
-                                            type="password"
-                                            v-model="createForm.password"
-                                    >
+                                    <input class="form-input" minlength="8" placeholder="请输入密码（至少8位）" required
+                                           type="password" v-model="createForm.password"/>
                                 </div>
                                 <div class="form-group">
                                     <label class="form-checkbox">
-                                        <input type="checkbox" v-model="createForm.is_superuser">
+                                        <input type="checkbox" v-model="createForm.is_superuser"/>
                                         <span>设为管理员</span>
                                     </label>
                                 </div>
                                 <div class="form-actions">
                                     <button class="btn-cancel" type="button" v-on:click="closeCreateModal">取消</button>
-                                    <button class="btn-submit" type="submit" v-bind:disabled="isSubmitting">
-                                        {{ isSubmitting ? '创建中...' : '创建用户' }}
+                                    <button class="btn-submit" type="submit" v-bind:disabled="isSubmitting">{{
+                                        isSubmitting ? '创建中...' : '创建用户' }}
                                     </button>
                                 </div>
                             </form>
@@ -638,48 +631,34 @@
                             <form v-on:submit.prevent="updateUser">
                                 <div class="form-group">
                                     <label class="form-label">邮箱地址</label>
-                                    <input
-                                            class="form-input"
-                                            readonly
-                                            type="email"
-                                            v-model="editForm.email"
-                                    >
+                                    <input class="form-input" readonly type="email" v-model="editForm.email"/>
                                 </div>
                                 <div class="form-group">
                                     <label class="form-label">全名</label>
-                                    <input
-                                            class="form-input"
-                                            placeholder="请输入全名"
-                                            type="text"
-                                            v-model="editForm.full_name"
-                                    >
+                                    <input class="form-input" placeholder="请输入全名" type="text"
+                                           v-model="editForm.full_name"/>
                                 </div>
                                 <div class="form-group">
                                     <label class="form-label">新密码（留空则不修改）</label>
-                                    <input
-                                            class="form-input"
-                                            minlength="8"
-                                            placeholder="请输入新密码"
-                                            type="password"
-                                            v-model="editForm.password"
-                                    >
+                                    <input class="form-input" minlength="8" placeholder="请输入新密码" type="password"
+                                           v-model="editForm.password"/>
                                 </div>
                                 <div class="form-group">
                                     <label class="form-checkbox">
-                                        <input type="checkbox" v-model="editForm.is_superuser">
+                                        <input type="checkbox" v-model="editForm.is_superuser"/>
                                         <span>管理员权限</span>
                                     </label>
                                 </div>
                                 <div class="form-group">
                                     <label class="form-checkbox">
-                                        <input type="checkbox" v-model="editForm.is_active">
+                                        <input type="checkbox" v-model="editForm.is_active"/>
                                         <span>账户启用</span>
                                     </label>
                                 </div>
                                 <div class="form-actions">
                                     <button class="btn-cancel" type="button" v-on:click="closeEditModal">取消</button>
-                                    <button class="btn-submit" type="submit" v-bind:disabled="isSubmitting">
-                                        {{ isSubmitting ? '保存中...' : '保存修改' }}
+                                    <button class="btn-submit" type="submit" v-bind:disabled="isSubmitting">{{
+                                        isSubmitting ? '保存中...' : '保存修改' }}
                                     </button>
                                 </div>
                             </form>
@@ -700,424 +679,423 @@
     var onMounted = Vue.onMounted;
 
     var app = createApp({
-        setup: function() {
-            // 页面状态
-            var isLoading = ref(true);
-            var isLoggedIn = ref(false);
-            var userInfo = ref({});
-            var loginTime = ref('');
+      setup: function () {
+        // 页面状态
+        var isLoading = ref(true);
+        var isLoggedIn = ref(false);
+        var userInfo = ref({});
+        var loginTime = ref("");
 
-            // 用户列表
-            var users = ref([]);
-            var filteredUsers = ref([]);
-            var isLoadingUsers = ref(false);
+        // 用户列表
+        var users = ref([]);
+        var filteredUsers = ref([]);
+        var isLoadingUsers = ref(false);
 
-            // 搜索和筛选
-            var searchQuery = ref('');
-            var roleFilter = ref('');
-            var statusFilter = ref('');
+        // 搜索和筛选
+        var searchQuery = ref("");
+        var roleFilter = ref("");
+        var statusFilter = ref("");
 
-            // 分页
-            var currentPage = ref(1);
-            var pageSize = 10;
+        // 分页
+        var currentPage = ref(1);
+        var pageSize = 10;
 
-            // 模态框状态
-            var showCreateModal = ref(false);
-            var showEditModal = ref(false);
-            var isSubmitting = ref(false);
+        // 模态框状态
+        var showCreateModal = ref(false);
+        var showEditModal = ref(false);
+        var isSubmitting = ref(false);
 
-            // 表单数据
-            var createForm = ref({
-                email: '',
-                full_name: '',
-                password: '',
-                is_superuser: false
+        // 表单数据
+        var createForm = ref({
+          email: "",
+          full_name: "",
+          password: "",
+          is_superuser: false,
+        });
+
+        var editForm = ref({
+          id: null,
+          email: "",
+          full_name: "",
+          password: "",
+          is_superuser: false,
+          is_active: true,
+        });
+
+        // 提示信息
+        var alertMessage = ref("");
+        var alertType = ref("success");
+
+        // 获取 Token
+        var getToken = function () {
+          return localStorage.getItem("access_token");
+        };
+
+        // 获取请求头
+        var getAuthHeaders = function () {
+          var token = getToken();
+          var headers = {
+            "Content-Type": "application/json",
+          };
+          if (token) {
+            headers["Authorization"] = "Bearer " + token;
+          }
+          return headers;
+        };
+
+        // 计算属性：总页数
+        var totalPages = computed(function () {
+          return Math.ceil(filteredUsers.value.length / pageSize);
+        });
+
+        // 计算属性：当前页数据
+        var paginatedUsers = computed(function () {
+          var start = (currentPage.value - 1) * pageSize;
+          var end = start + pageSize;
+          return filteredUsers.value.slice(start, end);
+        });
+
+        // 获取用户首字母
+        var getInitials = function (name) {
+          if (!name) return "?";
+          return name.charAt(0).toUpperCase();
+        };
+
+        // 格式化日期
+        var formatDate = function (dateStr) {
+          if (!dateStr) return "-";
+          var date = new Date(dateStr);
+          return date.toLocaleString("zh-CN", {
+            year: "numeric",
+            month: "2-digit",
+            day: "2-digit",
+            hour: "2-digit",
+            minute: "2-digit",
+          });
+        };
+
+        // 显示提示消息
+        var showAlert = function (message, type) {
+          alertMessage.value = message;
+          alertType.value = type || "success";
+          setTimeout(function () {
+            alertMessage.value = "";
+          }, 5000);
+        };
+
+        // 筛选用户
+        var filterUsers = function () {
+          var result = users.value.filter(function (user) {
+            var matchSearch = true;
+            var matchRole = true;
+            var matchStatus = true;
+
+            if (searchQuery.value) {
+              var query = searchQuery.value.toLowerCase();
+              matchSearch = (user.email && user.email.toLowerCase().indexOf(query) > -1) || (user.full_name && user.full_name.toLowerCase().indexOf(query) > -1);
+            }
+
+            if (roleFilter.value) {
+              if (roleFilter.value === "admin") {
+                matchRole = user.is_superuser;
+              } else {
+                matchRole = !user.is_superuser;
+              }
+            }
+
+            if (statusFilter.value) {
+              if (statusFilter.value === "active") {
+                matchStatus = user.is_active;
+              } else {
+                matchStatus = !user.is_active;
+              }
+            }
+
+            return matchSearch && matchRole && matchStatus;
+          });
+
+          filteredUsers.value = result;
+          currentPage.value = 1;
+        };
+
+        // 检查认证状态
+        var checkAuth = async function () {
+          var token = getToken();
+          console.log("[Auth] Token:", token ? "存在" : "不存在");
+
+          if (!token) {
+            return { isLoggedIn: false, userInfo: null };
+          }
+
+          try {
+            var response = await fetch("/api/v1/users/me", {
+              method: "GET",
+              headers: getAuthHeaders(),
             });
 
-            var editForm = ref({
-                id: null,
-                email: '',
-                full_name: '',
-                password: '',
-                is_superuser: false,
-                is_active: true
+            console.log("[Auth] Response status:", response.status);
+
+            if (response.ok) {
+              var data = await response.json();
+              console.log("[Auth] User info:", data);
+              return { isLoggedIn: true, userInfo: data };
+            } else {
+              console.log("[Auth] Token invalid, clearing...");
+              localStorage.removeItem("access_token");
+              localStorage.removeItem("login_time");
+              return { isLoggedIn: false, userInfo: null };
+            }
+          } catch (error) {
+            console.error("[Auth] Error:", error);
+            return { isLoggedIn: false, userInfo: null };
+          }
+        };
+
+        // 获取用户列表
+        var fetchUsers = async function () {
+          console.log("[Users] Fetching users...");
+          isLoadingUsers.value = true;
+
+          try {
+            var response = await fetch("/api/v1/users/", {
+              method: "GET",
+              headers: getAuthHeaders(),
             });
 
-            // 提示信息
-            var alertMessage = ref('');
-            var alertType = ref('success');
+            console.log("[Users] Response status:", response.status);
 
-            // 获取 Token
-            var getToken = function() {
-                return localStorage.getItem('access_token');
-            };
+            if (response.ok) {
+              var data = await response.json();
+              console.log("[Users] Data:", data);
+              users.value = data.data || [];
+              filterUsers();
+            } else {
+              var errorText = await response.text();
+              console.error("[Users] Error response:", errorText);
+              try {
+                var errorData = JSON.parse(errorText);
+                showAlert(errorData.detail || "获取用户列表失败", "error");
+              } catch (e) {
+                showAlert("获取用户列表失败: " + response.status, "error");
+              }
+            }
+          } catch (error) {
+            console.error("[Users] Fetch error:", error);
+            showAlert("获取用户列表失败: " + error.message, "error");
+          } finally {
+            isLoadingUsers.value = false;
+          }
+        };
 
-            // 获取请求头
-            var getAuthHeaders = function() {
-                var token = getToken();
-                var headers = {
-                    'Content-Type': 'application/json'
-                };
-                if (token) {
-                    headers['Authorization'] = 'Bearer ' + token;
-                }
-                return headers;
-            };
+        // 打开创建模态框
+        var openCreateModal = function () {
+          createForm.value = {
+            email: "",
+            full_name: "",
+            password: "",
+            is_superuser: false,
+          };
+          showCreateModal.value = true;
+        };
 
-            // 计算属性：总页数
-            var totalPages = computed(function() {
-                return Math.ceil(filteredUsers.value.length / pageSize);
+        // 关闭创建模态框
+        var closeCreateModal = function () {
+          showCreateModal.value = false;
+        };
+
+        // 创建用户
+        var createUser = async function () {
+          if (!createForm.value.email || !createForm.value.password) {
+            showAlert("请填写必填项", "error");
+            return;
+          }
+
+          isSubmitting.value = true;
+          try {
+            var response = await fetch("/api/v1/users/", {
+              method: "POST",
+              headers: getAuthHeaders(),
+              body: JSON.stringify(createForm.value),
             });
 
-            // 计算属性：当前页数据
-            var paginatedUsers = computed(function() {
-                var start = (currentPage.value - 1) * pageSize;
-                var end = start + pageSize;
-                return filteredUsers.value.slice(start, end);
+            if (response.ok) {
+              showAlert("用户创建成功");
+              closeCreateModal();
+              await fetchUsers();
+            } else {
+              var error = await response.json();
+              showAlert(error.detail || "创建用户失败", "error");
+            }
+          } catch (error) {
+            showAlert("创建用户时发生错误: " + error.message, "error");
+          } finally {
+            isSubmitting.value = false;
+          }
+        };
+
+        // 打开编辑模态框
+        var openEditModal = function (user) {
+          editForm.value = {
+            id: user.id,
+            email: user.email,
+            full_name: user.full_name || "",
+            password: "",
+            is_superuser: user.is_superuser,
+            is_active: user.is_active,
+          };
+          showEditModal.value = true;
+        };
+
+        // 关闭编辑模态框
+        var closeEditModal = function () {
+          showEditModal.value = false;
+        };
+
+        // 更新用户
+        var updateUser = async function () {
+          isSubmitting.value = true;
+          try {
+            var updateData = {
+              full_name: editForm.value.full_name,
+              is_superuser: editForm.value.is_superuser,
+              is_active: editForm.value.is_active,
+            };
+
+            if (editForm.value.password) {
+              updateData.password = editForm.value.password;
+            }
+
+            var response = await fetch("/api/v1/users/" + editForm.value.id, {
+              method: "PATCH",
+              headers: getAuthHeaders(),
+              body: JSON.stringify(updateData),
             });
 
-            // 获取用户首字母
-            var getInitials = function(name) {
-                if (!name) return '?';
-                return name.charAt(0).toUpperCase();
-            };
+            if (response.ok) {
+              showAlert("用户更新成功");
+              closeEditModal();
+              await fetchUsers();
+            } else {
+              var error = await response.json();
+              showAlert(error.detail || "更新用户失败", "error");
+            }
+          } catch (error) {
+            showAlert("更新用户时发生错误: " + error.message, "error");
+          } finally {
+            isSubmitting.value = false;
+          }
+        };
 
-            // 格式化日期
-            var formatDate = function(dateStr) {
-                if (!dateStr) return '-';
-                var date = new Date(dateStr);
-                return date.toLocaleString('zh-CN', {
-                    year: 'numeric',
-                    month: '2-digit',
-                    day: '2-digit',
-                    hour: '2-digit',
-                    minute: '2-digit'
-                });
-            };
+        // 删除用户
+        var deleteUser = async function (user) {
+          if (!confirm("确定要删除用户 " + user.email + " 吗？此操作不可撤销。")) {
+            return;
+          }
 
-            // 显示提示消息
-            var showAlert = function(message, type) {
-                alertMessage.value = message;
-                alertType.value = type || 'success';
-                setTimeout(function() {
-                    alertMessage.value = '';
-                }, 5000);
-            };
-
-            // 筛选用户
-            var filterUsers = function() {
-                var result = users.value.filter(function(user) {
-                    var matchSearch = true;
-                    var matchRole = true;
-                    var matchStatus = true;
-
-                    if (searchQuery.value) {
-                        var query = searchQuery.value.toLowerCase();
-                        matchSearch = (user.email && user.email.toLowerCase().indexOf(query) > -1) ||
-                                      (user.full_name && user.full_name.toLowerCase().indexOf(query) > -1);
-                    }
-
-                    if (roleFilter.value) {
-                        if (roleFilter.value === 'admin') {
-                            matchRole = user.is_superuser;
-                        } else {
-                            matchRole = !user.is_superuser;
-                        }
-                    }
-
-                    if (statusFilter.value) {
-                        if (statusFilter.value === 'active') {
-                            matchStatus = user.is_active;
-                        } else {
-                            matchStatus = !user.is_active;
-                        }
-                    }
-
-                    return matchSearch && matchRole && matchStatus;
-                });
-
-                filteredUsers.value = result;
-                currentPage.value = 1;
-            };
-
-            // 检查认证状态
-            var checkAuth = async function() {
-                var token = getToken();
-                console.log('[Auth] Token:', token ? '存在' : '不存在');
-
-                if (!token) {
-                    return { isLoggedIn: false, userInfo: null };
-                }
-
-                try {
-                    var response = await fetch('/api/v1/users/me', {
-                        method: 'GET',
-                        headers: getAuthHeaders()
-                    });
-
-                    console.log('[Auth] Response status:', response.status);
-
-                    if (response.ok) {
-                        var data = await response.json();
-                        console.log('[Auth] User info:', data);
-                        return { isLoggedIn: true, userInfo: data };
-                    } else {
-                        console.log('[Auth] Token invalid, clearing...');
-                        localStorage.removeItem('access_token');
-                        localStorage.removeItem('login_time');
-                        return { isLoggedIn: false, userInfo: null };
-                    }
-                } catch (error) {
-                    console.error('[Auth] Error:', error);
-                    return { isLoggedIn: false, userInfo: null };
-                }
-            };
-
-            // 获取用户列表
-            var fetchUsers = async function() {
-                console.log('[Users] Fetching users...');
-                isLoadingUsers.value = true;
-
-                try {
-                    var response = await fetch('/api/v1/users/', {
-                        method: 'GET',
-                        headers: getAuthHeaders()
-                    });
-
-                    console.log('[Users] Response status:', response.status);
-
-                    if (response.ok) {
-                        var data = await response.json();
-                        console.log('[Users] Data:', data);
-                        users.value = data.data || [];
-                        filterUsers();
-                    } else {
-                        var errorText = await response.text();
-                        console.error('[Users] Error response:', errorText);
-                        try {
-                            var errorData = JSON.parse(errorText);
-                            showAlert(errorData.detail || '获取用户列表失败', 'error');
-                        } catch (e) {
-                            showAlert('获取用户列表失败: ' + response.status, 'error');
-                        }
-                    }
-                } catch (error) {
-                    console.error('[Users] Fetch error:', error);
-                    showAlert('获取用户列表失败: ' + error.message, 'error');
-                } finally {
-                    isLoadingUsers.value = false;
-                }
-            };
-
-            // 打开创建模态框
-            var openCreateModal = function() {
-                createForm.value = {
-                    email: '',
-                    full_name: '',
-                    password: '',
-                    is_superuser: false
-                };
-                showCreateModal.value = true;
-            };
-
-            // 关闭创建模态框
-            var closeCreateModal = function() {
-                showCreateModal.value = false;
-            };
-
-            // 创建用户
-            var createUser = async function() {
-                if (!createForm.value.email || !createForm.value.password) {
-                    showAlert('请填写必填项', 'error');
-                    return;
-                }
-
-                isSubmitting.value = true;
-                try {
-                    var response = await fetch('/api/v1/users/', {
-                        method: 'POST',
-                        headers: getAuthHeaders(),
-                        body: JSON.stringify(createForm.value)
-                    });
-
-                    if (response.ok) {
-                        showAlert('用户创建成功');
-                        closeCreateModal();
-                        await fetchUsers();
-                    } else {
-                        var error = await response.json();
-                        showAlert(error.detail || '创建用户失败', 'error');
-                    }
-                } catch (error) {
-                    showAlert('创建用户时发生错误: ' + error.message, 'error');
-                } finally {
-                    isSubmitting.value = false;
-                }
-            };
-
-            // 打开编辑模态框
-            var openEditModal = function(user) {
-                editForm.value = {
-                    id: user.id,
-                    email: user.email,
-                    full_name: user.full_name || '',
-                    password: '',
-                    is_superuser: user.is_superuser,
-                    is_active: user.is_active
-                };
-                showEditModal.value = true;
-            };
-
-            // 关闭编辑模态框
-            var closeEditModal = function() {
-                showEditModal.value = false;
-            };
-
-            // 更新用户
-            var updateUser = async function() {
-                isSubmitting.value = true;
-                try {
-                    var updateData = {
-                        full_name: editForm.value.full_name,
-                        is_superuser: editForm.value.is_superuser,
-                        is_active: editForm.value.is_active
-                    };
-
-                    if (editForm.value.password) {
-                        updateData.password = editForm.value.password;
-                    }
-
-                    var response = await fetch('/api/v1/users/' + editForm.value.id, {
-                        method: 'PATCH',
-                        headers: getAuthHeaders(),
-                        body: JSON.stringify(updateData)
-                    });
-
-                    if (response.ok) {
-                        showAlert('用户更新成功');
-                        closeEditModal();
-                        await fetchUsers();
-                    } else {
-                        var error = await response.json();
-                        showAlert(error.detail || '更新用户失败', 'error');
-                    }
-                } catch (error) {
-                    showAlert('更新用户时发生错误: ' + error.message, 'error');
-                } finally {
-                    isSubmitting.value = false;
-                }
-            };
-
-            // 删除用户
-            var deleteUser = async function(user) {
-                if (!confirm('确定要删除用户 ' + user.email + ' 吗？此操作不可撤销。')) {
-                    return;
-                }
-
-                try {
-                    var response = await fetch('/api/v1/users/' + user.id, {
-                        method: 'DELETE',
-                        headers: getAuthHeaders()
-                    });
-
-                    if (response.ok) {
-                        showAlert('用户删除成功');
-                        await fetchUsers();
-                    } else {
-                        var error = await response.json();
-                        showAlert(error.detail || '删除用户失败', 'error');
-                    }
-                } catch (error) {
-                    showAlert('删除用户时发生错误: ' + error.message, 'error');
-                }
-            };
-
-            // 分页操作
-            var prevPage = function() {
-                if (currentPage.value > 1) {
-                    currentPage.value--;
-                }
-            };
-
-            var nextPage = function() {
-                if (currentPage.value < totalPages.value) {
-                    currentPage.value++;
-                }
-            };
-
-            // 页面初始化
-            onMounted(async function() {
-                console.log('[Init] Page mounted, checking auth...');
-
-                try {
-                    var result = await checkAuth();
-                    console.log('[Init] Auth result:', result);
-
-                    isLoggedIn.value = result.isLoggedIn;
-                    userInfo.value = result.userInfo || {};
-
-                    if (result.isLoggedIn) {
-                        loginTime.value = PaYiPa.Auth.getLoginTime();
-
-                        // 检查是否是管理员
-                        if (result.userInfo && !result.userInfo.is_superuser) {
-                            console.log('[Init] Not superuser, redirecting...');
-                            window.location.href = '/index';
-                            return;
-                        }
-
-                        console.log('[Init] User is superuser, fetching users...');
-                        await fetchUsers();
-                    } else {
-                        console.log('[Init] User not logged in');
-                    }
-                } catch (error) {
-                    console.error('[Init] Error:', error);
-                } finally {
-                    isLoading.value = false;
-                }
+          try {
+            var response = await fetch("/api/v1/users/" + user.id, {
+              method: "DELETE",
+              headers: getAuthHeaders(),
             });
 
-            return {
-                isLoading: isLoading,
-                isLoggedIn: isLoggedIn,
-                userInfo: userInfo,
-                loginTime: loginTime,
-                users: users,
-                filteredUsers: filteredUsers,
-                isLoadingUsers: isLoadingUsers,
-                searchQuery: searchQuery,
-                roleFilter: roleFilter,
-                statusFilter: statusFilter,
-                currentPage: currentPage,
-                pageSize: pageSize,
-                totalPages: totalPages,
-                paginatedUsers: paginatedUsers,
-                showCreateModal: showCreateModal,
-                showEditModal: showEditModal,
-                isSubmitting: isSubmitting,
-                createForm: createForm,
-                editForm: editForm,
-                alertMessage: alertMessage,
-                alertType: alertType,
-                getInitials: getInitials,
-                formatDate: formatDate,
-                filterUsers: filterUsers,
-                openCreateModal: openCreateModal,
-                closeCreateModal: closeCreateModal,
-                createUser: createUser,
-                openEditModal: openEditModal,
-                closeEditModal: closeEditModal,
-                updateUser: updateUser,
-                deleteUser: deleteUser,
-                prevPage: prevPage,
-                nextPage: nextPage
-            };
-        }
+            if (response.ok) {
+              showAlert("用户删除成功");
+              await fetchUsers();
+            } else {
+              var error = await response.json();
+              showAlert(error.detail || "删除用户失败", "error");
+            }
+          } catch (error) {
+            showAlert("删除用户时发生错误: " + error.message, "error");
+          }
+        };
+
+        // 分页操作
+        var prevPage = function () {
+          if (currentPage.value > 1) {
+            currentPage.value--;
+          }
+        };
+
+        var nextPage = function () {
+          if (currentPage.value < totalPages.value) {
+            currentPage.value++;
+          }
+        };
+
+        // 页面初始化
+        onMounted(async function () {
+          console.log("[Init] Page mounted, checking auth...");
+
+          try {
+            var result = await checkAuth();
+            console.log("[Init] Auth result:", result);
+
+            isLoggedIn.value = result.isLoggedIn;
+            userInfo.value = result.userInfo || {};
+
+            if (result.isLoggedIn) {
+              loginTime.value = PaYiPa.Auth.getLoginTime();
+
+              // 检查是否是管理员
+              if (result.userInfo && !result.userInfo.is_superuser) {
+                console.log("[Init] Not superuser, redirecting...");
+                window.location.href = "/index";
+                return;
+              }
+
+              console.log("[Init] User is superuser, fetching users...");
+              await fetchUsers();
+            } else {
+              console.log("[Init] User not logged in");
+            }
+          } catch (error) {
+            console.error("[Init] Error:", error);
+          } finally {
+            isLoading.value = false;
+          }
+        });
+
+        return {
+          isLoading: isLoading,
+          isLoggedIn: isLoggedIn,
+          userInfo: userInfo,
+          loginTime: loginTime,
+          users: users,
+          filteredUsers: filteredUsers,
+          isLoadingUsers: isLoadingUsers,
+          searchQuery: searchQuery,
+          roleFilter: roleFilter,
+          statusFilter: statusFilter,
+          currentPage: currentPage,
+          pageSize: pageSize,
+          totalPages: totalPages,
+          paginatedUsers: paginatedUsers,
+          showCreateModal: showCreateModal,
+          showEditModal: showEditModal,
+          isSubmitting: isSubmitting,
+          createForm: createForm,
+          editForm: editForm,
+          alertMessage: alertMessage,
+          alertType: alertType,
+          getInitials: getInitials,
+          formatDate: formatDate,
+          filterUsers: filterUsers,
+          openCreateModal: openCreateModal,
+          closeCreateModal: closeCreateModal,
+          createUser: createUser,
+          openEditModal: openEditModal,
+          closeEditModal: closeEditModal,
+          updateUser: updateUser,
+          deleteUser: deleteUser,
+          prevPage: prevPage,
+          nextPage: nextPage,
+        };
+      },
     });
 
     PaYiPaComponents.registerComponents(app);
-    app.mount('#app');
+    app.mount("#app");
 </script>
 </body>
 </html>

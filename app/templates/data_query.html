@@ -1,309 +1,309 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-    <meta charset="UTF-8">
-    <meta content="width=device-width, initial-scale=1.0" name="viewport">
+    <meta charset="UTF-8"/>
+    <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
     <title>数据查询详情 - PaYiPa</title>
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
-    <link href="/static/css/style.css" rel="stylesheet">
+    <link href="/static/css/style.css" rel="stylesheet"/>
     <style>
         /* 页面布局 */
         .content-layout {
-            display: flex;
-            gap: 20px;
+          display: flex;
+          gap: 20px;
         }
 
         /* 左侧功能面板 */
         .function-panel {
-            width: 280px;
-            flex-shrink: 0;
+          width: 280px;
+          flex-shrink: 0;
         }
 
         .function-section {
-            background: #ffffff;
-            border-radius: 10px;
-            padding: 20px;
-            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-            margin-bottom: 16px;
+          background: #ffffff;
+          border-radius: 10px;
+          padding: 20px;
+          box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+          margin-bottom: 16px;
         }
 
         .function-section-title {
-            font-size: 14px;
-            font-weight: 600;
-            color: #111827;
-            margin-bottom: 14px;
-            padding-bottom: 10px;
-            border-bottom: 1px solid #e5e7eb;
-            display: flex;
-            align-items: center;
-            gap: 8px;
+          font-size: 14px;
+          font-weight: 600;
+          color: #111827;
+          margin-bottom: 14px;
+          padding-bottom: 10px;
+          border-bottom: 1px solid #e5e7eb;
+          display: flex;
+          align-items: center;
+          gap: 8px;
         }
 
         .view-all-btn {
-            width: 100%;
-            padding: 12px 16px;
-            background: linear-gradient(135deg, #2563eb, #7c3aed);
-            border: none;
-            border-radius: 8px;
-            color: #ffffff;
-            font-size: 14px;
-            font-weight: 500;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 8px;
-            transition: all 0.2s ease;
+          width: 100%;
+          padding: 12px 16px;
+          background: linear-gradient(135deg, #2563eb, #7c3aed);
+          border: none;
+          border-radius: 8px;
+          color: #ffffff;
+          font-size: 14px;
+          font-weight: 500;
+          cursor: pointer;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 8px;
+          transition: all 0.2s ease;
         }
 
         .view-all-btn:hover {
-            transform: scale(1.02);
-            box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3);
+          transform: scale(1.02);
+          box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3);
         }
 
         .view-all-btn.active {
-            box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.25);
+          box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.25);
         }
 
         /* SQL 卡片 */
         .sql-cards-grid {
-            display: flex;
-            flex-direction: column;
-            gap: 10px;
+          display: flex;
+          flex-direction: column;
+          gap: 10px;
         }
 
         .sql-card {
-            background: #f9fafb;
-            border-radius: 8px;
-            padding: 12px;
-            cursor: pointer;
-            transition: all 0.2s ease;
-            border: 2px solid transparent;
+          background: #f9fafb;
+          border-radius: 8px;
+          padding: 12px;
+          cursor: pointer;
+          transition: all 0.2s ease;
+          border: 2px solid transparent;
         }
 
         .sql-card:hover {
-            background: #f3f4f6;
-            border-color: #2563eb;
+          background: #f3f4f6;
+          border-color: #2563eb;
         }
 
         .sql-card.active {
-            background: #dbeafe;
-            border-color: #2563eb;
+          background: #dbeafe;
+          border-color: #2563eb;
         }
 
         .sql-card-title {
-            font-size: 13px;
-            font-weight: 600;
-            color: #111827;
-            margin-bottom: 4px;
+          font-size: 13px;
+          font-weight: 600;
+          color: #111827;
+          margin-bottom: 4px;
         }
 
         .sql-card-preview {
-            font-size: 11px;
-            color: #6b7280;
-            font-family: monospace;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
+          font-size: 11px;
+          color: #6b7280;
+          font-family: monospace;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
         }
 
         /* 右侧数据面板 */
         .data-panel {
-            flex: 1;
-            background: #ffffff;
-            border-radius: 10px;
-            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-            overflow: hidden;
-            display: flex;
-            flex-direction: column;
+          flex: 1;
+          background: #ffffff;
+          border-radius: 10px;
+          box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+          overflow: hidden;
+          display: flex;
+          flex-direction: column;
         }
 
         .data-panel-header {
-            padding: 16px 20px;
-            border-bottom: 1px solid #e5e7eb;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
+          padding: 16px 20px;
+          border-bottom: 1px solid #e5e7eb;
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
         }
 
         .data-panel-title {
-            font-size: 15px;
-            font-weight: 600;
-            color: #111827;
+          font-size: 15px;
+          font-weight: 600;
+          color: #111827;
         }
 
         .data-count {
-            background: #dbeafe;
-            color: #2563eb;
-            padding: 4px 12px;
-            border-radius: 16px;
-            font-size: 12px;
-            font-weight: 600;
+          background: #dbeafe;
+          color: #2563eb;
+          padding: 4px 12px;
+          border-radius: 16px;
+          font-size: 12px;
+          font-weight: 600;
         }
 
         /* 数据表格 */
         .data-table-wrapper {
-            overflow-x: auto;
-            flex: 1;
+          overflow-x: auto;
+          flex: 1;
         }
 
         .data-table {
-            width: 100%;
-            border-collapse: collapse;
+          width: 100%;
+          border-collapse: collapse;
         }
 
         .data-table th {
-            background: #f9fafb;
-            padding: 12px 16px;
-            text-align: left;
-            font-weight: 600;
-            color: #6b7280;
-            font-size: 12px;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            white-space: nowrap;
-            position: sticky;
-            top: 0;
+          background: #f9fafb;
+          padding: 12px 16px;
+          text-align: left;
+          font-weight: 600;
+          color: #6b7280;
+          font-size: 12px;
+          text-transform: uppercase;
+          letter-spacing: 0.5px;
+          white-space: nowrap;
+          position: sticky;
+          top: 0;
         }
 
         .data-table td {
-            padding: 14px 16px;
-            border-bottom: 1px solid #e5e7eb;
-            color: #111827;
-            font-size: 13px;
+          padding: 14px 16px;
+          border-bottom: 1px solid #e5e7eb;
+          color: #111827;
+          font-size: 13px;
         }
 
         .data-table tr:hover {
-            background: #f9fafb;
+          background: #f9fafb;
         }
 
         .data-table .title-cell {
-            max-width: 280px;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
+          max-width: 280px;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
         }
 
         .data-table .url-cell {
-            max-width: 180px;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
+          max-width: 180px;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
         }
 
         .data-table .url-cell a {
-            color: #2563eb;
+          color: #2563eb;
         }
 
         .data-table .url-cell a:hover {
-            text-decoration: underline;
+          text-decoration: underline;
         }
 
         .detail-btn {
-            padding: 6px 14px;
-            background: #dbeafe;
-            border: none;
-            border-radius: 6px;
-            color: #2563eb;
-            font-size: 12px;
-            font-weight: 500;
-            cursor: pointer;
-            transition: all 0.2s ease;
+          padding: 6px 14px;
+          background: #dbeafe;
+          border: none;
+          border-radius: 6px;
+          color: #2563eb;
+          font-size: 12px;
+          font-weight: 500;
+          cursor: pointer;
+          transition: all 0.2s ease;
         }
 
         .detail-btn:hover {
-            background: #2563eb;
-            color: #ffffff;
+          background: #2563eb;
+          color: #ffffff;
         }
 
         /* 分页 */
         .pagination-wrapper {
-            padding: 16px 20px;
-            border-top: 1px solid #e5e7eb;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            background: #ffffff;
+          padding: 16px 20px;
+          border-top: 1px solid #e5e7eb;
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          background: #ffffff;
         }
 
         .pagination-info {
-            color: #6b7280;
-            font-size: 13px;
+          color: #6b7280;
+          font-size: 13px;
         }
 
         .pagination-controls {
-            display: flex;
-            align-items: center;
-            gap: 8px;
+          display: flex;
+          align-items: center;
+          gap: 8px;
         }
 
         .pagination-btn {
-            padding: 6px 12px;
-            background: #ffffff;
-            border: 1px solid #d1d5db;
-            border-radius: 6px;
-            color: #374151;
-            font-size: 13px;
-            cursor: pointer;
-            transition: all 0.2s ease;
+          padding: 6px 12px;
+          background: #ffffff;
+          border: 1px solid #d1d5db;
+          border-radius: 6px;
+          color: #374151;
+          font-size: 13px;
+          cursor: pointer;
+          transition: all 0.2s ease;
         }
 
         .pagination-btn:hover:not(:disabled) {
-            background: #2563eb;
-            border-color: #2563eb;
-            color: #ffffff;
+          background: #2563eb;
+          border-color: #2563eb;
+          color: #ffffff;
         }
 
         .pagination-btn:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
+          opacity: 0.5;
+          cursor: not-allowed;
         }
 
         .page-size-select {
-            padding: 6px 10px;
-            border: 1px solid #d1d5db;
-            border-radius: 6px;
-            font-size: 13px;
-            color: #374151;
-            cursor: pointer;
-            background: #ffffff;
+          padding: 6px 10px;
+          border: 1px solid #d1d5db;
+          border-radius: 6px;
+          font-size: 13px;
+          color: #374151;
+          cursor: pointer;
+          background: #ffffff;
         }
 
         .page-info {
-            padding: 0 12px;
-            color: #6b7280;
-            font-size: 13px;
+          padding: 0 12px;
+          color: #6b7280;
+          font-size: 13px;
         }
 
         /* 响应式 */
         @media (max-width: 1200px) {
-            .content-layout {
-                flex-direction: column;
-            }
+          .content-layout {
+            flex-direction: column;
+          }
 
-            .function-panel {
-                width: 100%;
-            }
+          .function-panel {
+            width: 100%;
+          }
 
-            .function-section {
-                display: flex;
-                flex-wrap: wrap;
-                gap: 10px;
-            }
+          .function-section {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+          }
 
-            .function-section-title {
-                width: 100%;
-            }
+          .function-section-title {
+            width: 100%;
+          }
 
-            .sql-cards-grid {
-                flex-direction: row;
-                flex-wrap: wrap;
-            }
+          .sql-cards-grid {
+            flex-direction: row;
+            flex-wrap: wrap;
+          }
 
-            .sql-card {
-                flex: 1;
-                min-width: 200px;
-            }
+          .sql-card {
+            flex: 1;
+            min-width: 200px;
+          }
         }
     </style>
 </head>
@@ -330,11 +330,8 @@
                                 <span>📋</span>
                                 <span>数据表查询</span>
                             </div>
-                            <button
-                                    class="view-all-btn"
-                                    v-bind:class="{ active: activeQuery === 'all' }"
-                                    v-on:click="viewAllData"
-                            >
+                            <button class="view-all-btn" v-bind:class="{ active: activeQuery === 'all' }"
+                                    v-on:click="viewAllData">
                                 <span>📊</span>
                                 <span>查看所有数据</span>
                             </button>
@@ -351,13 +348,8 @@
                             <empty-state message="暂无自定义SQL" v-else-if="sqlQueries.length === 0"></empty-state>
 
                             <div class="sql-cards-grid" v-else>
-                                <div
-                                        class="sql-card"
-                                        v-bind:class="{ active: activeQuery === sql.id }"
-                                        v-bind:key="sql.id"
-                                        v-for="sql in sqlQueries"
-                                        v-on:click="executeSql(sql.id)"
-                                >
+                                <div class="sql-card" v-bind:class="{ active: activeQuery === sql.id }"
+                                     v-bind:key="sql.id" v-for="sql in sqlQueries" v-on:click="executeSql(sql.id)">
                                     <div class="sql-card-title">{{ sql.name }}</div>
                                     <div class="sql-card-preview">{{ sql.sql }}</div>
                                 </div>
@@ -368,18 +360,16 @@
                     <!-- 右侧数据面板 -->
                     <div class="data-panel">
                         <div class="data-panel-header">
-                            <div class="data-panel-title">
-                                {{ activeQuery === 'all' ? '全部数据' : (activeSqlName || '查询结果') }}
+                            <div class="data-panel-title">{{ activeQuery === 'all' ? '全部数据' : (activeSqlName ||
+                                '查询结果') }}
                             </div>
                             <span class="data-count" v-if="totalCount > 0">共 {{ totalCount }} 条</span>
                         </div>
 
                         <loading-state message="正在加载数据..." v-if="dataLoading"></loading-state>
 
-                        <empty-state
-                                v-bind:message="activeQuery ? '暂无数据' : '请选择查询方式'"
-                                v-else-if="!dataLoading && tableData.length === 0"
-                        ></empty-state>
+                        <empty-state v-bind:message="activeQuery ? '暂无数据' : '请选择查询方式'"
+                                     v-else-if="!dataLoading && tableData.length === 0"></empty-state>
 
                         <div class="data-table-wrapper" v-else>
                             <table class="data-table">
@@ -391,25 +381,16 @@
                                 </thead>
                                 <tbody>
                                 <tr v-bind:key="row.id" v-for="row in tableData">
-                                    <td
-                                            v-bind:class="getCellClass(col)"
-                                            v-bind:key="col"
-                                            v-for="col in tableColumns"
-                                    >
+                                    <td v-bind:class="getCellClass(col)" v-bind:key="col" v-for="col in tableColumns">
                                         <template v-if="col === 'url'">
                                             <a target="_blank" v-bind:href="row[col]">{{ row[col] }}</a>
                                         </template>
-                                        <template v-else-if="col === 'publish_time'">
-                                            {{ formatDate(row[col]) }}
+                                        <template v-else-if="col === 'publish_time'"> {{ formatDate(row[col]) }}
                                         </template>
-                                        <template v-else>
-                                            {{ row[col] }}
-                                        </template>
+                                        <template v-else> {{ row[col] }}</template>
                                     </td>
                                     <td>
-                                        <button class="detail-btn" v-on:click="viewDetail(row.id)">
-                                            查看详情
-                                        </button>
+                                        <button class="detail-btn" v-on:click="viewDetail(row.id)">查看详情</button>
                                     </td>
                                 </tr>
                                 </tbody>
@@ -417,9 +398,8 @@
                         </div>
 
                         <div class="pagination-wrapper" v-if="totalCount > 0">
-                            <div class="pagination-info">
-                                显示 {{ (currentPage - 1) * pageSize + 1 }} - {{ Math.min(currentPage * pageSize,
-                                totalCount) }} 条，共 {{ totalCount }} 条
+                            <div class="pagination-info">显示 {{ (currentPage - 1) * pageSize + 1 }} - {{
+                                Math.min(currentPage * pageSize, totalCount) }} 条，共 {{ totalCount }} 条
                             </div>
                             <div class="pagination-controls">
                                 <select class="page-size-select" v-model="pageSize" v-on:change="onPageSizeChange">
@@ -459,163 +439,163 @@
     var onMounted = Vue.onMounted;
 
     var app = createApp({
-        setup: function() {
-            var isLoggedIn = ref(false);
-            var userInfo = ref({});
-            var loginTime = ref('');
+      setup: function () {
+        var isLoggedIn = ref(false);
+        var userInfo = ref({});
+        var loginTime = ref("");
 
-            var urlParams = new URLSearchParams(window.location.search);
-            var configId = urlParams.get('config_id');
+        var urlParams = new URLSearchParams(window.location.search);
+        var configId = urlParams.get("config_id");
 
-            var sqlLoading = ref(false);
-            var dataLoading = ref(false);
-            var sqlQueries = ref([]);
-            var tableData = ref([]);
-            var tableColumns = ref([]);
-            var totalCount = ref(0);
-            var activeQuery = ref(null);
-            var activeSqlName = ref('');
-            var currentPage = ref(1);
-            var pageSize = ref(20);
+        var sqlLoading = ref(false);
+        var dataLoading = ref(false);
+        var sqlQueries = ref([]);
+        var tableData = ref([]);
+        var tableColumns = ref([]);
+        var totalCount = ref(0);
+        var activeQuery = ref(null);
+        var activeSqlName = ref("");
+        var currentPage = ref(1);
+        var pageSize = ref(20);
 
-            var totalPages = computed(function() {
-                return Math.ceil(totalCount.value / pageSize.value) || 1;
-            });
+        var totalPages = computed(function () {
+          return Math.ceil(totalCount.value / pageSize.value) || 1;
+        });
 
-            var formatDate = function(dateStr) {
-                return PaYiPa.Utils.formatDate(dateStr);
-            };
+        var formatDate = function (dateStr) {
+          return PaYiPa.Utils.formatDate(dateStr);
+        };
 
-            var getCellClass = function(col) {
-                if (col === 'title') return 'title-cell';
-                if (col === 'url') return 'url-cell';
-                return '';
-            };
+        var getCellClass = function (col) {
+          if (col === "title") return "title-cell";
+          if (col === "url") return "url-cell";
+          return "";
+        };
 
-            var loadSqlQueries = async function() {
-                if (!configId) return;
-                try {
-                    sqlLoading.value = true;
-                    var result = await PaYiPa.API.get('/api/v1/datas/sqls/' + configId);
-                    sqlQueries.value = (result && result.data) ? result.data : [];
-                } catch (e) {
-                    console.error('加载SQL查询列表失败:', e);
-                } finally {
-                    sqlLoading.value = false;
-                }
-            };
+        var loadSqlQueries = async function () {
+          if (!configId) return;
+          try {
+            sqlLoading.value = true;
+            var result = await PaYiPa.API.get("/api/v1/datas/sqls/" + configId);
+            sqlQueries.value = result && result.data ? result.data : [];
+          } catch (e) {
+            console.error("加载SQL查询列表失败:", e);
+          } finally {
+            sqlLoading.value = false;
+          }
+        };
 
-            var viewAllData = async function() {
-                if (!configId) return;
-                activeQuery.value = 'all';
-                activeSqlName.value = '';
-                try {
-                    dataLoading.value = true;
-                    var skip = (currentPage.value - 1) * pageSize.value;
-                    var result = await PaYiPa.API.get('/api/v1/datas/table/' + configId + '?skip=' + skip + '&limit=' + pageSize.value);
-                    tableData.value = (result && result.data) ? result.data : [];
-                    totalCount.value = (result && result.count) ? result.count : 0;
-                    if (tableData.value.length > 0) {
-                        tableColumns.value = Object.keys(tableData.value[0]).filter(function(k) {
-                            return k !== 'id';
-                        });
-                        tableColumns.value.unshift('id');
-                    }
-                } catch (e) {
-                    console.error('加载数据失败:', e);
-                    tableData.value = [];
-                } finally {
-                    dataLoading.value = false;
-                }
-            };
+        var viewAllData = async function () {
+          if (!configId) return;
+          activeQuery.value = "all";
+          activeSqlName.value = "";
+          try {
+            dataLoading.value = true;
+            var skip = (currentPage.value - 1) * pageSize.value;
+            var result = await PaYiPa.API.get("/api/v1/datas/table/" + configId + "?skip=" + skip + "&limit=" + pageSize.value);
+            tableData.value = result && result.data ? result.data : [];
+            totalCount.value = result && result.count ? result.count : 0;
+            if (tableData.value.length > 0) {
+              tableColumns.value = Object.keys(tableData.value[0]).filter(function (k) {
+                return k !== "id";
+              });
+              tableColumns.value.unshift("id");
+            }
+          } catch (e) {
+            console.error("加载数据失败:", e);
+            tableData.value = [];
+          } finally {
+            dataLoading.value = false;
+          }
+        };
 
-            var executeSql = async function(sqlId) {
-                activeQuery.value = sqlId;
-                var sql = sqlQueries.value.find(function(s) {
-                    return s.id === sqlId;
-                });
-                activeSqlName.value = sql ? sql.name : '';
-                try {
-                    dataLoading.value = true;
-                    var result = await PaYiPa.API.get('/api/v1/datas/sql/' + sqlId);
-                    tableData.value = (result && result.data) ? result.data : [];
-                    totalCount.value = (result && result.count) ? result.count : 0;
-                    if (tableData.value.length > 0) {
-                        tableColumns.value = Object.keys(tableData.value[0]).filter(function(k) {
-                            return k !== 'id';
-                        });
-                        tableColumns.value.unshift('id');
-                    }
-                    currentPage.value = 1;
-                } catch (e) {
-                    console.error('执行SQL查询失败:', e);
-                    tableData.value = [];
-                } finally {
-                    dataLoading.value = false;
-                }
-            };
+        var executeSql = async function (sqlId) {
+          activeQuery.value = sqlId;
+          var sql = sqlQueries.value.find(function (s) {
+            return s.id === sqlId;
+          });
+          activeSqlName.value = sql ? sql.name : "";
+          try {
+            dataLoading.value = true;
+            var result = await PaYiPa.API.get("/api/v1/datas/sql/" + sqlId);
+            tableData.value = result && result.data ? result.data : [];
+            totalCount.value = result && result.count ? result.count : 0;
+            if (tableData.value.length > 0) {
+              tableColumns.value = Object.keys(tableData.value[0]).filter(function (k) {
+                return k !== "id";
+              });
+              tableColumns.value.unshift("id");
+            }
+            currentPage.value = 1;
+          } catch (e) {
+            console.error("执行SQL查询失败:", e);
+            tableData.value = [];
+          } finally {
+            dataLoading.value = false;
+          }
+        };
 
-            var viewDetail = function(id) {
-                window.open('/data_detail?config_id=' + configId + '&detail_id=' + id, '_blank');
-            };
+        var viewDetail = function (id) {
+          window.open("/data_detail?config_id=" + configId + "&detail_id=" + id, "_blank");
+        };
 
-            var goToPage = function(page) {
-                if (page < 1 || page > totalPages.value) return;
-                currentPage.value = page;
-                if (activeQuery.value === 'all') {
-                    viewAllData();
-                }
-            };
+        var goToPage = function (page) {
+          if (page < 1 || page > totalPages.value) return;
+          currentPage.value = page;
+          if (activeQuery.value === "all") {
+            viewAllData();
+          }
+        };
 
-            var onPageSizeChange = function() {
-                currentPage.value = 1;
-                if (activeQuery.value === 'all') {
-                    viewAllData();
-                }
-            };
+        var onPageSizeChange = function () {
+          currentPage.value = 1;
+          if (activeQuery.value === "all") {
+            viewAllData();
+          }
+        };
 
-            onMounted(async function() {
-                if (!configId) {
-                    window.location.href = '/data';
-                    return;
-                }
-                var result = await PaYiPa.Auth.checkAuth();
-                isLoggedIn.value = result.isLoggedIn;
-                userInfo.value = result.userInfo || {};
-                if (result.isLoggedIn) {
-                    loginTime.value = PaYiPa.Auth.getLoginTime();
-                    await loadSqlQueries();
-                }
-            });
+        onMounted(async function () {
+          if (!configId) {
+            window.location.href = "/data";
+            return;
+          }
+          var result = await PaYiPa.Auth.checkAuth();
+          isLoggedIn.value = result.isLoggedIn;
+          userInfo.value = result.userInfo || {};
+          if (result.isLoggedIn) {
+            loginTime.value = PaYiPa.Auth.getLoginTime();
+            await loadSqlQueries();
+          }
+        });
 
-            return {
-                isLoggedIn: isLoggedIn,
-                userInfo: userInfo,
-                loginTime: loginTime,
-                sqlLoading: sqlLoading,
-                dataLoading: dataLoading,
-                sqlQueries: sqlQueries,
-                tableData: tableData,
-                tableColumns: tableColumns,
-                totalCount: totalCount,
-                activeQuery: activeQuery,
-                activeSqlName: activeSqlName,
-                currentPage: currentPage,
-                pageSize: pageSize,
-                totalPages: totalPages,
-                formatDate: formatDate,
-                getCellClass: getCellClass,
-                viewAllData: viewAllData,
-                executeSql: executeSql,
-                viewDetail: viewDetail,
-                goToPage: goToPage,
-                onPageSizeChange: onPageSizeChange
-            };
-        }
+        return {
+          isLoggedIn: isLoggedIn,
+          userInfo: userInfo,
+          loginTime: loginTime,
+          sqlLoading: sqlLoading,
+          dataLoading: dataLoading,
+          sqlQueries: sqlQueries,
+          tableData: tableData,
+          tableColumns: tableColumns,
+          totalCount: totalCount,
+          activeQuery: activeQuery,
+          activeSqlName: activeSqlName,
+          currentPage: currentPage,
+          pageSize: pageSize,
+          totalPages: totalPages,
+          formatDate: formatDate,
+          getCellClass: getCellClass,
+          viewAllData: viewAllData,
+          executeSql: executeSql,
+          viewDetail: viewDetail,
+          goToPage: goToPage,
+          onPageSizeChange: onPageSizeChange,
+        };
+      },
     });
 
     PaYiPaComponents.registerComponents(app);
-    app.mount('#app');
+    app.mount("#app");
 </script>
 </body>
 </html>
