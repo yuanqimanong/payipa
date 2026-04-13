@@ -51,6 +51,11 @@ async def aggregated_search_page(request: Request):
     return serve_template("aggregated_search")
 
 
+@router.get("/knowledge_base", response_class=HTMLResponse)
+async def knowledge_base_page(request: Request):
+    return serve_template("knowledge_base")
+
+
 @router.get("/log_view", response_class=HTMLResponse)
 async def log_view_page(request: Request):
     return serve_template("log_view")

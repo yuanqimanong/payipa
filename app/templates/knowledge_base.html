@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8"/>
+    <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+    <title>知识库检索 - PaYiPa</title>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <link href="/static/css/style.css" rel="stylesheet"/>
+    <style>
+        .kb-iframe-container {
+          width: 100%;
+          height: calc(100vh - 140px);
+          border-radius: 10px;
+          overflow: hidden;
+          box-shadow: 0 4px 24px rgba(0, 0, 0, 0.08);
+          border: 1px solid #e5e7eb;
+          background: #fff;
+        }
+
+        .kb-iframe-container iframe {
+          width: 100%;
+          height: 100%;
+          border: none;
+        }
+    </style>
+</head>
+<body>
+<div id="app">
+    <!-- 未登录状态 -->
+    <login-prompt v-if="!isLoggedIn"></login-prompt>
+
+    <!-- 已登录状态 -->
+    <div class="app-layout" v-else>
+        <app-sidebar active-page="dashboard" v-bind:user-info="userInfo"></app-sidebar>
+
+        <div class="main-wrapper">
+            <app-header v-bind:login-time="loginTime" v-bind:user-info="userInfo"></app-header>
+
+            <main class="main-content">
+                <page-header back-url="/index" icon="📚"
+                             title="知识库检索（临时：需要提前联系管理员上传你的文件）"></page-header>
+
+                <!-- iframe 嵌入知识库 -->
+                <div class="kb-iframe-container">
+                    <iframe src="http://192.168.14.60:8584/" allowfullscreen></iframe>
+                </div>
+            </main>
+        </div>
+    </div>
+</div>
+
+<script src="/static/js/common.js"></script>
+<script src="/static/js/components.js"></script>
+<script>
+    var createApp = Vue.createApp;
+    var ref = Vue.ref;
+    var onMounted = Vue.onMounted;
+
+    var app = createApp({
+      setup: function () {
+        var isLoggedIn = ref(false);
+        var userInfo = ref({});
+        var loginTime = ref("");
+
+        onMounted(async function () {
+          var result = await PaYiPa.Auth.checkAuth();
+          isLoggedIn.value = result.isLoggedIn;
+          userInfo.value = result.userInfo || {};
+          if (result.isLoggedIn) {
+            loginTime.value = PaYiPa.Auth.getLoginTime();
+          }
+        });
+
+        return {
+          isLoggedIn: isLoggedIn,
+          userInfo: userInfo,
+          loginTime: loginTime,
+        };
+      },
+    });
+
+    PaYiPaComponents.registerComponents(app);
+    app.mount("#app");
+</script>
+</body>
+</html>

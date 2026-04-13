@@ -307,6 +307,19 @@
                     </button>
                 </div>
 
+                <!-- 知识库检索入口 -->
+                <div class="search-card" v-on:click="goToKnowledgeBase">
+                    <div class="search-card-icon">📚</div>
+                    <div class="search-card-content">
+                        <div class="search-card-title">知识库检索</div>
+                        <div class="search-card-desc">基于内部知识库的智能检索平台，快速查找企业内部文档与知识</div>
+                    </div>
+                    <button class="search-card-btn">
+                        <span>立即检索</span>
+                        <span>→</span>
+                    </button>
+                </div>
+
                 <!-- 快速统计 -->
                 <div class="stats-grid">
                     <div class="stat-card">
@@ -493,6 +506,10 @@
           window.location.href = "/aggregated_search";
         };
 
+        var goToKnowledgeBase = function () {
+          window.location.href = "/knowledge_base";
+        };
+
         onMounted(async function () {
           var result = await PaYiPa.Auth.checkAuth();
           isLoggedIn.value = result.isLoggedIn;
@@ -507,6 +524,7 @@
           userInfo: userInfo,
           loginTime: loginTime,
           goToAggregatedSearch: goToAggregatedSearch,
+          goToKnowledgeBase: goToKnowledgeBase,
         };
       },
     });
