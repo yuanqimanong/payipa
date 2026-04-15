@@ -38,11 +38,11 @@
 
             <main class="main-content">
                 <page-header back-url="/index" icon="📚"
-                             title="知识库检索（临时：需要提前联系管理员上传你的文件）"></page-header>
+                             title="知识库检索"></page-header>
 
                 <!-- iframe 嵌入知识库 -->
                 <div class="kb-iframe-container">
-                    <iframe src="http://192.168.14.60:8584/" allowfullscreen></iframe>
+                    <iframe v-bind:src="'http://192.168.14.60:22233/' + (userInfo.email ? userInfo.email.split('@')[0] : '')" allowfullscreen></iframe>
                 </div>
             </main>
         </div>
