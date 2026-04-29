@@ -345,7 +345,7 @@
                         <div class="detail-meta">
                             <div class="detail-meta-item">
                                 <span>👤</span>
-                                <span>作者: {{ detailData.author || '-' }}</span>
+                                <span v-html="formatContent(detailData.author)">作者: {{ detailData.author || '-' }}</span>
                             </div>
                             <div class="detail-meta-item">
                                 <span>📅</span>
@@ -387,7 +387,7 @@
                         <!-- 摘要 -->
                         <div class="detail-section" v-if="detailData.description">
                             <div class="detail-section-title">📝 摘要描述</div>
-                            <div class="detail-description">{{ detailData.description }}</div>
+                            <div class="detail-description" v-html="formatContent(detailData.description)"></div>
                         </div>
 
                         <!-- 正文 -->
