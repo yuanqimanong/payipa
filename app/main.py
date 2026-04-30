@@ -1,6 +1,7 @@
 import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.routing import APIRoute
 from fastapi.staticfiles import StaticFiles
 
@@ -21,6 +22,9 @@ app = FastAPI(
 )
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
+
+# Add GZip middleware (compress responses > 1KB)
+app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 # Add CORS middleware
 app.add_middleware(
