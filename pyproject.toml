@@ -1,0 +1,54 @@
+# payipa monorepo —— uv workspace 聚合根（虚拟项目，不单独构建/分发）。
+# 真正的可分发包在 packages/* 与 apps/*。
+[project]
+name = "payipa"
+version = "0.0.0"
+description = "payipa / 爬亿爬 —— 源无关的数据获取→清洗→查询→组装→推送 一站式平台（monorepo）"
+requires-python = ">=3.14"
+dependencies = [
+    "payipa-contracts",
+    "payipa-core",
+    "pyp-server",
+    "pyp-agent",
+]
+
+[tool.uv]
+package = false # 聚合根为虚拟项目：安装其依赖（各成员），但自身不构建
+
+[tool.uv.workspace]
+members = ["apps/*", "packages/*"]
+
+[tool.uv.sources]
+payipa-contracts = { workspace = true }
+payipa-core = { workspace = true }
+pyp-server = { workspace = true }
+pyp-agent = { workspace = true }
+# 双仓纪律（新方案 00 §2.2）：提交态用 git 源（可复现、CI 可解析；jb 已发 PyPI 后可切版本约束）。
+#    本地联调改 jb 时临时切回 editable path（改后 uv sync，不提交此改动）：
+#    jianbing-utils = { path = "../jianbing_utils", editable = true }
+#    详见 CLAUDE.md。
+jianbing-utils = { git = "https://github.com/yuanqimanong/jianbing_utils.git", tag = "v0.1.0" }
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "ruff>=0.10",
+    "import-linter>=2.1",
+    "httpx>=0.27", # FastAPI/Starlette TestClient 冒烟所需
+]
+
+[tool.ruff]
+target-version = "py314"
+line-length = 120 # 契约字段带内联中文 description，放宽到 120
+extend-exclude = ["deploy/alembic/versions"] # 迁移脚本自动生成，不纳入 lint
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "C4"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q --import-mode=importlib"
+filterwarnings = [
+    # 已知无害：starlette TestClient 提示 httpx→httpx2 迁移；不影响功能，暂不换驱动
+    "ignore:Using `httpx` with `starlette.testclient` is deprecated",
+]

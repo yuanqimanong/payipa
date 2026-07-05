@@ -1,0 +1,12 @@
+[project]
+name = "payipa-contracts"
+version = "0.1.0"
+description = "payipa 契约包：agent↔主控 + 模块间 Pydantic schema（零 I/O、零逻辑，唯一共同依赖）"
+readme = "README.md"
+requires-python = ">=3.14"
+# 契约包依赖只有 pydantic（红线）：保证 agent 侧安装轻、边界干净。
+dependencies = ["pydantic>=2.12"]
+
+[build-system]
+requires = ["uv_build>=0.11,<0.12"]
+build-backend = "uv_build"

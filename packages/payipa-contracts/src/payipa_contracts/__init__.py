@@ -1,0 +1,131 @@
+"""payipa-contracts —— 协议定义层（Pydantic v2）。
+
+跨进程/跨模块传递的数据形状：零 I/O、零业务逻辑、零 DB、零密钥；依赖只有 pydantic。
+字段标注「已生效/未生效」（见 :mod:`payipa_contracts._annotate`）。破坏性变更升 ``version.CONTRACT_VERSION``。
+"""
+
+from __future__ import annotations
+
+from payipa_contracts import agent, artifact, enums, errors, event, monitor, result, rule, task, version
+from payipa_contracts.agent import (
+    Cancel,
+    Capabilities,
+    ClientFrame,
+    ErrorFrame,
+    Heartbeat,
+    RegisterAck,
+    RegisterReq,
+    ServerFrame,
+    StatusReport,
+    TaskAssign,
+)
+from payipa_contracts.artifact import Artifact, ArtifactRef
+from payipa_contracts.enums import (
+    ArtifactStatus,
+    BatchStatus,
+    Channel,
+    ConnectorType,
+    CrawlStrategy,
+    EngineHint,
+    FieldType,
+    LocatorType,
+    Priority,
+    RequestState,
+    RuleStatus,
+    StorageBackend,
+    TriggerType,
+)
+from payipa_contracts.errors import ERROR_LABELS, ErrorCode, label
+from payipa_contracts.event import AuditEvent, LifecycleEvent
+from payipa_contracts.monitor import (
+    BatchProgress,
+    NodeSnapshot,
+    ProxyStat,
+    QualityMetric,
+    QueueStat,
+)
+from payipa_contracts.result import ExecSummary, FieldMeta, Item, ResultBatch
+from payipa_contracts.rule import (
+    CleanOp,
+    CrawlRules,
+    FailWhen,
+    FieldRule,
+    LayoutMatch,
+    Locator,
+    RuleManifest,
+    RulePack,
+    RulePointer,
+)
+from payipa_contracts.task import TaskSpec
+from payipa_contracts.version import (
+    CONTRACT_VERSION,
+    MIN_SUPPORTED_CONTRACT_VERSION,
+    assert_compatible,
+    is_compatible,
+)
+
+__all__ = [
+    "CONTRACT_VERSION",
+    "ERROR_LABELS",
+    "MIN_SUPPORTED_CONTRACT_VERSION",
+    "Artifact",
+    "ArtifactRef",
+    "ArtifactStatus",
+    "AuditEvent",
+    "BatchProgress",
+    "BatchStatus",
+    "Cancel",
+    "Capabilities",
+    "Channel",
+    "CleanOp",
+    "ClientFrame",
+    "ConnectorType",
+    "CrawlRules",
+    "CrawlStrategy",
+    "EngineHint",
+    "ErrorCode",
+    "ErrorFrame",
+    "ExecSummary",
+    "FailWhen",
+    "FieldMeta",
+    "FieldRule",
+    "FieldType",
+    "Heartbeat",
+    "Item",
+    "LayoutMatch",
+    "LifecycleEvent",
+    "Locator",
+    "LocatorType",
+    "NodeSnapshot",
+    "Priority",
+    "ProxyStat",
+    "QualityMetric",
+    "QueueStat",
+    "RegisterAck",
+    "RegisterReq",
+    "RequestState",
+    "ResultBatch",
+    "RuleManifest",
+    "RulePack",
+    "RulePointer",
+    "RuleStatus",
+    "ServerFrame",
+    "StatusReport",
+    "StorageBackend",
+    "TaskAssign",
+    "TaskSpec",
+    "TriggerType",
+    "agent",
+    "artifact",
+    "assert_compatible",
+    "enums",
+    "errors",
+    "event",
+    "is_compatible",
+    "label",
+    "monitor",
+    "result",
+    "rule",
+    "task",
+    "version",
+]

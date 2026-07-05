@@ -1,0 +1,21 @@
+[project]
+name = "pyp-agent"
+version = "0.1.0"
+description = "payipa 子节点 agent：出站 WS、抓取、大对象直传、回传指针；只依赖 contracts（禁止依赖 core）"
+readme = "README.md"
+requires-python = ">=3.14"
+# 依赖刻意最小：contracts + jbutils + HTTP/WS + 并发底座。绝不含 payipa-core / SQLAlchemy / DB 驱动。
+dependencies = [
+    "payipa-contracts",
+    "jianbing-utils",
+    "niquests>=3.20",
+    "websockets>=16",
+    "anyio>=4.14",
+]
+
+[project.scripts]
+pyp-agent = "pyp_agent.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.11,<0.12"]
+build-backend = "uv_build"

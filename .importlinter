@@ -1,0 +1,38 @@
+# ASCII only: import-linter reads this config with the OS locale codec (GBK on Windows),
+# which rejects non-ASCII bytes. Rationale for each contract is in CLAUDE.md.
+[importlinter]
+root_packages =
+    payipa_contracts
+    payipa
+    pyp_server
+    pyp_agent
+
+# Layered: server -> core -> contracts (higher may import lower; lower must not import higher).
+[importlinter:contract:layers]
+name = payipa layered architecture (server > core > contracts)
+type = layers
+layers =
+    pyp_server
+    payipa
+    payipa_contracts
+
+# Red line: pyp-agent must not depend on payipa-core or the server (agent depends on contracts only).
+[importlinter:contract:agent-min-deps]
+name = pyp-agent must not depend on core or server
+type = forbidden
+source_modules =
+    pyp_agent
+forbidden_modules =
+    payipa
+    pyp_server
+
+# Contracts is a dependency-free leaf: must not import any in-repo package.
+[importlinter:contract:contracts-leaf]
+name = payipa-contracts is a dependency-free leaf
+type = forbidden
+source_modules =
+    payipa_contracts
+forbidden_modules =
+    payipa
+    pyp_server
+    pyp_agent

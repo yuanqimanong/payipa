@@ -1,0 +1,28 @@
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+
+# 前置：payipa 依赖 jianbing-utils（public 仓）经 git 源解析（tag v0.1.0）。
+# 提交前须：① jianbing_utils 打并推 tag v0.1.0；② 把根 pyproject 的 [tool.uv.sources]
+# 从本地 path 源换成 git 源；③ uv lock 后提交。详见 CLAUDE.md。
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # 钉 uv 版本（不用浮动 action tag）
+      - name: Install uv 0.11.26
+        run: curl -LsSf https://astral.sh/uv/0.11.26/install.sh | sh
+      - name: Sync workspace (locked)
+        run: uv sync --all-packages --locked
+      - name: Ruff lint
+        run: uv run ruff check
+      - name: Ruff format check
+        run: uv run ruff format --check
+      - name: Import boundaries (import-linter)
+        run: uv run lint-imports
+      - name: Pytest
+        run: uv run pytest

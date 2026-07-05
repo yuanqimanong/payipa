@@ -1,0 +1,24 @@
+[project]
+name = "payipa-core"
+version = "0.1.0"
+description = "payipa 领域包：全部业务逻辑（crawl/explore/studio/deliver/ai/proxy/monitor/storage）"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "payipa-contracts",
+    "jianbing-utils",          # core.storage 经 jbutils.s3 做 presigned/multipart
+    "sqlalchemy[asyncio]>=2.0.45",
+    "asyncpg>=0.31",           # 运行时异步驱动
+    "psycopg[binary]>=3.2",    # Alembic 迁移用同步驱动
+    "alembic>=1.13",
+    "pydantic>=2.12",
+    "pydantic-settings>=2.4",
+]
+
+[build-system]
+requires = ["uv_build>=0.11,<0.12"]
+build-backend = "uv_build"
+
+# 项目名 payipa-core，但导入名为 payipa（src/payipa）——显式指定模块名。
+[tool.uv.build-backend]
+module-name = "payipa"

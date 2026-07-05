@@ -1,0 +1,34 @@
+# Python
+__pycache__/
+*.py[codz]
+*$py.class
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# uv / venv
+.venv/
+venv/
+
+# 工具缓存
+.ruff_cache/
+.pytest_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# IDE / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+
+# 本地环境与密钥（绝不入库）
+.env
+.env.*
+!.env.example
+
+# 说明：uv.lock 应提交入库。
+# ⚠️ [tool.uv.sources] 的本地 path 源（jianbing-utils）不得提交——提交前换回 git/PyPI 源（见 CLAUDE.md）。

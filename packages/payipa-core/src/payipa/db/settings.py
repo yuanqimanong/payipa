@@ -1,0 +1,71 @@
+"""数据库/基础设施配置（pydantic-settings 读 .env 或环境变量）。
+
+启动必需项走环境变量（SDD §3.5）。.env 在 project/ 根（payipa 的父目录），故同时探测
+``.env`` 与 ``../.env``；生产由 compose/环境注入真实变量。库名可配（09 定案）。
+"""
+
+from __future__ import annotations
+
+from functools import lru_cache
+from typing import Literal
+
+from pydantic_settings import BaseSettings, SettingsConfigDict
+from sqlalchemy import URL
+
+DbKey = Literal["pyp", "data_center", "business"]
+
+
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_file=(".env", "../.env"),
+        env_file_encoding="utf-8",
+        extra="ignore",
+        case_sensitive=False,
+    )
+
+    # PostgreSQL（三库同实例，库名可配）
+    pg_host: str = "localhost"
+    pg_port: int = 5432
+    pg_user: str = "postgres"
+    pg_password: str = "postgres"
+    pg_db_pyp: str = "pyp_sys"  # 平台库（.env 默认名 pyp_sys）
+    pg_db_data_center: str = "data_center"  # 采集数据库
+    pg_db_business: str = "business"  # 组装产物库
+
+    # 运行时可选组件（M2/M5 接线；缺省 None = 降级）
+    redis_url: str | None = None
+    s3_endpoint: str | None = None
+    s3_access_key: str | None = None
+    s3_secret_key: str | None = None
+    s3_bucket: str | None = None
+
+    def _db_name(self, key: DbKey) -> str:
+        return {
+            "pyp": self.pg_db_pyp,
+            "data_center": self.pg_db_data_center,
+            "business": self.pg_db_business,
+        }[key]
+
+    def _url(self, drivername: str, key: DbKey) -> URL:
+        return URL.create(
+            drivername=drivername,
+            username=self.pg_user,
+            password=self.pg_password,
+            host=self.pg_host,
+            port=self.pg_port,
+            database=self._db_name(key),
+        )
+
+    def async_url(self, key: DbKey) -> URL:
+        """asyncpg 驱动的连接 URL（运行时用）。"""
+        return self._url("postgresql+asyncpg", key)
+
+    def sync_url(self, key: DbKey) -> URL:
+        """psycopg（同步）驱动的连接 URL（Alembic 迁移用）。"""
+        return self._url("postgresql+psycopg", key)
+
+
+@lru_cache
+def get_settings() -> Settings:
+    """进程内单例（首次访问时读取 env/.env）。"""
+    return Settings()

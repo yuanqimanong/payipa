@@ -1,0 +1,18 @@
+[project]
+name = "pyp-server"
+version = "0.1.0"
+description = "payipa 主控进程：FastAPI 装配 + 应用 API + agent WS 接入端点 + 调度循环 + OpenAPI"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "payipa-core",
+    "payipa-contracts",
+    "fastapi>=0.128",
+    "uvicorn[standard]>=0.30",
+    "pydantic-settings>=2.4",
+    "jinja2>=3.1", # SSR 模板（06 定案）；sse-starlette/pyjwt/sqladmin 随后续里程碑加入
+]
+
+[build-system]
+requires = ["uv_build>=0.11,<0.12"]
+build-backend = "uv_build"
