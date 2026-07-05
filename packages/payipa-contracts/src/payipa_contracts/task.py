@@ -15,6 +15,7 @@ class TaskSpec(BaseModel):
     """一个请求数据任务（恒小、可复现；规则走指针不内嵌）。"""
 
     task_id: str = active("用户视角任务 id")
+    req_id: str = active("请求数据任务 id（调度单元；agent 回报 StatusReport/ResultBatch 以此为准）")
     batch_id: str = active("本次执行轮（批次）id")
     source: str = active("数据源 id/短码")
     target: str = active("抓取目标（URL / API endpoint）")

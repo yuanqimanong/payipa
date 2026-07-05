@@ -20,6 +20,7 @@ def build_parser() -> argparse.ArgumentParser:
     join.add_argument("--server", required=True, help="主控 URL，如 https://pyp.example.com")
     join.add_argument("--token", required=True, help="一次性 join token")
     join.add_argument("--slots", type=int, default=None, help="并发槽 N（默认按机器规格）")
+    join.add_argument("--agent-id", default=None, help="节点 id（默认 agent-1）")
     return parser
 
 
@@ -27,11 +28,13 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     if args.command == "join":
-        print(
-            f"[pyp-agent {__version__}] join server={args.server} slots={args.slots} "
-            "(M0 骨架：出站 WS 注册→心跳→领任务→回报 将于 M1 落地)"
-        )
-        # M1: import anyio; anyio.run(AgentConnection(args.server, args.token, args.slots).run)
+        import anyio
+
+        from pyp_agent.conn import AgentConnection
+
+        conn = AgentConnection(args.server, args.token, slot_n=args.slots or 4, agent_id=args.agent_id or "agent-1")
+        print(f"[pyp-agent {__version__}] joining {args.server} (slots={conn.slot_n}) …")
+        anyio.run(conn.run)  # 出站 WS：注册→心跳→领任务→回报；断线退避重连
         return 0
     parser.print_help()
     return 1

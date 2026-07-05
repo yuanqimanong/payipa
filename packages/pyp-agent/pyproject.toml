@@ -11,6 +11,9 @@ dependencies = [
     "niquests>=3.20",
     "websockets>=16",
     "anyio>=4.14",
+    "parsel>=1.9",       # xpath/css 选择器（内置声明式解释器）
+    "jsonpath-ng>=1.6",  # jsonpath 定位（API 型数据源）
+    "dateparser>=1.2",   # 业务时间解析（parse_date 清洗算子）
 ]
 
 [project.scripts]

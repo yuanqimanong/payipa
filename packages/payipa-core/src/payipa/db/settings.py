@@ -39,6 +39,12 @@ class Settings(BaseSettings):
     s3_secret_key: str | None = None
     s3_bucket: str | None = None
 
+    # 存储兜底（local 后端）+ 内部上传
+    data_root: str = "var/storage"  # 本地对象存储根目录
+    upload_secret: str = "dev-insecure-change-me"  # 内部上传 HMAC 密钥（生产走 env 注入）
+    min_free_mb: int = 500  # 磁盘水位下限（MB）：低于则拒绝新上传并告警
+    raw_retention_days: int = 7  # raw 归档默认保留期（按源可覆盖，02 定案）；GC 清理过期
+
     def _db_name(self, key: DbKey) -> str:
         return {
             "pyp": self.pg_db_pyp,

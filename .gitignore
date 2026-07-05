@@ -11,6 +11,9 @@ dist/
 .venv/
 venv/
 
+# 本地对象存储（local 后端数据根）
+var/
+
 # 工具缓存
 .ruff_cache/
 .pytest_cache/

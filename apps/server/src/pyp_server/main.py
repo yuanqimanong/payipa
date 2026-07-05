@@ -12,7 +12,8 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from pyp_server.routers import api, health, ws
+from pyp_server.hub import AgentHub
+from pyp_server.routers import api, explore, health, internal, ws
 from pyp_server.settings import get_server_settings
 
 _HERE = Path(__file__).parent
@@ -26,8 +27,11 @@ def create_app() -> FastAPI:
         description=settings.description,
         debug=settings.debug,
     )
+    app.state.hub = AgentHub()  # 在线 agent 连接注册表（进程内单例）
     app.include_router(health.router)
     app.include_router(api.router)
+    app.include_router(explore.router)
+    app.include_router(internal.router)
     app.include_router(ws.router)
 
     # SSR（06 定案）：模板与静态资源目录（M0 占位）

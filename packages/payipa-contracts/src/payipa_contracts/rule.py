@@ -64,6 +64,9 @@ class RulePack(BaseModel):
     """一个版型的完整声明式规则。"""
 
     fields: list[FieldRule] = active("字段规则列表")
+    item_locator: Locator | None = active(
+        "列表页行选择器：设则每个匹配节点产一条记录（字段定位相对节点）；不设则整页一条", default=None
+    )
     layout_match: LayoutMatch | None = active("版型识别", default=None)
     crawl: CrawlRules | None = active("爬行规则", default=None, since="M2")
     fail_when: FailWhen | None = active("软失败判定", default=None, since="M2")

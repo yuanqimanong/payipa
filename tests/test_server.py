@@ -34,6 +34,7 @@ def test_docs_and_redoc_served() -> None:
 def test_task_preview_roundtrip() -> None:
     spec = {
         "task_id": "t1",
+        "req_id": "rq1",
         "batch_id": "b1",
         "source": "demo",
         "target": "https://example.com",

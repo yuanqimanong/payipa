@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 
 from payipa_contracts._annotate import active, reserved
 from payipa_contracts.artifact import ArtifactRef
+from payipa_contracts.result import ResultBatch
 from payipa_contracts.task import TaskSpec
 from payipa_contracts.version import CONTRACT_VERSION
 
@@ -63,6 +64,13 @@ class ErrorFrame(BaseModel):
     req_id: str | None = active("关联请求任务 id（若有）", default=None)
 
 
+class ResultReport(BaseModel):
+    """结果回传帧：小结构化结果 + 大对象指针 + 执行摘要（走控制面，大 blob 已直传）。"""
+
+    type: Literal["result"] = "result"
+    result: ResultBatch = active("回传结果（items + artifacts 指针 + summary）", since="M1")
+
+
 # ── 主控 → 客户端（agent）──────────────────────────────────────────────────
 class RegisterAck(BaseModel):
     """注册应答：换取长期节点凭证 + 契约版本。"""
@@ -78,6 +86,9 @@ class TaskAssign(BaseModel):
 
     type: Literal["task_assign"] = "task_assign"
     task: TaskSpec = active("任务定义", since="M1")
+    upload_token: str | None = active(
+        "本任务的内部上传 token（local 兜底回传 raw 用；绑定 source+batch）", default=None, since="M1"
+    )
 
 
 class Cancel(BaseModel):
@@ -90,7 +101,7 @@ class Cancel(BaseModel):
 
 # ── 判别联合（供 server 端点分发 / OpenAPI）────────────────────────────────
 ClientFrame = Annotated[
-    RegisterReq | Heartbeat | StatusReport | ErrorFrame,
+    RegisterReq | Heartbeat | StatusReport | ResultReport | ErrorFrame,
     Field(discriminator="type"),
 ]
 ServerFrame = Annotated[

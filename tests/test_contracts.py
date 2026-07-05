@@ -79,6 +79,7 @@ def test_client_frame_discriminated_union_roundtrip() -> None:
 def test_task_assign_carries_task_spec() -> None:
     task = c.TaskSpec(
         task_id="t1",
+        req_id="rq1",
         batch_id="b1",
         source="demo",
         target="https://example.com",
