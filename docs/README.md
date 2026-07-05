@@ -2,7 +2,8 @@
 
 > 本目录是 payipa / 爬亿爬 的**设计与实现方案**（原「新方案」讨论定案记录，现随代码归入 `payipa/docs/`）。
 > **开工蓝图 = [软件需求与详细设计说明书.md](软件需求与详细设计说明书.md)（SDD）**，综合全部定案；冲突以 SDD + [决策记录.md](决策记录.md) 为准。
-> 落地约定/命令见 [../CLAUDE.md](../CLAUDE.md)；本地试用见 [../QUICKSTART.md](../QUICKSTART.md)。
+> 落地约定/命令见 [../CLAUDE.md](../CLAUDE.md)；本地试用见 [../QUICKSTART.md](../QUICKSTART.md)；
+> **干净机器从零用 PyCharm 调试全链路见 [从零开始调试测试.md](从零开始调试测试.md)（手把手）**。
 
 ## 实现进度（2026-07-05）
 
@@ -11,7 +12,7 @@
 | M0 骨架 | ✅ 已实现 · CI 绿 | 双仓 + uv workspace、contracts 全 schema、三库 Alembic、server 空壳、agent 骨架、import-linter |
 | M1 Walking Skeleton | ✅ 已实现 · 活体验证 | 单源端到端（建源 → agent WS 抓取 → raw 存档 → 入库 data_center → Tabulator 查看页）+ 声明式解释器/FieldMeta |
 | 登录 + 建源界面 | ✅ 已实现 | argon2 + HttpOnly cookie 登录、建源表单、页面级保护、`pyp-admin` 建管理员 |
-| M2 调度与分布式 | ⏳ 计划 | cron / Redis 队列 / 槽位派发 / 租约回收 / 限流调频 / 多 agent |
+| M2 调度与分布式 | 🔧 进行中 | 已实现：持久化派发环（槽位派发/自动排空）+ 租约回收 + 断连重排 + 监控端点实时聚合 + agent Docker 多容器。待做：cron/定时 · Redis 队列 · 优先级 · 限流调频 · Cancel · 分组亲和 |
 | M3 组装沙箱 · M4 推送对外 · M5 智能增强 | ⏳ 计划 | 见 SDD §12 |
 
 > 契约字段的「已生效/未生效 + since_milestone」标注即反映各字段的实现里程碑（见 `payipa-contracts`）。
