@@ -9,12 +9,11 @@ from __future__ import annotations
 from pathlib import Path
 
 from fastapi import FastAPI
-from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from pyp_server.hub import AgentHub
-from pyp_server.routers import api, auth_routes, explore, health, internal, sources, ws
+from pyp_server.routers import api, auth_routes, explore, health, internal, sources, ui, ws
 from pyp_server.settings import get_server_settings
 
 _HERE = Path(__file__).parent
@@ -31,17 +30,14 @@ def create_app() -> FastAPI:
     app.state.hub = AgentHub()  # 在线 agent 连接注册表（进程内单例）
     app.include_router(health.router)
     app.include_router(auth_routes.router)
+    app.include_router(ui.router)
     app.include_router(sources.router)
     app.include_router(api.router)
     app.include_router(explore.router)
     app.include_router(internal.router)
     app.include_router(ws.router)
 
-    @app.get("/", include_in_schema=False)
-    async def _root() -> RedirectResponse:
-        return RedirectResponse("/sources")
-
-    # SSR（06 定案）：模板与静态资源目录（M0 占位）
+    # SSR（06 定案）：模板与静态资源目录
     app.state.templates = Jinja2Templates(directory=str(_HERE / "templates"))
     static_dir = _HERE / "static"
     if static_dir.is_dir():

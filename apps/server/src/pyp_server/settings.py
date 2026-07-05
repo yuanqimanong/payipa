@@ -10,7 +10,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class ServerSettings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="PYP_SERVER_",
-        env_file=(".env", "../.env"),
+        env_file=".env",  # payipa/.env（本项目内）；见 .env.example
         env_file_encoding="utf-8",
         extra="ignore",
     )

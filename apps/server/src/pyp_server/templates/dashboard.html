@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}仪表盘{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div class="titles">
+    <h2>仪表盘 <span class="mock-tag">● 示例数据</span></h2>
+    <p>平台概览。真实统计接入后示例数据自动移除。</p>
+  </div>
+  <div class="actions"><a class="btn" href="/sources/new">＋ 新建数据源</a></div>
+</div>
+<div class="grid cols-4" id="stats"></div>
+<div class="card" style="margin-top: 16px">
+  <div class="card-head">最近批次</div>
+  <div class="table-wrap"><table class="tbl"><thead id="rhead"></thead><tbody id="rbody"></tbody></table></div>
+</div>
+<script>
+  const BADGE = { active: "green", online: "green", success: "green", done: "green", running: "blue", queued: "blue", assigned: "blue", testing: "amber", draft: "amber", paused: "amber", pending: "amber", disabled: "red", offline: "red", failed: "red", error: "red" };
+  (async () => {
+    const d = (await (await fetch("/static/mock.json")).json()).dashboard;
+    document.getElementById("stats").innerHTML = d.stats
+      .map((s) => `<div class="stat"><div class="k">${s.k}</div><div class="v">${s.v}</div><div class="d ${s.dir}">${s.d}</div></div>`)
+      .join("");
+    const cols = d.recent.columns;
+    document.getElementById("rhead").innerHTML = "<tr>" + cols.map((c) => `<th>${c.label}</th>`).join("") + "</tr>";
+    document.getElementById("rbody").innerHTML = d.recent.rows
+      .map((r) => "<tr>" + cols.map((c) => {
+        let v = r[c.key]; if (v == null) v = "";
+        if (c.type === "badge") { const cls = BADGE[String(v).toLowerCase()] || ""; return `<td><span class="badge ${cls}"><span class="dot"></span>${v}</span></td>`; }
+        if (c.type === "mono") return `<td><code>${v}</code></td>`;
+        return `<td>${v}</td>`;
+      }).join("") + "</tr>")
+      .join("");
+  })();
+</script>
+{% endblock %}

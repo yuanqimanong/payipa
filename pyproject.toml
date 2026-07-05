@@ -23,7 +23,7 @@ payipa-contracts = { workspace = true }
 payipa-core = { workspace = true }
 pyp-server = { workspace = true }
 pyp-agent = { workspace = true }
-# 双仓纪律（新方案 00 §2.2）：提交态用 git 源（可复现、CI 可解析；jb 已发 PyPI 后可切版本约束）。
+# 双仓纪律（docs/00 §2.2）：提交态用 git 源（可复现、CI 可解析；jb 已发 PyPI 后可切版本约束）。
 #    本地联调改 jb 时临时切回 editable path（改后 uv sync，不提交此改动）：
 #    jianbing-utils = { path = "../jianbing_utils", editable = true }
 #    详见 CLAUDE.md。

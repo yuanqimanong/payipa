@@ -35,4 +35,4 @@ uv run pytest
 
 三库连接从 `../project/.env`（或环境变量）读：`PG_HOST/PG_PORT/PG_USER/PG_PASSWORD` + `PG_DB_PYP`/`PG_DB_DATA_CENTER`/`PG_DB_BUSINESS`。迁移：`uv run alembic -c deploy/alembic.ini upgrade heads`。
 
-> 开发约定、双仓纪律、里程碑见 [CLAUDE.md](CLAUDE.md)。权威设计见 `../新方案/`（SDD + 决策记录为准）。
+> 开发约定、双仓纪律、里程碑见 [CLAUDE.md](CLAUDE.md)。权威设计见 [docs/](docs/README.md)（实现方案；SDD + 决策记录为准）。

@@ -1,0 +1,213 @@
+{
+  "_note": "临时 mock 数据，仅供未实现页面调试展示。对应功能实现后删除本文件及 mock_page 路由即可。",
+  "dashboard": {
+    "stats": [
+      { "k": "数据源", "v": "12", "d": "+2 本周", "dir": "up" },
+      { "k": "今日采集", "v": "48,210", "d": "+12.4%", "dir": "up" },
+      { "k": "在线节点", "v": "3 / 4", "d": "1 离线", "dir": "down" },
+      { "k": "解析成功率", "v": "98.6%", "d": "+0.3%", "dir": "up" }
+    ],
+    "recent": {
+      "columns": [
+        { "key": "batch", "label": "批次", "type": "mono" },
+        { "key": "source", "label": "数据源" },
+        { "key": "ok", "label": "成功" },
+        { "key": "fail", "label": "失败" },
+        { "key": "status", "label": "状态", "type": "badge" },
+        { "key": "time", "label": "开始时间" }
+      ],
+      "rows": [
+        { "batch": "b-10241", "source": "books 图书列表", "ok": 998, "fail": 2, "status": "done", "time": "2026-07-05 14:02" },
+        { "batch": "b-10240", "source": "news 新闻站", "ok": 512, "fail": 7, "status": "running", "time": "2026-07-05 13:55" },
+        { "batch": "b-10239", "source": "jobs 招聘", "ok": 0, "fail": 0, "status": "queued", "time": "2026-07-05 13:50" },
+        { "batch": "b-10238", "source": "x-api 帖子", "ok": 1200, "fail": 340, "status": "failed", "time": "2026-07-05 13:31" }
+      ]
+    }
+  },
+  "tasks": {
+    "desc": "用户任务（数据能力实例）：触发、批次、进度、血缘。",
+    "columns": [
+      { "key": "id", "label": "任务", "type": "mono" },
+      { "key": "source", "label": "数据源" },
+      { "key": "trigger", "label": "触发" },
+      { "key": "priority", "label": "优先级", "type": "badge" },
+      { "key": "status", "label": "状态", "type": "badge" },
+      { "key": "updated", "label": "更新" }
+    ],
+    "rows": [
+      { "id": "t-3021", "source": "books 图书列表", "trigger": "cron 每日 02:00", "priority": "high", "status": "running", "updated": "2 分钟前" },
+      { "id": "t-3020", "source": "news 新闻站", "trigger": "手动", "priority": "mid", "status": "done", "updated": "1 小时前" },
+      { "id": "t-3019", "source": "jobs 招聘", "trigger": "一次性 定时", "priority": "low", "status": "queued", "updated": "10 分钟前" },
+      { "id": "t-3018", "source": "x-api 帖子", "trigger": "API", "priority": "high", "status": "failed", "updated": "昨天" }
+    ]
+  },
+  "rules": {
+    "desc": "数据源解析规则/版型：内容寻址版本、状态机 draft→testing→active。",
+    "columns": [
+      { "key": "source", "label": "数据源" },
+      { "key": "ver", "label": "版本", "type": "mono" },
+      { "key": "hash", "label": "内容 hash", "type": "mono" },
+      { "key": "fields", "label": "字段数" },
+      { "key": "status", "label": "状态", "type": "badge" },
+      { "key": "by", "label": "创建者" }
+    ],
+    "rows": [
+      { "source": "books 图书列表", "ver": "v3", "hash": "a1b2c3…", "fields": 4, "status": "active", "by": "admin" },
+      { "source": "news 新闻站", "ver": "v7", "hash": "9f8e7d…", "fields": 9, "status": "active", "by": "tech-01" },
+      { "source": "jobs 招聘", "ver": "v2", "hash": "44de21…", "fields": 6, "status": "testing", "by": "tech-02" },
+      { "source": "x-api 帖子", "ver": "v1", "hash": "0c1122…", "fields": 5, "status": "draft", "by": "admin" }
+    ]
+  },
+  "assemblies": {
+    "desc": "数据组装（简单版 ETL）：读 data_center → 写 business；增量 = 读侧水位 + 写侧指纹幂等。",
+    "columns": [
+      { "key": "name", "label": "组装任务" },
+      { "key": "upstream", "label": "上游任务" },
+      { "key": "mode", "label": "模式" },
+      { "key": "rows", "label": "产物行数" },
+      { "key": "status", "label": "状态", "type": "badge" }
+    ],
+    "rows": [
+      { "name": "图书+评论 合并", "upstream": "t-3021", "mode": "增量", "rows": "128,400", "status": "done" },
+      { "name": "新闻日报聚合", "upstream": "t-3020", "mode": "全量", "rows": "9,210", "status": "running" },
+      { "name": "招聘薪资统计", "upstream": "t-3019", "mode": "增量", "rows": "0", "status": "queued" }
+    ]
+  },
+  "push": {
+    "desc": "推送组件：手动 / 链路自动 / 定时；批次推送 + 指纹下游去重；Outbox 可靠投递。",
+    "columns": [
+      { "key": "name", "label": "推送组件" },
+      { "key": "target", "label": "目标" },
+      { "key": "trigger", "label": "触发" },
+      { "key": "last", "label": "最近推送" },
+      { "key": "status", "label": "状态", "type": "badge" }
+    ],
+    "rows": [
+      { "name": "推送 Ghost 博客", "target": "https://blog.example.com", "trigger": "链路自动", "last": "998 条 · 成功", "status": "active" },
+      { "name": "飞书群通知", "target": "lark webhook", "trigger": "定时 每日 09:00", "last": "1 条 · 成功", "status": "active" },
+      { "name": "下游 HTTP", "target": "https://dw.example.com/ingest", "trigger": "手动", "last": "340 条 · 失败", "status": "failed" }
+    ]
+  },
+  "users": {
+    "desc": "用户管理：管理员开通、停用不删、交接向导、多角色 + 特殊权限。",
+    "columns": [
+      { "key": "username", "label": "用户名" },
+      { "key": "roles", "label": "角色" },
+      { "key": "status", "label": "状态", "type": "badge" },
+      { "key": "last", "label": "最近登录" }
+    ],
+    "rows": [
+      { "username": "admin", "roles": "管理员", "status": "active", "last": "刚刚" },
+      { "username": "tech-01", "roles": "技术", "status": "active", "last": "3 小时前" },
+      { "username": "ops-01", "roles": "运营", "status": "active", "last": "昨天" },
+      { "username": "wei", "roles": "运维", "status": "disabled", "last": "2026-06-20" }
+    ]
+  },
+  "roles": {
+    "desc": "RBAC：角色 × 资源 × 动作 + 特殊权限（如 SQL 窗口、强制入库）。",
+    "columns": [
+      { "key": "role", "label": "角色" },
+      { "key": "scope", "label": "资源范围" },
+      { "key": "actions", "label": "动作" },
+      { "key": "users", "label": "用户数" }
+    ],
+    "rows": [
+      { "role": "管理员", "scope": "全部", "actions": "读/写/执行/授权", "users": 1 },
+      { "role": "技术", "scope": "规则/任务/查询/组装/推送", "actions": "读/写/执行", "users": 3 },
+      { "role": "运营", "scope": "任务/查看/补数", "actions": "读/写/执行", "users": 2 },
+      { "role": "运维", "scope": "节点/监控/日志/存储", "actions": "读 (+节点写)", "users": 1 }
+    ]
+  },
+  "config": {
+    "desc": "公共配置：AI 模型/系统提示词/存储/全局默认参数/代理商（凭证加密存储）。",
+    "columns": [
+      { "key": "key", "label": "配置项", "type": "mono" },
+      { "key": "value", "label": "值" },
+      { "key": "scope", "label": "分类" }
+    ],
+    "rows": [
+      { "key": "storage.backend", "value": "local (var/storage)", "scope": "存储" },
+      { "key": "crawl.rate_limit", "value": "10 req/s / 子域", "scope": "全局默认" },
+      { "key": "crawl.retry", "value": "3 次 · 指数退避", "scope": "全局默认" },
+      { "key": "raw.retention_days", "value": "7", "scope": "存储" },
+      { "key": "ai.model", "value": "（未配置）", "scope": "AI" }
+    ]
+  },
+  "audit": {
+    "desc": "操作日志：任务/规则发布/强制入库/SQL 查询/权限变更/交接（保留期可配）。",
+    "columns": [
+      { "key": "time", "label": "时间" },
+      { "key": "actor", "label": "操作者" },
+      { "key": "action", "label": "动作", "type": "mono" },
+      { "key": "object", "label": "对象" },
+      { "key": "source", "label": "来源", "type": "badge" }
+    ],
+    "rows": [
+      { "time": "14:02:11", "actor": "admin", "action": "source.create", "object": "books", "source": "web" },
+      { "time": "13:31:40", "actor": "tech-01", "action": "rule.publish", "object": "news v7", "source": "web" },
+      { "time": "11:20:05", "actor": "ops-01", "action": "data.force_insert", "object": "books #4821", "source": "web" },
+      { "time": "09:15:33", "actor": "admin", "action": "user.disable", "object": "wei", "source": "web" }
+    ]
+  },
+  "nodes": {
+    "desc": "节点管理：agent 出站接入、槽位 N/权重/分组、升级提示。",
+    "columns": [
+      { "key": "agent", "label": "节点", "type": "mono" },
+      { "key": "host", "label": "主机" },
+      { "key": "slots", "label": "槽位(用/总)" },
+      { "key": "ver", "label": "版本" },
+      { "key": "status", "label": "状态", "type": "badge" }
+    ],
+    "rows": [
+      { "agent": "agent-a1", "host": "crawl-node-1", "slots": "6 / 32", "ver": "0.1.0", "status": "online" },
+      { "agent": "agent-a2", "host": "crawl-node-2", "slots": "18 / 32", "ver": "0.1.0", "status": "online" },
+      { "agent": "agent-b1", "host": "auto-node-1", "slots": "2 / 8", "ver": "0.1.0", "status": "online" },
+      { "agent": "agent-b2", "host": "auto-node-2", "slots": "0 / 8", "ver": "0.0.9", "status": "offline" }
+    ]
+  },
+  "monitor": {
+    "desc": "系统监控：节点/队列/批次/限流调频 + 数据质量（解析成功·失败·空白率）。",
+    "columns": [
+      { "key": "metric", "label": "指标" },
+      { "key": "value", "label": "当前值" },
+      { "key": "trend", "label": "趋势" },
+      { "key": "status", "label": "状态", "type": "badge" }
+    ],
+    "rows": [
+      { "metric": "队列深度", "value": "1,204", "trend": "↘ 下降", "status": "running" },
+      { "metric": "解析成功率", "value": "98.6%", "trend": "↗ 上升", "status": "active" },
+      { "metric": "空白率", "value": "0.8%", "trend": "→ 平稳", "status": "active" },
+      { "metric": "429/503 触发", "value": "12 / 分钟", "trend": "↗ 上升", "status": "testing" },
+      { "metric": "封禁换出口", "value": "3 / 分钟", "trend": "→ 平稳", "status": "active" }
+    ]
+  },
+  "storage": {
+    "desc": "存储管理：磁盘水位、用量、artifact GC（raw 默认保留 7 天）。",
+    "columns": [
+      { "key": "source", "label": "数据源" },
+      { "key": "raw", "label": "raw 用量" },
+      { "key": "files", "label": "多媒体" },
+      { "key": "retention", "label": "保留期" }
+    ],
+    "rows": [
+      { "source": "books 图书列表", "raw": "1.2 GB", "files": "0", "retention": "7 天" },
+      { "source": "news 新闻站", "raw": "18.4 GB", "files": "3.1 GB", "retention": "7 天" },
+      { "source": "x-api 帖子", "raw": "412 MB", "files": "0", "retention": "3 天" }
+    ]
+  },
+  "logs": {
+    "desc": "系统运行日志（仅运维权限可见）。存平台库 pyp，默认保留 30 天。",
+    "columns": [
+      { "key": "time", "label": "时间" },
+      { "key": "level", "label": "级别", "type": "badge" },
+      { "key": "comp", "label": "组件", "type": "mono" },
+      { "key": "msg", "label": "消息" }
+    ],
+    "rows": [
+      { "time": "14:02:11", "level": "active", "comp": "crawl.dispatch", "msg": "batch b-10241 dispatched 1000 requests" },
+      { "time": "13:31:41", "level": "failed", "comp": "deliver.outbox", "msg": "push to dw.example.com failed (502), retry in 8s" },
+      { "time": "13:20:00", "level": "testing", "comp": "crawl.throttle", "msg": "news.example.com 429 → rate halved to 5rps" },
+      { "time": "09:15:33", "level": "active", "comp": "auth", "msg": "user wei disabled by admin" }
+    ]
+  }
+}

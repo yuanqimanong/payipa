@@ -32,7 +32,7 @@ async def sources_list(request: Request):
         ).all()
     sources = [{"uuid": r[0], "name": r[1], "created_at": r[2].isoformat() if r[2] else ""} for r in rows]
     return request.app.state.templates.TemplateResponse(
-        request, "sources_list.html", {"user": user, "sources": sources}
+        request, "sources_list.html", {"user": user, "sources": sources, "active": "sources"}
     )
 
 
@@ -41,7 +41,9 @@ async def sources_new(request: Request):
     user = await get_current_user(request)
     if user is None:
         return _login_redirect()
-    return request.app.state.templates.TemplateResponse(request, "source_new.html", {"user": user, "error": None})
+    return request.app.state.templates.TemplateResponse(
+        request, "source_new.html", {"user": user, "error": None, "active": "sources"}
+    )
 
 
 @router.post("/sources/create", summary="建源提交 → 运行 → 跳查看页")
@@ -80,7 +82,7 @@ async def sources_create(request: Request):
         return request.app.state.templates.TemplateResponse(
             request,
             "source_new.html",
-            {"user": user, "error": "数据源短码、种子 URL、至少一个字段 为必填"},
+            {"user": user, "error": "数据源短码、种子 URL、至少一个字段 为必填", "active": "sources"},
             status_code=400,
         )
 

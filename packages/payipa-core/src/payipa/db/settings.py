@@ -17,7 +17,7 @@ DbKey = Literal["pyp", "data_center", "business"]
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=(".env", "../.env"),
+        env_file=".env",  # payipa/.env（本项目内）；见 .env.example
         env_file_encoding="utf-8",
         extra="ignore",
         case_sensitive=False,

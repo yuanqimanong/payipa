@@ -52,4 +52,6 @@ async def data_page(source: str, request: Request):
     user = await get_current_user(request)
     if user is None:
         return RedirectResponse("/login", status_code=303)
-    return request.app.state.templates.TemplateResponse(request, "data.html", {"source": source, "user": user})
+    return request.app.state.templates.TemplateResponse(
+        request, "data.html", {"source": source, "user": user, "active": "sources"}
+    )

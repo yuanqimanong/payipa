@@ -4,27 +4,34 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>登录 · payipa</title>
+    <link rel="stylesheet" href="/static/app.css" />
     <style>
-      body { font-family: system-ui, sans-serif; background: #f5f6f8; display: flex; min-height: 100vh; align-items: center; justify-content: center; margin: 0; }
-      .card { background: #fff; padding: 32px 28px; border-radius: 10px; box-shadow: 0 2px 16px rgba(0,0,0,.08); width: 320px; }
-      h1 { font-size: 20px; margin: 0 0 4px; }
-      .sub { color: #888; font-size: 13px; margin-bottom: 20px; }
-      label { display: block; font-size: 13px; color: #555; margin: 12px 0 4px; }
-      input { width: 100%; box-sizing: border-box; padding: 9px 10px; border: 1px solid #ccc; border-radius: 6px; font-size: 14px; }
-      button { width: 100%; margin-top: 20px; padding: 10px; background: #2563eb; color: #fff; border: 0; border-radius: 6px; font-size: 15px; cursor: pointer; }
-      .error { color: #dc2626; font-size: 13px; margin-top: 12px; min-height: 16px; }
+      body { display: flex; min-height: 100vh; align-items: center; justify-content: center; }
+      .login { width: 340px; }
+      .login .brand { border: 0; padding: 0 0 20px; font-size: 18px; }
+      .login .card { padding: 26px 26px 28px; box-shadow: var(--shadow); }
+      .login h1 { font-size: 18px; margin: 0 0 4px; }
+      .login .sub { color: var(--text-muted); font-size: 13px; margin-bottom: 18px; }
+      .login .btn { width: 100%; justify-content: center; margin-top: 20px; padding: 10px; }
     </style>
   </head>
   <body>
-    <form class="card" method="post" action="/login">
-      <h1>payipa / 爬亿爬</h1>
-      <div class="sub">数据平台 · 请登录（账号由管理员开通）</div>
-      <label for="username">用户名</label>
-      <input id="username" name="username" autocomplete="username" autofocus />
-      <label for="password">密码</label>
-      <input id="password" name="password" type="password" autocomplete="current-password" />
-      <button type="submit">登录</button>
-      <div class="error">{% if error %}{{ error }}{% endif %}</div>
+    <form class="login" method="post" action="/login">
+      <div class="brand"><span class="logo">爬</span> <div>payipa <small>爬亿爬</small></div></div>
+      <div class="card">
+        <h1>登录</h1>
+        <div class="sub">数据平台 · 账号由管理员开通（无自助注册）</div>
+        <div class="field">
+          <label for="username">用户名</label>
+          <input id="username" name="username" autocomplete="username" autofocus />
+        </div>
+        <div class="field">
+          <label for="password">密码</label>
+          <input id="password" name="password" type="password" autocomplete="current-password" />
+        </div>
+        {% if error %}<div class="form-error" style="margin: 4px 0 0">{{ error }}</div>{% endif %}
+        <button class="btn" type="submit">登录</button>
+      </div>
     </form>
   </body>
 </html>

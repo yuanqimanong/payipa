@@ -1,39 +1,35 @@
-<!doctype html>
-<html lang="zh">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>数据查看 · {{ source }}</title>
-    <!-- vendor 静态资源（无 CDN，06 SSR 栈） -->
-    <link rel="stylesheet" href="/static/vendor/tabulator/tabulator.min.css" />
-    <script src="/static/vendor/tabulator/tabulator.min.js"></script>
-    <script src="/static/vendor/htmx/htmx.min.js"></script>
-    <style>
-      body { font-family: system-ui, sans-serif; margin: 24px; color: #222; }
-      code { background: #f0f0f0; padding: 1px 5px; border-radius: 4px; }
-      h2 small { color: #888; font-weight: normal; }
-      #grid { margin-top: 12px; }
-    </style>
-  </head>
-  <body>
-    <h2>数据源 <code>{{ source }}</code> 产出 <small>（Tabulator remote：组合筛选 / 多列排序 / 分页 → 服务端译 SQL）</small></h2>
-    <div id="grid"></div>
-    <script>
-      // /api/data/{source} 返回 {last_page, data} —— 正是 Tabulator remote 分页契约。
-      // 表头筛选(headerFilter) → filter[i]；点列头排序 → sort[i]；翻页 → page/size。全部发服务端。
-      new Tabulator("#grid", {
-        ajaxURL: "/api/data/{{ source }}",
-        layout: "fitDataStretch",
-        placeholder: "暂无数据（该数据源尚未采集或无匹配）",
-        pagination: true,
-        paginationMode: "remote",
-        paginationSize: 20,
-        paginationSizeSelector: [10, 20, 50, 100],
-        filterMode: "remote",
-        sortMode: "remote",
-        autoColumns: true, // 动态源列不固定，自动推断
-        columnDefaults: { headerFilter: "input", headerFilterLiveFilter: false },
-      });
-    </script>
-  </body>
-</html>
+{% extends "base.html" %}
+{% block title %}数据 · {{ source }}{% endblock %}
+{% block head %}
+<link rel="stylesheet" href="/static/vendor/tabulator/tabulator.min.css" />
+<script src="/static/vendor/tabulator/tabulator.min.js"></script>
+<script src="/static/vendor/htmx/htmx.min.js"></script>
+<style>
+  .tabulator { border: 0; background: transparent; font-size: 13.5px; }
+  .tabulator .tabulator-header { border-bottom: 1px solid var(--border); background: var(--surface-2); }
+  .tabulator-row.tabulator-row-even { background: var(--surface-2); }
+</style>
+{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div class="titles">
+    <h2>数据源 <code>{{ source }}</code> 产出</h2>
+    <p>Tabulator remote：表头筛选 / 点列头排序 / 分页 —— 全部服务端译 SQL。</p>
+  </div>
+  <div class="actions"><a class="btn ghost" href="/sources">← 返回列表</a></div>
+</div>
+<div class="card card-pad">
+  <div id="grid"></div>
+</div>
+<script>
+  new Tabulator("#grid", {
+    ajaxURL: "/api/data/{{ source }}",
+    layout: "fitDataStretch",
+    placeholder: "暂无数据（该数据源尚未采集或无匹配）",
+    pagination: true, paginationMode: "remote", paginationSize: 20,
+    paginationSizeSelector: [10, 20, 50, 100],
+    filterMode: "remote", sortMode: "remote", autoColumns: true,
+    columnDefaults: { headerFilter: "input", headerFilterLiveFilter: false },
+  });
+</script>
+{% endblock %}
