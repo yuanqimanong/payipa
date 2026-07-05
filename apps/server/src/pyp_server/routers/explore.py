@@ -5,12 +5,14 @@ from __future__ import annotations
 import re
 
 from fastapi import APIRouter, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from payipa.crawl.ingest import build_data_table
 from payipa.db.engine import get_engine
 from payipa.explore.query import query_data
 from sqlalchemy.exc import ProgrammingError
 from starlette.datastructures import QueryParams
+
+from pyp_server.auth import get_current_user
 
 router = APIRouter(tags=["explore"])
 
@@ -46,6 +48,8 @@ async def get_data(source: str, request: Request) -> dict:
 
 
 @router.get("/data/{source}", response_class=HTMLResponse, summary="数据查看页（SSR + Tabulator remote）")
-async def data_page(source: str, request: Request) -> HTMLResponse:
-    templates = request.app.state.templates
-    return templates.TemplateResponse(request, "data.html", {"source": source})
+async def data_page(source: str, request: Request):
+    user = await get_current_user(request)
+    if user is None:
+        return RedirectResponse("/login", status_code=303)
+    return request.app.state.templates.TemplateResponse(request, "data.html", {"source": source, "user": user})

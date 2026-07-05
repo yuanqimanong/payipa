@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 
+from jianbing_utils import crypto
 from payipa_contracts import RulePack, RulePointer
 from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -16,7 +16,7 @@ from payipa.db.pyp import Rule
 def content_hash(pack: RulePack) -> str:
     """规则内容的规范化 sha256（字段排序，确定性）。"""
     blob = json.dumps(pack.model_dump(mode="json"), sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-    return hashlib.sha256(blob.encode("utf-8")).hexdigest()
+    return crypto.sha256(blob)
 
 
 class RuleStore:

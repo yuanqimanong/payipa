@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="zh">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>登录 · payipa</title>
+    <style>
+      body { font-family: system-ui, sans-serif; background: #f5f6f8; display: flex; min-height: 100vh; align-items: center; justify-content: center; margin: 0; }
+      .card { background: #fff; padding: 32px 28px; border-radius: 10px; box-shadow: 0 2px 16px rgba(0,0,0,.08); width: 320px; }
+      h1 { font-size: 20px; margin: 0 0 4px; }
+      .sub { color: #888; font-size: 13px; margin-bottom: 20px; }
+      label { display: block; font-size: 13px; color: #555; margin: 12px 0 4px; }
+      input { width: 100%; box-sizing: border-box; padding: 9px 10px; border: 1px solid #ccc; border-radius: 6px; font-size: 14px; }
+      button { width: 100%; margin-top: 20px; padding: 10px; background: #2563eb; color: #fff; border: 0; border-radius: 6px; font-size: 15px; cursor: pointer; }
+      .error { color: #dc2626; font-size: 13px; margin-top: 12px; min-height: 16px; }
+    </style>
+  </head>
+  <body>
+    <form class="card" method="post" action="/login">
+      <h1>payipa / 爬亿爬</h1>
+      <div class="sub">数据平台 · 请登录（账号由管理员开通）</div>
+      <label for="username">用户名</label>
+      <input id="username" name="username" autocomplete="username" autofocus />
+      <label for="password">密码</label>
+      <input id="password" name="password" type="password" autocomplete="current-password" />
+      <button type="submit">登录</button>
+      <div class="error">{% if error %}{{ error }}{% endif %}</div>
+    </form>
+  </body>
+</html>

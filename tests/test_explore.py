@@ -8,12 +8,10 @@ from pyp_server.main import app
 client = TestClient(app)
 
 
-def test_data_page_renders_html() -> None:
-    r = client.get("/data/mysource")
-    assert r.status_code == 200
-    assert r.headers["content-type"].startswith("text/html")
-    assert "mysource" in r.text  # 模板注入了 source
-    assert "tabulator.min.js" in r.text  # 引用了 vendored Tabulator（非 CDN）
+def test_data_page_requires_login() -> None:
+    r = client.get("/data/mysource", follow_redirects=False)
+    assert r.status_code == 303
+    assert r.headers["location"] == "/login"
 
 
 def test_vendored_static_served() -> None:

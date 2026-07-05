@@ -1,16 +1,11 @@
-"""应用 REST API。M1：/api/agents（在线节点）+ /api/sources/{uuid}/run（手动触发单源一次）。
+"""应用 REST API。/api/agents（在线节点）+ /api/sources/{uuid}/run（触发单源）+ 契约 stub。
 
-其余为契约 stub（让 OpenAPI 呈现 schema）。完整端点清单见 SDD §6.5。
+完整端点清单见 SDD §6.5；JSON API 的细粒度鉴权（RBAC）留后续安全里程碑。
 """
 
 from __future__ import annotations
 
 from fastapi import APIRouter, Request
-from payipa.crawl.rules import RuleStore
-from payipa.crawl.run import create_batch_with_requests, ensure_data_table, setup_source
-from payipa.db.engine import get_engine
-from payipa.db.settings import get_settings
-from payipa.security.tokens import issue_upload_token
 from payipa_contracts import (
     BatchProgress,
     Channel,
@@ -21,6 +16,8 @@ from payipa_contracts import (
     TaskSpec,
 )
 from pydantic import BaseModel, Field
+
+from pyp_server.service import dispatch_source_run
 
 router = APIRouter(prefix="/api", tags=["api"])
 
@@ -58,26 +55,15 @@ async def preview_task(spec: TaskSpec) -> TaskAssign:
     return TaskAssign(task=spec)
 
 
-@router.post("/sources/{uuid}/run", response_model=RunResponse, summary="M1：手动触发单源一次采集")
+@router.post("/sources/{uuid}/run", response_model=RunResponse, summary="触发单源一次采集")
 async def run_source(uuid: str, body: RunRequest, request: Request) -> RunResponse:
-    hub = request.app.state.hub
-    pyp = get_engine("pyp")
-    dc = get_engine("data_center")
-    _source_id, task_id = await setup_source(pyp, uuid)
-    ptr = await RuleStore(pyp).put(_source_id, body.rule)
-    indexed = body.indexed_fields or [f.name for f in body.rule.fields if f.index]
-    await ensure_data_table(dc, uuid, indexed)
-    batch_id, specs = await create_batch_with_requests(
-        pyp, task_id=task_id, source_uuid=uuid, targets=body.seed_urls, rule_ptr=ptr, channel=body.channel
+    result = await dispatch_source_run(
+        request.app.state.hub,
+        uuid=uuid,
+        name=uuid,
+        seed_urls=body.seed_urls,
+        rule=body.rule,
+        indexed_fields=body.indexed_fields,
+        channel=body.channel,
     )
-    secret = get_settings().upload_secret
-    dispatched = 0
-    for spec in specs:
-        conn = hub.pick_free()
-        if conn is None:  # 无空闲 agent：留排队（M2 由调度循环重新派发）
-            break
-        token = issue_upload_token(secret, uuid, batch_id)
-        await hub.send_frame(conn.agent_id, TaskAssign(task=spec, upload_token=token))
-        hub.on_dispatched(conn.agent_id, spec.req_id)
-        dispatched += 1
-    return RunResponse(batch_id=batch_id, requests=len(specs), dispatched=dispatched)
+    return RunResponse(**result)

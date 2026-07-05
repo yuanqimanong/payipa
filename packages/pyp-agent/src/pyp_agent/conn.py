@@ -10,6 +10,7 @@ import time
 
 import anyio
 import websockets
+from jianbing_utils.retry import backoff_delay
 from payipa_contracts import (
     Capabilities,
     ErrorCode,
@@ -163,4 +164,4 @@ class AgentConnection:
                 if max_retries is not None and attempt >= max_retries:
                     raise
                 attempt += 1
-                await anyio.sleep(min(2**attempt, 30))
+                await anyio.sleep(backoff_delay(attempt, base=1.0, cap=30.0, jitter=True))

@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="zh">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>数据源 · payipa</title>
+    <style>
+      body { font-family: system-ui, sans-serif; margin: 0; color: #222; background: #f7f8fa; }
+      header { background: #fff; border-bottom: 1px solid #e5e7eb; padding: 12px 24px; display: flex; align-items: center; gap: 16px; }
+      header h1 { font-size: 17px; margin: 0; }
+      header .spacer { flex: 1; }
+      .user { color: #666; font-size: 13px; }
+      main { max-width: 960px; margin: 24px auto; padding: 0 16px; }
+      .btn { display: inline-block; padding: 8px 14px; background: #2563eb; color: #fff; border-radius: 6px; text-decoration: none; font-size: 14px; border: 0; cursor: pointer; }
+      .btn.sm { padding: 4px 10px; font-size: 13px; background: #e5edff; color: #2563eb; }
+      table { width: 100%; border-collapse: collapse; background: #fff; margin-top: 16px; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 4px rgba(0,0,0,.05); }
+      th, td { text-align: left; padding: 10px 14px; border-bottom: 1px solid #eee; font-size: 14px; }
+      th { background: #f3f4f6; }
+      code { background: #f0f0f0; padding: 1px 6px; border-radius: 4px; }
+      .empty { color: #888; padding: 24px; text-align: center; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>payipa / 爬亿爬</h1>
+      <span class="user">数据源</span>
+      <div class="spacer"></div>
+      <span class="user">👤 {{ user.username }}</span>
+      <form method="post" action="/logout" style="margin:0"><button class="btn sm" type="submit">登出</button></form>
+    </header>
+    <main>
+      <a class="btn" href="/sources/new">＋ 新建数据源</a>
+      <table>
+        <thead><tr><th>名称</th><th>短码</th><th>创建时间</th><th>操作</th></tr></thead>
+        <tbody>
+          {% for s in sources %}
+          <tr>
+            <td>{{ s.name }}</td>
+            <td><code>{{ s.uuid }}</code></td>
+            <td>{{ s.created_at }}</td>
+            <td><a class="btn sm" href="/data/{{ s.uuid }}">查看数据</a></td>
+          </tr>
+          {% else %}
+          <tr><td colspan="4" class="empty">还没有数据源，点「新建数据源」创建并采集。</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </main>
+  </body>
+</html>

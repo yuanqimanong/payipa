@@ -1,0 +1,29 @@
+{
+  "seed_urls": ["https://books.toscrape.com/"],
+  "indexed_fields": ["title"],
+  "rule": {
+    "item_locator": { "type": "css", "expr": "article.product_pod" },
+    "fields": [
+      { "name": "title", "locator": { "type": "css", "expr": "h3 a@title" }, "type": "store" },
+      {
+        "name": "price",
+        "locator": { "type": "css", "expr": "p.price_color" },
+        "type": "store",
+        "clean": [{ "op": "regex_extract", "params": { "pattern": "([\\d.]+)" } }, { "op": "float" }]
+      },
+      {
+        "name": "availability",
+        "locator": { "type": "css", "expr": "p.instock.availability" },
+        "type": "store",
+        "clean": [{ "op": "collapse_ws" }]
+      },
+      {
+        "name": "detail_url",
+        "locator": { "type": "css", "expr": "h3 a@href" },
+        "type": "store+link",
+        "clean": [{ "op": "url_normalize" }]
+      }
+    ],
+    "fingerprint": ["title"]
+  }
+}

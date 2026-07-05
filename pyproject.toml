@@ -27,7 +27,7 @@ pyp-agent = { workspace = true }
 #    本地联调改 jb 时临时切回 editable path（改后 uv sync，不提交此改动）：
 #    jianbing-utils = { path = "../jianbing_utils", editable = true }
 #    详见 CLAUDE.md。
-jianbing-utils = { git = "https://github.com/yuanqimanong/jianbing_utils.git", tag = "v0.1.1" }
+jianbing-utils = { git = "https://github.com/yuanqimanong/jianbing_utils.git", tag = "v0.1.3" }
 
 [dependency-groups]
 dev = [
