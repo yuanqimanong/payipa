@@ -57,19 +57,24 @@ docker compose -f deploy/docker-compose.agents.yml down
 单个容器（不用 compose）：在 `project/` 根 `docker build -f payipa/packages/pyp-agent/Dockerfile -t payipa-agent:local .`，
 再 `docker run --rm --add-host host.docker.internal:host-gateway payipa-agent:local join --server http://host.docker.internal:8000 --token dev`。
 
-派发的任务会落到某个空闲容器（`/api/agents` 里该 agent 的 `slot_used`/`inflight` 会变化），抓完数据同样进 `/data/{短码}`。
+派发由**后台派发环**负责：请求先以 QUEUED 落库，主控每秒把排队请求铺到各在线容器的空闲槽（跨容器公平铺满）。
+所以**请求数超过总槽数也不会丢**——多的排队、随空闲槽腾出陆续下发；某容器中途挂掉，它的在途请求自动回队重排到存活容器（`/api/agents` 的 `slot_used`/`inflight` 会随之变化）。抓完数据进 `/data/{短码}`。
+进度可观测：`GET /api/monitor/batches/{batch_id}`（按 state 实时聚合 total/ok/fail/running/pct）、`GET /api/monitor/queue`（排队深度）。
 
 ## 也可用 API（curl，无需登录）
 
 ```bash
 curl -X POST "http://127.0.0.1:8000/api/sources/books/run" \
   -H "content-type: application/json" --data @deploy/examples/books.json
+# 看进度（batch_id 取上一步返回值）
+curl "http://127.0.0.1:8000/api/monitor/batches/<batch_id>"
 ```
+> 返回里 `dispatched` 恒为 0：派发不在建批次时同步发生，改由后台环负责（见上）。
 > 页面（`/data`、`/sources`）需登录；JSON API 目前开放，细粒度 RBAC 鉴权在后续安全里程碑接入。
 
 ## 还不能测（后续里程碑）
 
-- **任务调度**（cron/定时/API 触发）、Redis 队列、限流调频、租约回收（M2）。多 agent **已可派发**（空闲槽轮转），但队列/重派/负载均衡策略待 M2。
+- **任务调度进阶（M2 后续切片）**：cron/定时触发、Redis 队列、优先级排序、限流/自动调频、Cancel 取消、分组亲和、权重均衡。当前已具备：**持久化队列 + 自动派发环 + 租约回收 + 断连重排 + 监控端点实时聚合**。
 - **组装 / 推送 / 对外 Dataset API / AI 帮写 / 代理中转 / 反检测引擎**（M3–M5）。
 - **镜像发布**：`docker pull` / `pip install pyp-agent` 尚未发到 registry/PyPI（现为本地 `docker build`，见 §4）。
 - **完整权限（RBAC）**：现仅"登录"门槛 + 页面保护；角色×资源×动作矩阵在 06/09 里程碑。

@@ -5,11 +5,14 @@
 
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from payipa.crawl.ingest import build_data_table
 from payipa.crawl.run import (
     finalize_batch_if_done,
     handle_result,
+    requeue_agent_inflight,
     resolve_ingest_context,
     set_request_state,
 )
@@ -27,6 +30,9 @@ from payipa_contracts import (
 )
 from pydantic import TypeAdapter, ValidationError
 
+from pyp_server.settings import get_server_settings
+
+logger = logging.getLogger("pyp_server.ws")
 router = APIRouter()
 _client_frame = TypeAdapter(ClientFrame)
 
@@ -76,7 +82,7 @@ async def agent_ws(ws: WebSocket) -> None:
         while True:
             frame = _client_frame.validate_python(await ws.receive_json())
             if isinstance(frame, Heartbeat):
-                hub.update_heartbeat(agent_id, frame.free_slots, frame.inflight)
+                hub.update_heartbeat(agent_id)  # 只刷新存活；槽位以 on_dispatched/on_finished 为准
             elif isinstance(frame, ResultReport):
                 await _ingest_result(frame.result)
                 hub.on_finished(agent_id, frame.result.req_id)
@@ -91,3 +97,9 @@ async def agent_ws(ws: WebSocket) -> None:
     finally:
         if agent_id:
             hub.unregister(agent_id)
+            # 断连即回收该 agent 在途请求 → 回 QUEUED（attempt+1），下一 tick 派发环重排到存活 agent；
+            # 失败也不阻断清理，租约 reaper 兜底。
+            try:
+                await requeue_agent_inflight(get_engine("pyp"), agent_id, max_attempt=get_server_settings().max_attempt)
+            except Exception:  # noqa: BLE001
+                logger.warning("requeue inflight for %s failed; lease reaper will recover", agent_id, exc_info=True)

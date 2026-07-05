@@ -6,17 +6,35 @@ M0 空壳：健康检查 + 契约 stub API + agent WS 握手 + OpenAPI（/openap
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from pathlib import Path
 
+import anyio
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from pyp_server.hub import AgentHub
 from pyp_server.routers import api, auth_routes, explore, health, internal, sources, ui, ws
+from pyp_server.scheduler import dispatch_loop
 from pyp_server.settings import get_server_settings
 
 _HERE = Path(__file__).parent
+
+
+@asynccontextmanager
+async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
+    """服务生命周期：在 anyio 结构化并发下拉起后台派发环，关停时整树取消。"""
+    if not get_server_settings().dispatch_enabled:
+        yield  # 测试/特殊部署：不启派发环
+        return
+    async with anyio.create_task_group() as tg:
+        tg.start_soon(dispatch_loop, app)
+        try:
+            yield
+        finally:
+            tg.cancel_scope.cancel()
 
 
 def create_app() -> FastAPI:
@@ -26,6 +44,7 @@ def create_app() -> FastAPI:
         version=settings.version,
         description=settings.description,
         debug=settings.debug,
+        lifespan=_lifespan,
     )
     app.state.hub = AgentHub()  # 在线 agent 连接注册表（进程内单例）
     app.include_router(health.router)

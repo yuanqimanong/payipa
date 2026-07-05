@@ -6,6 +6,7 @@ M1：内存态，进程内单例（app.state.hub）。槽位信用制：只向�
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field
 
 from fastapi import WebSocket
@@ -19,6 +20,7 @@ class AgentConn:
     slot_n: int
     free_slots: int
     inflight: set[str] = field(default_factory=set)
+    last_seen: float = 0.0  # 单调时钟：最近一次心跳（供后续 liveness reaper；本切片不做超时判定）
 
 
 class AgentHub:
@@ -31,11 +33,13 @@ class AgentHub:
     def unregister(self, agent_id: str) -> None:
         self._agents.pop(agent_id, None)
 
-    def update_heartbeat(self, agent_id: str, free_slots: int, inflight: list[str]) -> None:
+    def update_heartbeat(self, agent_id: str) -> None:
+        """心跳只刷新存活标记。**槽位/在途以服务端 on_dispatched/on_finished 记账为准**——
+        agent 自报 free_slots/inflight 当前不可信（conn.py 占位恒报 slot_n/空），不能用来驱动派发，
+        否则心跳会周期性抹掉派发记账、导致超发。真实自报的对账留后续 M2 切片。"""
         conn = self._agents.get(agent_id)
         if conn is not None:
-            conn.free_slots = free_slots
-            conn.inflight = set(inflight)
+            conn.last_seen = time.monotonic()
 
     def pick_free(self) -> AgentConn | None:
         """取空闲槽最多的在线 agent（平手取任意）。"""

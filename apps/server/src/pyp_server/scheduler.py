@@ -1,0 +1,90 @@
+"""后台派发环 + 租约回收（M2）。
+
+PG 为权威、内存 hub 仅运行态视图：每 interval 秒 (1) 回收到期租约的在途请求 →
+(2) 把 QUEUED 请求填到当前空闲槽（跨所有在线 agent 按空闲槽公平铺满）。
+单个 anyio 后台任务，挂 FastAPI lifespan，随服务优雅启停（结构化并发，整树可取消）。
+
+不直接碰 payipa-core 的 ORM/SQL——只调用 payipa.crawl.run 的 helper（server→core→contracts 不破）。
+"""
+
+from __future__ import annotations
+
+import logging
+from datetime import UTC, datetime, timedelta
+from typing import TYPE_CHECKING
+
+import anyio
+from payipa.crawl.run import (
+    claim_queued_for_dispatch,
+    mark_assigned,
+    requeue_expired_leases,
+    requeue_request,
+)
+from payipa.db.engine import get_engine
+from payipa.db.settings import get_settings as get_db_settings
+from payipa.security.tokens import issue_upload_token
+from payipa_contracts import TaskAssign
+
+from pyp_server.settings import get_server_settings
+
+if TYPE_CHECKING:
+    from fastapi import FastAPI
+    from sqlalchemy.ext.asyncio import AsyncEngine
+
+    from pyp_server.hub import AgentHub
+
+logger = logging.getLogger("pyp_server.scheduler")
+
+
+async def drain_once(hub: AgentHub, pyp: AsyncEngine, secret: str, lease_s: int) -> int:
+    """把 QUEUED 请求逐条填到当前空闲槽，直到无槽或无排队。返回本轮成功下发数。
+
+    每次取 1 条后 :meth:`pick_free` 会重算（on_dispatched 递减空闲槽），从而在多 agent 间按空闲槽铺满。
+    """
+    dispatched = 0
+    while True:
+        conn = hub.pick_free()
+        if conn is None:  # 无空闲槽 → 本轮到此
+            return dispatched
+        specs = await claim_queued_for_dispatch(pyp, limit=1)
+        if not specs:  # 无排队请求
+            return dispatched
+        spec = specs[0]
+        req_id = int(spec.req_id)
+        lease_until = datetime.now(UTC) + timedelta(seconds=spec.timeout_s or lease_s)
+        if await mark_assigned(pyp, req_id, conn.agent_id, lease_until) != 1:
+            continue  # 未抢到（状态已变）——试下一条
+        token = issue_upload_token(secret, spec.source, int(spec.batch_id))
+        try:
+            await hub.send_frame(conn.agent_id, TaskAssign(task=spec, upload_token=token))
+        except Exception:  # noqa: BLE001 —— 下发失败（连接坏）：退回 QUEUED，结束本轮
+            logger.warning("send TaskAssign failed for req %s; requeue", req_id, exc_info=True)
+            # 若 requeue 也失败（如 DB 同时抖动），异常上抛给 dispatch_loop 退避重试；
+            # 该请求暂留 ASSIGNED，由租约 reaper（requeue_expired_leases）兜底回收。
+            await requeue_request(pyp, req_id)
+            return dispatched
+        hub.on_dispatched(conn.agent_id, spec.req_id)
+        dispatched += 1
+
+
+async def dispatch_loop(app: FastAPI) -> None:
+    """长驻后台环：回收过期租约 → 排空队列。任何业务异常都不能让它退出（仅 cancel 时结束）。"""
+    settings = get_server_settings()
+    hub: AgentHub = app.state.hub
+    pyp = get_engine("pyp")
+    secret = get_db_settings().upload_secret
+    interval, lease_s, max_attempt = settings.dispatch_interval_s, settings.task_lease_s, settings.max_attempt
+    logger.info("dispatch loop up (interval=%ss lease=%ss max_attempt=%s)", interval, lease_s, max_attempt)
+    fails = 0
+    while True:
+        try:
+            await requeue_expired_leases(pyp, max_attempt=max_attempt)
+            await drain_once(hub, pyp, secret, lease_s)
+            fails = 0
+        except Exception:  # noqa: BLE001 —— anyio 取消是 BaseException，不会被这里吞掉
+            fails += 1
+            delay = min(30.0, interval * 2 ** min(fails - 1, 5))  # 指数退避，DB 抖动时不忙转拖垮连接池
+            logger.exception("dispatch loop tick failed (x%d); backoff %.1fs", fails, delay)
+            await anyio.sleep(delay)  # 取消点
+            continue
+        await anyio.sleep(interval)  # 取消点：lifespan 关停时在此优雅退出

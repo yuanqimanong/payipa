@@ -92,7 +92,6 @@ async def sources_create(request: Request):
         fingerprint=fingerprint,
     )
     await dispatch_source_run(
-        request.app.state.hub,
         uuid=uuid,
         name=name or uuid,
         seed_urls=seed_urls,

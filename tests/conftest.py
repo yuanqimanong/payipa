@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import os
 
 import pytest
+
+# 测试默认关闭后台派发环（避免它与用例抢 QUEUED 请求 / 无 PG 时刷错误日志）。
+os.environ.setdefault("PYP_SERVER_DISPATCH_ENABLED", "0")
 
 
 def _pg_reachable() -> bool:
