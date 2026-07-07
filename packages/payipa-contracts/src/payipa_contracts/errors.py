@@ -1,4 +1,5 @@
-"""错误码枚举（负数）——写入 ``requests.state`` / ``data_*.state``（smallint）。
+"""错误码枚举（负数）——负数错误码写入 ``requests.state``（smallint）；
+``data_*`` 只落成功行（state=3）、不写负数（避免无字段失败行指纹碰撞）。
 
 **第一批"定死"**（SDD §4.4 / 07 / 02 方向）。数值/命名如需调整在 M0 内确认；
 新增错误码继续向下取负值、不复用旧值。正数正常态见 :mod:`payipa_contracts.enums` 的 ``RequestState``。
