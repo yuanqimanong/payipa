@@ -9,6 +9,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from datetime import datetime
 
+from jianbing_utils import crypto
 from payipa_contracts import Channel, ErrorCode, RequestState, ResultBatch, RulePack, RulePointer, TaskSpec
 from sqlalchemy import Table, func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -16,6 +17,16 @@ from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
 from payipa.crawl.ingest import Ingestor, build_data_table, create_data_table
 from payipa.db.pyp import Batch, Request, Rule, Source, Task
+
+
+def url_fingerprint(url: str) -> str:
+    """URL 去重指纹：最小规范化（去 fragment + 去首尾空白）后 sha256。
+
+    完整规范化（查询参数排序/百分号归一/黑白名单）由 jianbing_utils 自研模块承接（决策：URL 规范化自研），
+    此处先用最小实现保证批内同 URL 去重正确。
+    """
+    normalized = url.split("#", 1)[0].strip()
+    return crypto.sha256(normalized)
 
 
 async def setup_source(engine_pyp: AsyncEngine, uuid: str, name: str = "M1 source") -> tuple[int, int]:
@@ -95,6 +106,8 @@ async def create_batch_with_requests(
                         rule_hash=rule_ptr.content_hash,
                         rule_version=rule_ptr.version,
                         state=int(RequestState.QUEUED),
+                        depth=0,
+                        url_hash=url_fingerprint(target),
                     )
                     .returning(Request.id)
                 )
@@ -193,7 +206,7 @@ async def claim_queued_for_dispatch(engine_pyp: AsyncEngine, *, limit: int = 16)
                 .join(Source.__table__, Task.source_id == Source.id)
                 .join(Rule.__table__, Rule.content_hash == Request.rule_hash)
                 .where(Request.state == int(RequestState.QUEUED), Batch.status == "running")
-                .order_by(Request.created_at, Request.id)
+                .order_by(Request.depth, Request.created_at, Request.id)  # BFS：浅层优先（默认广度）
                 .limit(limit)
             )
         ).all()
@@ -265,6 +278,58 @@ async def requeue_agent_inflight(engine_pyp: AsyncEngine, agent_id: str, *, max_
     """agent 断连即回收其在途请求（快速路径，不等租约超时）；由 WS 端点在 finally 中调用。"""
     async with engine_pyp.begin() as conn:
         return await _requeue_or_giveup(conn, [Request.agent_id == agent_id], max_attempt)
+
+
+async def enqueue_discovered(engine_pyp: AsyncEngine, parent_req_id: int, urls: Sequence[str]) -> int:
+    """多波爬行：把父请求本页发现的链接并入**同一批次**入队。
+
+    URL 指纹批内去重（唯一索引 (batch_id, url_hash) + ON CONFLICT DO NOTHING）；depth=父+1；
+    仅当 depth ≤ rule.crawl.max_depth 才入队（无 crawl 规则 ⇒ max_depth=0 ⇒ 不跟进，退化为单页）。
+    返回实际新入队条数。**须在批次收尾判定前调用**，新 QUEUED 落库以防跨波提前 finalize。
+    """
+    if not urls:
+        return 0
+    async with engine_pyp.begin() as conn:
+        parent = (
+            await conn.execute(
+                select(Request.batch_id, Request.depth, Request.rule_hash, Request.rule_version).where(
+                    Request.id == parent_req_id
+                )
+            )
+        ).first()
+        if parent is None:
+            return 0
+        batch_id, parent_depth, rule_hash, rule_version = parent
+        child_depth = (parent_depth or 0) + 1
+        spec = None
+        if rule_hash:
+            spec = (await conn.execute(select(Rule.spec).where(Rule.content_hash == rule_hash))).scalar()
+        pack = RulePack.model_validate(spec) if spec else None
+        max_depth = pack.crawl.max_depth if (pack and pack.crawl) else 0
+        if child_depth > max_depth:
+            return 0
+        inserted = 0
+        seen: set[str] = set()
+        for url in urls:
+            uh = url_fingerprint(url)
+            if uh in seen:  # 先去同页内重复，减少无谓 INSERT
+                continue
+            seen.add(uh)
+            res = await conn.execute(
+                pg_insert(Request.__table__)
+                .values(
+                    batch_id=batch_id,
+                    target=url,
+                    rule_hash=rule_hash,
+                    rule_version=rule_version,
+                    state=int(RequestState.QUEUED),
+                    depth=child_depth,
+                    url_hash=uh,
+                )
+                .on_conflict_do_nothing(index_elements=["batch_id", "url_hash"])
+            )
+            inserted += res.rowcount or 0
+    return inserted
 
 
 # ── M2 监控聚合（供 /api/monitor 端点；仅读）──────────────────────────────────

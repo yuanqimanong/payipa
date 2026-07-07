@@ -10,6 +10,7 @@ import logging
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from payipa.crawl.ingest import build_data_table
 from payipa.crawl.run import (
+    enqueue_discovered,
     finalize_batch_if_done,
     handle_result,
     requeue_agent_inflight,
@@ -42,11 +43,13 @@ _CLOSE_UNSUPPORTED = 1003
 
 
 async def _ingest_result(result: ResultBatch) -> None:
-    """先写 data_center（指纹幂等）→ 再置 pyp 请求成功 → 尝试收尾批次。"""
+    """多波续爬 + 入库 + 收尾。顺序：先把本页发现链接并入同批入队（新 QUEUED 落库、防跨波提前收尾）
+    → 写 data_center（指纹幂等）并置请求成功 → 尝试收尾批次。"""
     pyp = get_engine("pyp")
     dc = get_engine("data_center")
     uuid, fingerprint_keys, indexed = await resolve_ingest_context(pyp, int(result.req_id))
     table = build_data_table(uuid, indexed)
+    await enqueue_discovered(pyp, int(result.req_id), result.discovered)
     await handle_result(pyp, dc, table, result, fingerprint_keys=fingerprint_keys)
     await finalize_batch_if_done(pyp, int(result.batch_id))
 

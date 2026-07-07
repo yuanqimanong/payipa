@@ -167,6 +167,7 @@ class Request(TimestampMixin, PypBase):
     agent_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     account: Mapped[str | None] = mapped_column(String(128), nullable=True)
     error_code: Mapped[int | None] = mapped_column(SmallInteger, nullable=True)
+    url_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)  # URL 指纹：批内去重（唯一索引见迁移）
 
 
 class TaskEvent(TimestampMixin, PypBase):

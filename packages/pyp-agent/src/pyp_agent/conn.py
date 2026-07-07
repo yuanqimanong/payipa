@@ -84,6 +84,7 @@ async def process_task(
             req_id=task.req_id,
             items=parsed.items,
             artifacts=artifacts,
+            discovered=parsed.links,  # type=link/store+link 字段值 → 主控去重后并入同批入队（多波爬行）
             summary=summary,
         )
     )

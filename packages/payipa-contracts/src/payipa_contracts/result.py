@@ -48,4 +48,9 @@ class ResultBatch(BaseModel):
     req_id: str = active("请求数据任务 id（correlation）")
     items: list[Item] = active("结构化记录（小 item）", default_factory=list)
     artifacts: list[ArtifactRef] = active("大对象指针（raw/多媒体）", default_factory=list)
+    discovered: list[str] = active(
+        "本页发现的待跟进链接（link/store+link 字段值）；主控 URL 指纹去重后并入同批入队，深度=父+1、受 max_depth 限",
+        default_factory=list,
+        since="M2",
+    )
     summary: ExecSummary = active("执行摘要")
