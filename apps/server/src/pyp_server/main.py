@@ -15,6 +15,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
+from pyp_server.consumer import consumer_loop
 from pyp_server.hub import AgentHub
 from pyp_server.ratelimit import SourceRateLimiter
 from pyp_server.routers import api, auth_routes, datasets, explore, health, internal, sources, ui, ws
@@ -26,12 +27,16 @@ _HERE = Path(__file__).parent
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
-    """服务生命周期：在 anyio 结构化并发下拉起后台派发环，关停时整树取消。"""
-    if not get_server_settings().dispatch_enabled:
-        yield  # 测试/特殊部署：不启派发环
+    """服务生命周期：在 anyio 结构化并发下拉起后台派发环 + 推送 Consumer，关停时整树取消。"""
+    settings = get_server_settings()
+    if not (settings.dispatch_enabled or settings.push_enabled):
+        yield  # 测试/特殊部署：不启后台环
         return
     async with anyio.create_task_group() as tg:
-        tg.start_soon(dispatch_loop, app)
+        if settings.dispatch_enabled:
+            tg.start_soon(dispatch_loop, app)
+        if settings.push_enabled:
+            tg.start_soon(consumer_loop, app)
         try:
             yield
         finally:

@@ -7,8 +7,9 @@ import os
 
 import pytest
 
-# 测试默认关闭后台派发环（避免它与用例抢 QUEUED 请求 / 无 PG 时刷错误日志）。
+# 测试默认关闭后台派发环 + 推送 Consumer（避免它与用例抢 QUEUED/outbox / 无 PG 时刷错误日志）。
 os.environ.setdefault("PYP_SERVER_DISPATCH_ENABLED", "0")
+os.environ.setdefault("PYP_SERVER_PUSH_ENABLED", "0")
 
 
 def _pg_reachable() -> bool:

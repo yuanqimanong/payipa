@@ -268,7 +268,10 @@ class PushComponent(TimestampMixin, OwnedMixin, PypBase):
     content_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     status: Mapped[str] = mapped_column(String(16), default="draft")  # draft/testing/active
     code_ref: Mapped[str | None] = mapped_column(Text, nullable=True)
-    target_creds: Mapped[str | None] = mapped_column(Text, nullable=True)  # 组件级加密存储
+    code: Mapped[str | None] = mapped_column(Text, nullable=True)  # 组件源码（固定方法 push(ctx)；内联存）
+    allow_domains: Mapped[list] = mapped_column(JSONB, default=list)  # 目标域白名单（隔离子进程出网仅放行这些）
+    signature: Mapped[str | None] = mapped_column(Text, nullable=True)  # 发布签名（HMAC content_hash，红线7）
+    target_creds: Mapped[str | None] = mapped_column(Text, nullable=True)  # 组件级加密存储（KEK 信封）
 
 
 class PushOutbox(TimestampMixin, OwnedMixin, PypBase):

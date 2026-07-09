@@ -42,6 +42,7 @@ class Settings(BaseSettings):
     # 存储兜底（local 后端）+ 内部上传
     data_root: str = "var/storage"  # 本地对象存储根目录
     upload_secret: str = "dev-insecure-change-me"  # 内部上传 HMAC 密钥（生产走 env 注入）
+    cred_kek: str = "dev-insecure-kek-change-me"  # 凭证信封主密钥（KEK，红线9）；生产走 env 注入，脚本永不接触
     min_free_mb: int = 500  # 磁盘水位下限（MB）：低于则拒绝新上传并告警
     raw_retention_days: int = 7  # raw 归档默认保留期（按源可覆盖，02 定案）；GC 清理过期
 

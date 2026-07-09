@@ -28,6 +28,13 @@ class ServerSettings(BaseSettings):
     task_lease_s: int = 1800  # 任务租约（秒）：在途无终结超此即视为失联回收；对齐 TaskSpec.timeout_s 默认
     max_attempt: int = 3  # 请求最大尝试次数（含首次）；超过定格 NODE_LOST(-6)
 
+    # ── M4 推送 Consumer（outbox 排空环）──────────────────────────────────
+    push_enabled: bool = True  # 后台推送 Consumer 开关（测试关闭）
+    push_interval_s: float = 2.0  # outbox 排空扫描间隔（秒）
+    push_lease_s: int = 300  # 消费租约（秒）：inflight 超此视为消费者失联，回收重投
+    push_max_attempts: int = 5  # 单条推送最大尝试次数；超过转 dead + 告警
+    push_batch: int = 32  # 单轮最多领取/投递条数
+
 
 @lru_cache
 def get_server_settings() -> ServerSettings:
