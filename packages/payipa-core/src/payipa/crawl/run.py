@@ -195,6 +195,41 @@ async def finalize_batch_if_done(engine_pyp: AsyncEngine, batch_id: int) -> bool
     return bool(res.rowcount)
 
 
+async def batch_trigger_context(engine_pyp: AsyncEngine, batch_id: int) -> dict | None:
+    """批次收尾自动触发所需上下文：所属任务的 params（含通知/推送绑定）+ 批次状态 + 成功计数。
+
+    返回 ``{task_id, status, params, ok, total}``；批次不存在返回 None。params 里约定键（可选）：
+    ``notify_bot_id``（收尾通知机器人）/ ``push_component_id`` + ``product_code``（链路自动推送）。
+    """
+    async with engine_pyp.begin() as conn:
+        row = (
+            await conn.execute(
+                select(Batch.task_id, Batch.status, Task.params)
+                .join(Task, Task.id == Batch.task_id)
+                .where(Batch.id == batch_id)
+            )
+        ).first()
+        if row is None:
+            return None
+        total = (
+            await conn.execute(select(func.count()).select_from(Request.__table__).where(Request.batch_id == batch_id))
+        ).scalar() or 0
+        ok = (
+            await conn.execute(
+                select(func.count())
+                .select_from(Request.__table__)
+                .where(Request.batch_id == batch_id, Request.state == int(RequestState.SUCCESS))
+            )
+        ).scalar() or 0
+    return {
+        "task_id": int(row.task_id),
+        "status": row.status,
+        "params": row.params or {},
+        "ok": int(ok),
+        "total": int(total),
+    }
+
+
 # ── M2 节点注册表（agents 表落库；hub 是运行态视图，此为权威）────────────────────
 async def register_agent(
     engine_pyp: AsyncEngine,

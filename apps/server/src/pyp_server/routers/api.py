@@ -5,11 +5,16 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Request
+import json
+
+from fastapi import APIRouter, HTTPException, Request
 from payipa.crawl.run import batch_progress as compute_batch_progress
 from payipa.crawl.run import cancel_batch as run_cancel_batch
 from payipa.crawl.run import queue_depth as compute_queue_depth
 from payipa.db.engine import get_engine
+from payipa.db.settings import get_settings as get_db_settings
+from payipa.deliver.notify import NotifyError, notify
+from payipa.deliver.outbox import enqueue_push
 from payipa_contracts import (
     BatchProgress,
     Cancel,
@@ -92,3 +97,46 @@ async def cancel_batch(batch_id: int, request: Request) -> CancelResponse:
         if conn is not None:
             await hub.send_frame(conn.agent_id, Cancel(req_id=req_id))
     return CancelResponse(canceled_queued=len(queued_ids), canceling_inflight=len(inflight_ids))
+
+
+# ── M4 推送/通知（手动触发；三触发统一走 outbox）─────────────────────────────
+class PushEnqueueRequest(BaseModel):
+    product_code: str | None = Field(None, description="数据集增量推送：推该产物短码的组装结果")
+    rows: list[dict] | None = Field(None, description="内联推送：直接推这些行（详情页单条/多条按钮）")
+    idempotency_key: str | None = Field(None, description="幂等键（同键只入一次）")
+
+
+class PushEnqueueResponse(BaseModel):
+    enqueued: int = Field(..., description="入队条数（0=幂等命中，已存在）")
+
+
+class NotifyTestRequest(BaseModel):
+    title: str = Field("payipa 测试通知", description="通知标题")
+    text: str = Field("这是一条来自 payipa 的测试通知。", description="通知正文")
+
+
+@router.post(
+    "/push/components/{component_id}/enqueue",
+    response_model=PushEnqueueResponse,
+    summary="手动触发推送：把一次投递入 outbox（Consumer 隔离子进程投递）",
+)
+async def enqueue_push_api(component_id: int, body: PushEnqueueRequest) -> PushEnqueueResponse:
+    if body.rows is not None:
+        payload_ref = json.dumps({"kind": "inline", "rows": body.rows})
+    elif body.product_code:
+        payload_ref = json.dumps({"kind": "dataset", "product_code": body.product_code})
+    else:
+        payload_ref = None
+    n = await enqueue_push(
+        get_engine("pyp"), component_id=component_id, payload_ref=payload_ref, idempotency_key=body.idempotency_key
+    )
+    return PushEnqueueResponse(enqueued=n)
+
+
+@router.post("/notify/{bot_id}/test", summary="给通知机器人发一条测试通知")
+async def notify_test(bot_id: int, body: NotifyTestRequest) -> dict:
+    try:
+        await notify(get_engine("pyp"), bot_id, title=body.title, text=body.text, kek=get_db_settings().cred_kek)
+    except NotifyError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"ok": True}

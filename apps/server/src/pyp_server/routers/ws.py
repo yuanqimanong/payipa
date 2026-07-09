@@ -40,6 +40,7 @@ from pydantic import TypeAdapter, ValidationError
 
 from pyp_server.ratelimit import SourceRateLimiter
 from pyp_server.settings import get_server_settings
+from pyp_server.triggers import on_batch_finalized
 
 logger = logging.getLogger("pyp_server.ws")
 router = APIRouter()
@@ -59,7 +60,8 @@ async def _ingest_result(result: ResultBatch, limiter: SourceRateLimiter) -> Non
     table = build_data_table(uuid, indexed)
     await enqueue_discovered(pyp, int(result.req_id), result.discovered)
     await handle_result(pyp, dc, table, result, fingerprint_keys=fingerprint_keys)
-    await finalize_batch_if_done(pyp, int(result.batch_id))
+    if await finalize_batch_if_done(pyp, int(result.batch_id)):  # 唯一那次 running→done
+        await on_batch_finalized(int(result.batch_id))  # 链路自动推送 + 收尾通知（best-effort）
     limiter.on_ok(uuid)  # 成功 → AIMD 加性增
 
 
