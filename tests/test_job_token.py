@@ -6,7 +6,7 @@ import jwt
 import pytest
 from payipa.security.job_token import issue_job_token, token_allows_table, verify_job_token
 
-_SECRET = "test-job-secret-please-change"
+_SECRET = "test-job-secret-please-change-32bytes-minimum-xx"  # ≥32B 避免 HMAC 短密钥告警
 
 
 def test_issue_verify_roundtrip() -> None:
@@ -27,7 +27,7 @@ def test_wrong_audience_rejected() -> None:
 
 def test_tampered_or_bad_secret_rejected() -> None:
     tok, _ = issue_job_token(_SECRET, "job-1", tables=["data_src"])
-    assert verify_job_token("another-secret", tok, "job-1") is None  # 签名不符
+    assert verify_job_token("another-secret-also-32-bytes-long-xxxxxx", tok, "job-1") is None  # 签名不符
     assert verify_job_token(_SECRET, tok + "x", "job-1") is None  # 篡改
 
 

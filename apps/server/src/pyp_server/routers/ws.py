@@ -95,14 +95,20 @@ async def agent_ws(ws: WebSocket) -> None:
 
     agent_id = register.agent_id
     token, token_hash = new_node_token()  # 长期节点凭证：明文只此一次下发，库存 hash（红线9）
-    weight, group_name = await register_agent(
-        get_engine("pyp"),
-        agent_id,
-        hostname=register.hostname,
-        slot_n=register.slot_n,
-        capabilities=register.capabilities.model_dump(),
-        node_token_hash=token_hash,
-    )
+    try:  # 节点落库为 best-effort：PG 抖动/未起时仍允许注册（内存 hub + 默认权重/分组），不阻断握手
+        weight, group_name = await register_agent(
+            get_engine("pyp"),
+            agent_id,
+            hostname=register.hostname,
+            slot_n=register.slot_n,
+            capabilities=register.capabilities.model_dump(),
+            node_token_hash=token_hash,
+        )
+    except Exception:  # noqa: BLE001
+        logger.warning(
+            "register_agent %s failed (DB down?); registering in-memory with defaults", agent_id, exc_info=True
+        )
+        weight, group_name = 1, None
     hub.register(agent_id, ws, register.slot_n, weight=weight, group_name=group_name)
     await ws.send_text(RegisterAck(node_token=token).model_dump_json())
 
