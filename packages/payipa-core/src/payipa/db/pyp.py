@@ -311,6 +311,21 @@ class Assembly(TimestampMixin, OwnedMixin, PypBase):
     indexed_fields: Mapped[list] = mapped_column(JSONB, default=list)  # 产物勾索引字段
 
 
+class AssemblyWatermark(TimestampMixin, PypBase):
+    """增量组装读侧水位（M3 slice-8）：某组装从某数据源已消费到的最大 data_* id。
+
+    读腿可重算：清零该行即从头重读（写腿 asm_ 指纹幂等去重，故重读不产重复）。按 (assembly_id, source) 唯一。
+    """
+
+    __tablename__ = "assembly_watermarks"
+    __table_args__ = (UniqueConstraint("assembly_id", "source", name="uq_assembly_watermark"),)
+
+    id: Mapped[int] = _pk()
+    assembly_id: Mapped[int] = mapped_column(ForeignKey("assemblies.id"), nullable=False)
+    source: Mapped[str] = mapped_column(String(64), nullable=False)  # data_{source} 的源短码
+    position: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)  # 已消费到的最大 id
+
+
 # ══ 公共配置 ════════════════════════════════════════════════════════════════
 class LlmModel(TimestampMixin, PypBase):
     __tablename__ = "llm_models"

@@ -10,7 +10,7 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 from typing import Protocol
 
-from payipa_contracts import ColumnFilter, TableQueryRequest
+from payipa_contracts import ColumnFilter, KeysetCursor, TableQueryRequest
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from payipa.studio.gateway import QueryGateway
@@ -20,11 +20,23 @@ AssembleFn = Callable[["AssembleContext"], Awaitable[list[dict]]]
 
 
 class AssembleContext:
-    """交给组装脚本的唯一取数入口。脚本经 ctx.read_table 读源数据（走 Query Gateway），不接触 DB。"""
+    """交给组装脚本的唯一取数入口。脚本经 ctx.read_table 读源数据（走 Query Gateway），不接触 DB。
 
-    def __init__(self, engine_dc: AsyncEngine, gateway: QueryGateway | None = None) -> None:
+    增量组装（M3 slice-8）：构造时传 watermarks={源: 已消费到的 id}，脚本 read_table(incremental=True) 只读
+    id 大于水位的新增行；读到的每源最大 id 记入 new_watermarks，供 run 层组装成功后推进水位（写腿指纹幂等）。
+    """
+
+    def __init__(
+        self,
+        engine_dc: AsyncEngine,
+        gateway: QueryGateway | None = None,
+        *,
+        watermarks: dict[str, int] | None = None,
+    ) -> None:
         self._dc = engine_dc
         self._gw = gateway or QueryGateway()
+        self._start_wm = dict(watermarks or {})
+        self.new_watermarks: dict[str, int] = {}
 
     async def read_table(
         self,
@@ -33,16 +45,40 @@ class AssembleContext:
         columns: list[str] | None = None,
         filters: list[ColumnFilter] | None = None,
         limit: int = 500,
+        incremental: bool = False,
     ) -> list[dict]:
-        """读某数据源全部（自动翻页）行；返回投影后的行 dict 列表。经 Query Gateway，无 SQL、无 DB 句柄。"""
+        """读某数据源全部（自动翻页）行；返回投影后的行 dict 列表。经 Query Gateway，无 SQL、无 DB 句柄。
+
+        incremental=True：从该源水位（默认 0）之后读起，并把读到的最大 id 记入 new_watermarks[source]；
+        若脚本未在 columns 中要 id，临时借 id 追踪水位、返回前剥掉，不污染脚本可见字段。
+        """
+        after = self._start_wm.get(source, 0) if incremental else 0
+        fetch_cols = columns
+        strip_id = False
+        if incremental and columns is not None and "id" not in columns:
+            fetch_cols = [*columns, "id"]  # 借 id 追踪水位
+            strip_id = True
         rows: list[dict] = []
-        cursor = None
+        cursor: KeysetCursor | None = KeysetCursor(after_id=after) if after else None
+        max_id = after
         while True:
-            req = TableQueryRequest(source=source, columns=columns, filters=filters or [], limit=limit, cursor=cursor)
+            req = TableQueryRequest(
+                source=source, columns=fetch_cols, filters=filters or [], limit=limit, cursor=cursor
+            )
             page, cursor, _ = await self._gw.read(self._dc, req)
+            for row in page:
+                rid = row.get("id")
+                if isinstance(rid, int) and rid > max_id:
+                    max_id = rid
             rows.extend(page)
             if cursor is None:
-                return rows
+                break
+        if incremental:
+            self.new_watermarks[source] = max_id
+            if strip_id:
+                for row in rows:
+                    row.pop("id", None)
+        return rows
 
 
 class CodeExecutor(Protocol):
