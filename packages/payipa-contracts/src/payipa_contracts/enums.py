@@ -103,6 +103,15 @@ class ArtifactStatus(StrEnum):
     FAILED = "failed"
 
 
+class OutboxState(StrEnum):
+    """推送 outbox 状态机（M4）：pending→inflight→sent | dead（达最大重试定格死信）。"""
+
+    PENDING = "pending"  # 待投递（含退避后重试）
+    INFLIGHT = "inflight"  # 已被 Consumer 领取、投递中（带租约防重）
+    SENT = "sent"  # 投递成功
+    DEAD = "dead"  # 达最大重试、进死信
+
+
 class FilterOp(StrEnum):
     """Query Gateway 结构化过滤算子（无 SQL 串；M3 组装取数）。"""
 
