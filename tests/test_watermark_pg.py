@@ -113,7 +113,8 @@ def test_incremental_watermark(require_pg: None) -> None:
             async with pyp.begin() as conn:
                 await conn.execute(
                     text(
-                        "DELETE FROM assembly_watermarks WHERE assembly_id IN (SELECT id FROM assemblies WHERE name='wm-asm')"
+                        "DELETE FROM assembly_watermarks WHERE assembly_id IN "
+                        "(SELECT id FROM assemblies WHERE name='wm-asm')"
                     )
                 )
                 await conn.execute(text("DELETE FROM assemblies WHERE name='wm-asm'"))

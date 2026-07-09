@@ -11,7 +11,8 @@ from collections.abc import Sequence
 
 from sqlalchemy.ext.asyncio import AsyncEngine
 
-from payipa.studio.asm import AsmLoader, build_asm_table, create_asm_table
+from payipa.studio.asm import AsmLoader, build_asm_table
+from payipa.studio.evolve import evolve_asm_table
 from payipa.studio.executor import AssembleContext, AssembleFn, CodeExecutor, LocalExecutor
 from payipa.studio.gateway import QueryGateway
 from payipa.studio.watermark import advance_watermarks, get_watermarks
@@ -36,7 +37,7 @@ async def run_assembly(
     upsert 成功后推进水位。水位前进只发生在组装成功之后，故中途失败下次会重读（读腿可重算 + 写腿幂等）。
     """
     table = build_asm_table(product_code, indexed_fields)
-    await create_asm_table(engine_business, table)
+    await evolve_asm_table(engine_business, table)  # 建表或加法演进（新增索引字段自动加列；破坏性变更会拦截）
     watermarks: dict[str, int] = {}
     if incremental and engine_pyp is not None and assembly_id is not None:
         watermarks = await get_watermarks(engine_pyp, assembly_id)
