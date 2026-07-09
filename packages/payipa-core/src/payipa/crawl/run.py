@@ -233,9 +233,7 @@ async def register_agent(
                 },
             )
         )
-        row = (
-            await conn.execute(select(Agent.weight, Agent.group_name).where(Agent.agent_id == agent_id))
-        ).first()
+        row = (await conn.execute(select(Agent.weight, Agent.group_name).where(Agent.agent_id == agent_id))).first()
     return (row[0] if row else 1), (row[1] if row else None)
 
 
@@ -273,9 +271,7 @@ async def source_of_request(engine_pyp: AsyncEngine, req_id: int) -> str | None:
 async def touch_agent(engine_pyp: AsyncEngine, agent_id: str) -> None:
     """心跳落库：刷新 last_heartbeat（供后续 liveness reaper/监控）。"""
     async with engine_pyp.begin() as conn:
-        await conn.execute(
-            update(Agent.__table__).where(Agent.agent_id == agent_id).values(last_heartbeat=func.now())
-        )
+        await conn.execute(update(Agent.__table__).where(Agent.agent_id == agent_id).values(last_heartbeat=func.now()))
 
 
 async def set_agent_offline(engine_pyp: AsyncEngine, agent_id: str) -> None:

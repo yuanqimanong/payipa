@@ -53,11 +53,7 @@ class AgentHub:
         group 非空时只在同组节点里选（分组亲和：任务 group ↔ agent group_name）；无同组空闲则返回 None，
         该任务留排队等同组节点空闲——不会错派到别组。group 为 None（未分组任务）可派给任意空闲节点。
         """
-        candidates = [
-            c
-            for c in self._agents.values()
-            if c.free_slots > 0 and (group is None or c.group_name == group)
-        ]
+        candidates = [c for c in self._agents.values() if c.free_slots > 0 and (group is None or c.group_name == group)]
         return max(candidates, key=lambda c: (c.free_slots, c.weight)) if candidates else None
 
     def on_dispatched(self, agent_id: str, req_id: str) -> None:
