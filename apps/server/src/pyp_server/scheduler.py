@@ -14,11 +14,16 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 import anyio
+from cronsim import CronSim, CronSimError
 from payipa.crawl.run import (
+    advance_schedule,
     claim_queued_for_dispatch,
+    create_batch_for_task,
+    due_schedules,
     mark_assigned,
     requeue_expired_leases,
     requeue_request,
+    sweep_canceling_batches,
 )
 from payipa.db.engine import get_engine
 from payipa.db.settings import get_settings as get_db_settings
@@ -67,8 +72,26 @@ async def drain_once(hub: AgentHub, pyp: AsyncEngine, secret: str, lease_s: int)
         dispatched += 1
 
 
+async def fire_due_schedules(pyp: AsyncEngine, now: datetime) -> int:
+    """把到点的 cron 调度实例化成新批次；用 cronsim 从 now 推进 next_run_at。返回触发的批次数。"""
+    fired = 0
+    for sched_id, task_id, cron_expr, source_uuid, seeds in await due_schedules(pyp):
+        if not seeds:  # 无存档种子（未经建源流程）→ 只推进时间、不空跑
+            logger.warning("schedule %s (task %s) has no seed_urls; skip firing", sched_id, task_id)
+        else:
+            await create_batch_for_task(pyp, task_id=task_id, source_uuid=source_uuid, seed_urls=seeds)
+            fired += 1
+        try:
+            next_run = next(CronSim(cron_expr, now))
+        except CronSimError, StopIteration:
+            logger.warning("schedule %s bad cron %r; disable by leaving next_run_at as-is", sched_id, cron_expr)
+            continue
+        await advance_schedule(pyp, sched_id, next_run)
+    return fired
+
+
 async def dispatch_loop(app: FastAPI) -> None:
-    """长驻后台环：回收过期租约 → 排空队列。任何业务异常都不能让它退出（仅 cancel 时结束）。"""
+    """长驻后台环：触发到点 cron → 回收过期租约 → 排空队列。任何业务异常都不能让它退出（仅 cancel 时结束）。"""
     settings = get_server_settings()
     hub: AgentHub = app.state.hub
     pyp = get_engine("pyp")
@@ -78,7 +101,9 @@ async def dispatch_loop(app: FastAPI) -> None:
     fails = 0
     while True:
         try:
+            await fire_due_schedules(pyp, datetime.now(UTC))
             await requeue_expired_leases(pyp, max_attempt=max_attempt)
+            await sweep_canceling_batches(pyp)
             await drain_once(hub, pyp, secret, lease_s)
             fails = 0
         except Exception:  # noqa: BLE001 —— anyio 取消是 BaseException，不会被这里吞掉

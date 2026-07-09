@@ -14,6 +14,7 @@ dependencies = [
     "python-multipart>=0.0.9", # 表单解析（登录/建源）
     "argon2-cffi>=23.1",     # 密码哈希（06 定案）
     "pyjwt>=2.9",            # 会话 token / 程序化鉴权（06 定案）
+    "cronsim>=2.7",
 ]
 
 [project.scripts]

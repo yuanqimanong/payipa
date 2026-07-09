@@ -10,13 +10,13 @@ from collections.abc import Sequence
 from datetime import datetime
 
 from jianbing_utils import crypto
-from payipa_contracts import Channel, ErrorCode, RequestState, ResultBatch, RulePack, RulePointer, TaskSpec
-from sqlalchemy import Table, func, select, update
+from payipa_contracts import Channel, ErrorCode, Priority, RequestState, ResultBatch, RulePack, RulePointer, TaskSpec
+from sqlalchemy import Table, case, func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
 from payipa.crawl.ingest import Ingestor, build_data_table, create_data_table
-from payipa.db.pyp import Batch, Request, Rule, Source, Task
+from payipa.db.pyp import Batch, Request, Rule, Schedule, Source, Task
 
 
 def url_fingerprint(url: str) -> str:
@@ -29,8 +29,17 @@ def url_fingerprint(url: str) -> str:
     return crypto.sha256(normalized)
 
 
-async def setup_source(engine_pyp: AsyncEngine, uuid: str, name: str = "M1 source") -> tuple[int, int]:
-    """确保 source + 一个 task 存在（幂等）；返回 (source_id, task_id)。M1 便捷入口。"""
+async def setup_source(
+    engine_pyp: AsyncEngine,
+    uuid: str,
+    name: str = "M1 source",
+    *,
+    seed_urls: Sequence[str] | None = None,
+) -> tuple[int, int]:
+    """确保 source + 一个 task 存在（幂等）；返回 (source_id, task_id)。
+
+    seed_urls 存档进 task.params（最近一次为准），供 cron/重跑无需重新提交种子（07 定时触发）。
+    """
     async with engine_pyp.begin() as conn:
         await conn.execute(
             pg_insert(Source.__table__)
@@ -39,12 +48,17 @@ async def setup_source(engine_pyp: AsyncEngine, uuid: str, name: str = "M1 sourc
         )
         source_id = (await conn.execute(select(Source.id).where(Source.uuid == uuid))).scalar_one()
         task_id = (await conn.execute(select(Task.id).where(Task.source_id == source_id).limit(1))).scalar()
+        params = {"seed_urls": list(seed_urls)} if seed_urls else None
         if task_id is None:
             task_id = (
                 await conn.execute(
-                    pg_insert(Task.__table__).values(source_id=source_id, trigger_type="manual").returning(Task.id)
+                    pg_insert(Task.__table__)
+                    .values(source_id=source_id, trigger_type="manual", params=params or {})
+                    .returning(Task.id)
                 )
             ).scalar_one()
+        elif params:
+            await conn.execute(update(Task.__table__).where(Task.id == task_id).values(params=params))
     return source_id, task_id
 
 
@@ -158,7 +172,10 @@ async def set_request_state(engine_pyp: AsyncEngine, req_id: int, state: int) ->
 
 
 async def finalize_batch_if_done(engine_pyp: AsyncEngine, batch_id: int) -> bool:
-    """无未完成 request（state 仍为排队/分派/运行）时把批次标 done。返回是否已收尾。"""
+    """无未完成 request（state 仍为排队/分派/运行）时把 running 批次标 done。返回是否本次完成收尾。
+
+    仅对 status='running' 的批次生效——已取消/已收尾的批次不被翻回 done。
+    """
     pending_states = (int(RequestState.QUEUED), int(RequestState.ASSIGNED), int(RequestState.RUNNING))
     async with engine_pyp.begin() as conn:
         pending = (
@@ -170,21 +187,26 @@ async def finalize_batch_if_done(engine_pyp: AsyncEngine, batch_id: int) -> bool
         ).scalar()
         if pending:
             return False
-        await conn.execute(
-            update(Batch.__table__).where(Batch.id == batch_id).values(status="done", finished_at=func.now())
+        res = await conn.execute(
+            update(Batch.__table__)
+            .where(Batch.id == batch_id, Batch.status == "running")
+            .values(status="done", finished_at=func.now())
         )
-    return True
+    return bool(res.rowcount)
 
 
 # ── M2 派发/回收（PG 权威；由 server 的后台派发环调用，core 不启循环）─────────────
 _INFLIGHT = (int(RequestState.ASSIGNED), int(RequestState.RUNNING))  # 「在途」= 已占用未终结
 
 
+_PRIORITY_RANK = case((Task.priority == "high", 0), (Task.priority == "mid", 1), else_=2)  # 高优先插队
+
+
 async def claim_queued_for_dispatch(engine_pyp: AsyncEngine, *, limit: int = 16) -> list[TaskSpec]:
-    """只读扫描 running 批次下 state=QUEUED 的请求（FIFO by created_at），组装成可下发的 TaskSpec。
+    """只读扫描 running 批次下 state=QUEUED 的请求，组装成可下发的 TaskSpec。
 
     **不改状态**——真正占用由 :func:`mark_assigned` 的乐观锁完成，避免读到即算派发。
-    优先级/深度排序留后续 M2 切片（当前纯 FIFO）。
+    排序=三元 score（07 定案）：(优先级档, 深度升序=BFS, 入队序)。
     """
     async with engine_pyp.connect() as conn:
         rows = (
@@ -197,6 +219,8 @@ async def claim_queued_for_dispatch(engine_pyp: AsyncEngine, *, limit: int = 16)
                     Batch.id,
                     Batch.channel,
                     Task.id,
+                    Task.priority,
+                    Task.group_name,
                     Source.uuid,
                     Rule.id,
                 )
@@ -206,12 +230,12 @@ async def claim_queued_for_dispatch(engine_pyp: AsyncEngine, *, limit: int = 16)
                 .join(Source.__table__, Task.source_id == Source.id)
                 .join(Rule.__table__, Rule.content_hash == Request.rule_hash)
                 .where(Request.state == int(RequestState.QUEUED), Batch.status == "running")
-                .order_by(Request.depth, Request.created_at, Request.id)  # BFS：浅层优先（默认广度）
+                .order_by(_PRIORITY_RANK, Request.depth, Request.created_at, Request.id)
                 .limit(limit)
             )
         ).all()
     specs: list[TaskSpec] = []
-    for req_id, target, rule_hash, rule_version, batch_id, channel, task_id, source_uuid, rule_id in rows:
+    for req_id, target, rule_hash, rule_version, batch_id, channel, task_id, priority, group, source_uuid, rid in rows:
         specs.append(
             TaskSpec(
                 task_id=str(task_id),
@@ -219,8 +243,10 @@ async def claim_queued_for_dispatch(engine_pyp: AsyncEngine, *, limit: int = 16)
                 batch_id=str(batch_id),
                 source=source_uuid,
                 target=target,
-                rule_ptr=RulePointer(rule_id=str(rule_id), version=int(rule_version or 0), content_hash=rule_hash),
+                rule_ptr=RulePointer(rule_id=str(rid), version=int(rule_version or 0), content_hash=rule_hash),
                 channel=Channel(channel),
+                priority=Priority(priority or "mid"),
+                group=group,
             )
         )
     return specs
@@ -252,18 +278,31 @@ async def requeue_request(engine_pyp: AsyncEngine, req_id: int) -> int:
 
 
 async def _requeue_or_giveup(conn: AsyncConnection, base_where: list, max_attempt: int) -> int:
-    """符合 base_where 的在途请求：未达 max_attempt → 回 QUEUED(attempt+1)；已达 → 定格 NODE_LOST(-6)。"""
+    """符合 base_where 的在途请求：未达 max_attempt → 回 QUEUED(attempt+1)；已达 → 定格 NODE_LOST(-6)。
+
+    仅对 running 批次重排；批次已取消/收尾的在途请求直接置 CANCELED（不再回队、也不计失联）。
+    """
+    running = select(Batch.id).where(Batch.status == "running").scalar_subquery()
+    canceled = await conn.execute(
+        update(Request.__table__)
+        .where(*base_where, Request.state.in_(_INFLIGHT), Request.batch_id.not_in(running))
+        .values(state=int(RequestState.CANCELED), lease_until=None)
+    )
     give_up = await conn.execute(
         update(Request.__table__)
-        .where(*base_where, Request.state.in_(_INFLIGHT), Request.attempt + 1 >= max_attempt)
+        .where(
+            *base_where, Request.state.in_(_INFLIGHT), Request.batch_id.in_(running), Request.attempt + 1 >= max_attempt
+        )
         .values(state=int(ErrorCode.NODE_LOST), error_code=int(ErrorCode.NODE_LOST), lease_until=None)
     )
     requeue = await conn.execute(
         update(Request.__table__)
-        .where(*base_where, Request.state.in_(_INFLIGHT), Request.attempt + 1 < max_attempt)
+        .where(
+            *base_where, Request.state.in_(_INFLIGHT), Request.batch_id.in_(running), Request.attempt + 1 < max_attempt
+        )
         .values(state=int(RequestState.QUEUED), attempt=Request.attempt + 1, lease_until=None, agent_id=None)
     )
-    return (give_up.rowcount or 0) + (requeue.rowcount or 0)
+    return (canceled.rowcount or 0) + (give_up.rowcount or 0) + (requeue.rowcount or 0)
 
 
 async def requeue_expired_leases(engine_pyp: AsyncEngine, *, max_attempt: int = 3) -> int:
@@ -359,14 +398,124 @@ async def batch_progress(engine_pyp: AsyncEngine, batch_id: int) -> dict:
 
 
 async def queue_depth(engine_pyp: AsyncEngine) -> dict[str, int]:
-    """running 批次下 state=QUEUED 请求的排队深度。M2 首刀仅单桶（优先级排序未接线，诚实归 'mid'）。"""
+    """running 批次下 state=QUEUED 请求的排队深度，按任务优先级(high/mid/low)分桶。"""
     async with engine_pyp.connect() as conn:
-        n = (
+        rows = (
             await conn.execute(
-                select(func.count())
+                select(Task.priority, func.count())
                 .select_from(Request.__table__)
                 .join(Batch.__table__, Request.batch_id == Batch.id)
+                .join(Task.__table__, Batch.task_id == Task.id)
                 .where(Request.state == int(RequestState.QUEUED), Batch.status == "running")
+                .group_by(Task.priority)
             )
-        ).scalar()
-    return {"mid": int(n or 0)}
+        ).all()
+    return {(p or "mid"): int(n) for p, n in rows}
+
+
+# ── M2 取消 + 定时触发 ────────────────────────────────────────────────────────
+async def cancel_batch(engine_pyp: AsyncEngine, batch_id: int) -> tuple[list[str], list[int]]:
+    """取消一个批次：清空其 QUEUED（直接置 CANCELED），把在途 ASSIGNED/RUNNING 标记待取消（返回其 req_id
+    供主控向 agent 发 Cancel 帧），批次置 canceling。返回 (在途 req_id 列表, 涉及的 agent 无关)。
+
+    返回 (inflight_req_ids, queued_ids)：inflight 需通知 agent 优雅收尾，queued 已就地取消。
+    """
+    async with engine_pyp.begin() as conn:
+        queued = list(
+            (
+                await conn.execute(
+                    select(Request.id).where(Request.batch_id == batch_id, Request.state == int(RequestState.QUEUED))
+                )
+            )
+            .scalars()
+            .all()
+        )
+        if queued:
+            await conn.execute(
+                update(Request.__table__)
+                .where(Request.batch_id == batch_id, Request.state == int(RequestState.QUEUED))
+                .values(state=int(RequestState.CANCELED), lease_until=None)
+            )
+        inflight = list(
+            (await conn.execute(select(Request.id).where(Request.batch_id == batch_id, Request.state.in_(_INFLIGHT))))
+            .scalars()
+            .all()
+        )
+        await conn.execute(
+            update(Batch.__table__)
+            .where(Batch.id == batch_id, Batch.status == "running")
+            .values(status="canceling" if inflight else "canceled", finished_at=None if inflight else func.now())
+        )
+    return [str(r) for r in inflight], queued
+
+
+async def sweep_canceling_batches(engine_pyp: AsyncEngine) -> int:
+    """把已无未完成请求的 canceling 批次收口为 canceled（在途 agent 回报 CANCELED 后）。返回收口数。"""
+    pending = (int(RequestState.QUEUED), int(RequestState.ASSIGNED), int(RequestState.RUNNING))
+    async with engine_pyp.begin() as conn:
+        stuck = select(Request.batch_id).where(Request.state.in_(pending)).distinct().scalar_subquery()
+        res = await conn.execute(
+            update(Batch.__table__)
+            .where(Batch.status == "canceling", Batch.id.not_in(stuck))
+            .values(status="canceled", finished_at=func.now())
+        )
+    return res.rowcount or 0
+
+
+async def due_schedules(engine_pyp: AsyncEngine) -> list[tuple[int, int, str, str, list[str]]]:
+    """返回到点（next_run_at ≤ now 或未初始化）且 enabled 的调度。
+
+    每项 = (schedule_id, task_id, cron_expr, source_uuid, seed_urls)。seed_urls 取自 task.params；触发时据此
+    建新批次（复用建源存档的种子）。next_run_at 的推进由调用方在成功建批后调用 :func:`advance_schedule` 完成。
+    """
+    async with engine_pyp.connect() as conn:
+        rows = (
+            await conn.execute(
+                select(Schedule.id, Task.id, Schedule.cron_expr, Source.uuid, Task.params)
+                .select_from(Schedule.__table__)
+                .join(Task.__table__, Schedule.task_id == Task.id)
+                .join(Source.__table__, Task.source_id == Source.id)
+                .where(
+                    Schedule.enabled.is_(True),
+                    (Schedule.next_run_at.is_(None)) | (Schedule.next_run_at <= func.now()),
+                )
+            )
+        ).all()
+    out: list[tuple[int, int, str, str, list[str]]] = []
+    for sched_id, task_id, cron_expr, source_uuid, params in rows:
+        seeds = list((params or {}).get("seed_urls") or [])
+        out.append((sched_id, task_id, cron_expr, source_uuid, seeds))
+    return out
+
+
+async def advance_schedule(engine_pyp: AsyncEngine, schedule_id: int, next_run_at: datetime) -> None:
+    """把调度的下次运行时间推进到 next_run_at（由调用方用 cron 表达式算出）。"""
+    async with engine_pyp.begin() as conn:
+        await conn.execute(update(Schedule.__table__).where(Schedule.id == schedule_id).values(next_run_at=next_run_at))
+
+
+async def create_batch_for_task(
+    engine_pyp: AsyncEngine,
+    *,
+    task_id: int,
+    source_uuid: str,
+    seed_urls: Sequence[str],
+    channel: Channel = Channel.PROD,
+) -> tuple[int, list[TaskSpec]]:
+    """按已存在的 task + 其数据源当前 active 规则建一个新批次（供 cron/API 重跑，无需重新提交规则）。"""
+    async with engine_pyp.connect() as conn:
+        row = (
+            await conn.execute(
+                select(Rule.id, Rule.version, Rule.content_hash)
+                .join(Task.__table__, Task.source_id == Rule.source_id)
+                .where(Task.id == task_id)
+                .order_by(Rule.version.desc())
+                .limit(1)
+            )
+        ).first()
+    if row is None:
+        raise LookupError(f"task {task_id} 无可用规则，无法建批次")
+    ptr = RulePointer(rule_id=str(row[0]), version=row[1], content_hash=row[2])
+    return await create_batch_with_requests(
+        engine_pyp, task_id=task_id, source_uuid=source_uuid, targets=seed_urls, rule_ptr=ptr, channel=channel
+    )

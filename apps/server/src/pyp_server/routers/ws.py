@@ -24,6 +24,7 @@ from payipa_contracts import (
     Heartbeat,
     RegisterAck,
     RegisterReq,
+    RequestState,
     ResultBatch,
     ResultReport,
     StatusReport,
@@ -89,7 +90,7 @@ async def agent_ws(ws: WebSocket) -> None:
             elif isinstance(frame, ResultReport):
                 await _ingest_result(frame.result)
                 hub.on_finished(agent_id, frame.result.req_id)
-            elif isinstance(frame, StatusReport) and frame.state < 0:
+            elif isinstance(frame, StatusReport) and (frame.state < 0 or frame.state == int(RequestState.CANCELED)):
                 await set_request_state(get_engine("pyp"), int(frame.req_id), frame.state)
                 hub.on_finished(agent_id, frame.req_id)
             elif isinstance(frame, ErrorFrame) and frame.req_id:

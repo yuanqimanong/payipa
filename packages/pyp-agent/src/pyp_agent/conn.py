@@ -12,15 +12,18 @@ import anyio
 import websockets
 from jianbing_utils.retry import backoff_delay
 from payipa_contracts import (
+    Cancel,
     Capabilities,
     ErrorCode,
     ErrorFrame,
     ExecSummary,
     Heartbeat,
     RegisterReq,
+    RequestState,
     ResultBatch,
     ResultReport,
     ServerFrame,
+    StatusReport,
     TaskAssign,
     TaskSpec,
 )
@@ -110,6 +113,7 @@ class AgentConnection:
         self.hostname = hostname
         self.heartbeat_s = heartbeat_s
         self.rule_cache = RuleCache(server)
+        self._scopes: dict[str, anyio.CancelScope] = {}  # req_id → 取消域（收 Cancel 帧就地取消该任务）
 
     async def run_once(self) -> None:
         """连接一次并进入收发循环（连接关闭即返回）。"""
@@ -131,7 +135,10 @@ class AgentConnection:
                     frame = _server_frame.validate_json(message)
                     if isinstance(frame, TaskAssign):
                         tg.start_soon(self._handle_task, ws, frame)
-                    # Cancel / register_ack 等 M2 处理
+                    elif isinstance(frame, Cancel) and frame.req_id:
+                        scope = self._scopes.get(frame.req_id)  # 取消对应任务协程；回报由 _handle_task 发
+                        if scope is not None:
+                            scope.cancel()
                 tg.cancel_scope.cancel()
 
     async def _heartbeat_loop(self, ws) -> None:
@@ -140,18 +147,29 @@ class AgentConnection:
             await ws.send(Heartbeat(free_slots=self.slot_n, inflight=[]).model_dump_json())
 
     async def _handle_task(self, ws, assign: TaskAssign) -> None:
+        req_id = assign.task.req_id
+        scope = anyio.CancelScope()
+        self._scopes[req_id] = scope
         try:
-            report = await process_task(
-                assign.task,
-                upload_token=assign.upload_token,
-                server_base=self.server,
-                rule_cache=self.rule_cache,
-                agent_id=self.agent_id,
-            )
-            await ws.send(report.model_dump_json())
-        except Exception as exc:  # noqa: BLE001  单任务失败回错误帧，不拖垮连接
+            with scope:  # 独立取消域：收 Cancel(req_id) 帧只取消本任务，不影响其它/连接
+                try:
+                    report = await process_task(
+                        assign.task,
+                        upload_token=assign.upload_token,
+                        server_base=self.server,
+                        rule_cache=self.rule_cache,
+                        agent_id=self.agent_id,
+                    )
+                    await ws.send(report.model_dump_json())
+                except Exception as exc:  # noqa: BLE001  单任务失败回错误帧，不拖垮连接
+                    await ws.send(
+                        ErrorFrame(code=int(ErrorCode.SOFT_FAIL), message=str(exc), req_id=req_id).model_dump_json()
+                    )
+        finally:
+            self._scopes.pop(req_id, None)
+        if scope.cancel_called:  # 被取消：域外回报 CANCELED（域内 send 会被取消掉）
             await ws.send(
-                ErrorFrame(code=int(ErrorCode.SOFT_FAIL), message=str(exc), req_id=assign.task.req_id).model_dump_json()
+                StatusReport(req_id=req_id, state=int(RequestState.CANCELED), message="canceled").model_dump_json()
             )
 
     async def run(self, *, max_retries: int | None = None) -> None:

@@ -7,10 +7,12 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Request
 from payipa.crawl.run import batch_progress as compute_batch_progress
+from payipa.crawl.run import cancel_batch as run_cancel_batch
 from payipa.crawl.run import queue_depth as compute_queue_depth
 from payipa.db.engine import get_engine
 from payipa_contracts import (
     BatchProgress,
+    Cancel,
     Channel,
     NodeSnapshot,
     QueueStat,
@@ -36,6 +38,11 @@ class RunResponse(BaseModel):
     batch_id: int
     requests: int
     dispatched: int
+
+
+class CancelResponse(BaseModel):
+    canceled_queued: int = Field(..., description="就地取消的排队请求数")
+    canceling_inflight: int = Field(..., description="已通知 agent 优雅收尾的在途请求数")
 
 
 @router.get("/agents", response_model=list[NodeSnapshot], summary="在线节点快照（来自 AgentHub）")
@@ -69,3 +76,19 @@ async def run_source(uuid: str, body: RunRequest) -> RunResponse:
         channel=body.channel,
     )
     return RunResponse(**result)
+
+
+@router.post(
+    "/batches/{batch_id}/cancel",
+    response_model=CancelResponse,
+    summary="取消一个批次（清排队 + 通知在途 agent 优雅收尾）",
+)
+async def cancel_batch(batch_id: int, request: Request) -> CancelResponse:
+    pyp = get_engine("pyp")
+    inflight_ids, queued_ids = await run_cancel_batch(pyp, batch_id)
+    hub = request.app.state.hub
+    for req_id in inflight_ids:  # 逐条通知持有该 req 的 agent 取消（agent 取消协程树、回 CANCELED）
+        conn = hub.find_by_req(req_id)
+        if conn is not None:
+            await hub.send_frame(conn.agent_id, Cancel(req_id=req_id))
+    return CancelResponse(canceled_queued=len(queued_ids), canceling_inflight=len(inflight_ids))

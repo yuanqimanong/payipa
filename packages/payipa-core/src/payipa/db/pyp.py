@@ -168,6 +168,7 @@ class Request(TimestampMixin, PypBase):
     account: Mapped[str | None] = mapped_column(String(128), nullable=True)
     error_code: Mapped[int | None] = mapped_column(SmallInteger, nullable=True)
     url_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)  # URL 指纹：批内去重（唯一索引见迁移）
+    # 见迁移 c1d2e3f4a5b6 的唯一索引 uq_requests_batch_url_hash (batch_id, url_hash)
 
 
 class TaskEvent(TimestampMixin, PypBase):

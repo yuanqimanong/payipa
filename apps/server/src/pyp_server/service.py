@@ -24,7 +24,7 @@ async def dispatch_source_run(
     """
     pyp = get_engine("pyp")
     dc = get_engine("data_center")
-    source_id, task_id = await setup_source(pyp, uuid, name)
+    source_id, task_id = await setup_source(pyp, uuid, name, seed_urls=seed_urls)  # 存档种子供 cron 重跑
     ptr = await RuleStore(pyp).put(source_id, rule)
     fields_indexed = indexed_fields or [f.name for f in rule.fields if f.index]
     await ensure_data_table(dc, uuid, fields_indexed)
