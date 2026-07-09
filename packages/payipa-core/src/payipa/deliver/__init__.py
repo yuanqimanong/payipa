@@ -23,6 +23,7 @@ from payipa.deliver.dataset import (
     read_dataset,
     verify_api_key,
 )
+from payipa.deliver.notify import NotifyBotStore, NotifyError, notify
 from payipa.deliver.outbox import (
     Deliverer,
     claim_due,
@@ -37,6 +38,8 @@ from payipa.deliver.pushexec import PushResult, run_push_component
 
 __all__ = [
     "Deliverer",
+    "NotifyBotStore",
+    "NotifyError",
     "PushComponentStore",
     "PushResult",
     "api_key_allows_dataset",
@@ -49,6 +52,7 @@ __all__ = [
     "mark_dead",
     "mark_failed",
     "mark_sent",
+    "notify",
     "read_dataset",
     "requeue_expired",
     "run_outbox_once",
