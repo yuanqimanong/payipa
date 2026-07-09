@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from payipa_contracts import agent, artifact, enums, errors, event, monitor, result, rule, task, version
+from payipa_contracts import agent, artifact, enums, errors, event, gateway, monitor, result, rule, task, version
 from payipa_contracts.agent import (
     Cancel,
     Capabilities,
@@ -29,6 +29,7 @@ from payipa_contracts.enums import (
     CrawlStrategy,
     EngineHint,
     FieldType,
+    FilterOp,
     LocatorType,
     Priority,
     RequestState,
@@ -38,6 +39,7 @@ from payipa_contracts.enums import (
 )
 from payipa_contracts.errors import ERROR_LABELS, ErrorCode, label
 from payipa_contracts.event import AuditEvent, LifecycleEvent
+from payipa_contracts.gateway import ColumnFilter, KeysetCursor, QuotaMeta, TableQueryRequest
 from payipa_contracts.monitor import (
     BatchProgress,
     NodeSnapshot,
@@ -80,6 +82,7 @@ __all__ = [
     "Channel",
     "CleanOp",
     "ClientFrame",
+    "ColumnFilter",
     "ConnectorType",
     "CrawlRules",
     "CrawlStrategy",
@@ -91,8 +94,10 @@ __all__ = [
     "FieldMeta",
     "FieldRule",
     "FieldType",
+    "FilterOp",
     "Heartbeat",
     "Item",
+    "KeysetCursor",
     "LayoutMatch",
     "LifecycleEvent",
     "Locator",
@@ -102,6 +107,7 @@ __all__ = [
     "ProxyStat",
     "QualityMetric",
     "QueueStat",
+    "QuotaMeta",
     "RegisterAck",
     "RegisterReq",
     "RequestState",
@@ -114,6 +120,7 @@ __all__ = [
     "ServerFrame",
     "StatusReport",
     "StorageBackend",
+    "TableQueryRequest",
     "TaskAssign",
     "TaskSpec",
     "TriggerType",
@@ -123,6 +130,7 @@ __all__ = [
     "enums",
     "errors",
     "event",
+    "gateway",
     "is_compatible",
     "label",
     "monitor",

@@ -101,3 +101,16 @@ class ArtifactStatus(StrEnum):
     UPLOADED = "uploaded"  # agent 报告上传完成
     VERIFIED = "verified"  # 主控 HeadObject 复核通过
     FAILED = "failed"
+
+
+class FilterOp(StrEnum):
+    """Query Gateway 结构化过滤算子（无 SQL 串；M3 组装取数）。"""
+
+    EQ = "eq"
+    NE = "ne"
+    GT = "gt"
+    GTE = "gte"
+    LT = "lt"
+    LTE = "lte"
+    IN = "in"
+    CONTAINS = "contains"  # 子串包含（文本 LIKE %v%）
