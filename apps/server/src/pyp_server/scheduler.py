@@ -42,34 +42,40 @@ logger = logging.getLogger("pyp_server.scheduler")
 
 
 async def drain_once(hub: AgentHub, pyp: AsyncEngine, secret: str, lease_s: int) -> int:
-    """把 QUEUED 请求逐条填到当前空闲槽，直到无槽或无排队。返回本轮成功下发数。
+    """把 QUEUED 请求填到匹配的空闲槽，直到无槽/无排队/本轮无进展。返回本轮成功下发数。
 
-    每次取 1 条后 :meth:`pick_free` 会重算（on_dispatched 递减空闲槽），从而在多 agent 间按空闲槽铺满。
+    先按 (优先级,深度,序) 取一批候选，逐条选**同组**空闲节点（分组亲和 + 空闲槽/权重择优）；某条无匹配节点
+    则跳过换下一条，避免分组头阻塞。on_dispatched 递减空闲槽，故多 agent 间按空闲槽铺满。
     """
     dispatched = 0
     while True:
-        conn = hub.pick_free()
-        if conn is None:  # 无空闲槽 → 本轮到此
+        if hub.pick_free() is None:  # 全无空闲槽 → 本轮到此
             return dispatched
-        specs = await claim_queued_for_dispatch(pyp, limit=1)
+        specs = await claim_queued_for_dispatch(pyp, limit=32)
         if not specs:  # 无排队请求
             return dispatched
-        spec = specs[0]
-        req_id = int(spec.req_id)
-        lease_until = datetime.now(UTC) + timedelta(seconds=spec.timeout_s or lease_s)
-        if await mark_assigned(pyp, req_id, conn.agent_id, lease_until) != 1:
-            continue  # 未抢到（状态已变）——试下一条
-        token = issue_upload_token(secret, spec.source, int(spec.batch_id))
-        try:
-            await hub.send_frame(conn.agent_id, TaskAssign(task=spec, upload_token=token))
-        except Exception:  # noqa: BLE001 —— 下发失败（连接坏）：退回 QUEUED，结束本轮
-            logger.warning("send TaskAssign failed for req %s; requeue", req_id, exc_info=True)
-            # 若 requeue 也失败（如 DB 同时抖动），异常上抛给 dispatch_loop 退避重试；
-            # 该请求暂留 ASSIGNED，由租约 reaper（requeue_expired_leases）兜底回收。
-            await requeue_request(pyp, req_id)
+        progressed = False
+        for spec in specs:
+            conn = hub.pick_free(spec.group)  # 同组空闲节点（group=None 可派任意）
+            if conn is None:
+                continue  # 该任务分组暂无空闲节点 → 跳过，换下一条（不阻塞别组）
+            req_id = int(spec.req_id)
+            lease_until = datetime.now(UTC) + timedelta(seconds=spec.timeout_s or lease_s)
+            if await mark_assigned(pyp, req_id, conn.agent_id, lease_until) != 1:
+                continue  # 未抢到（状态已变）——试下一条
+            token = issue_upload_token(secret, spec.source, int(spec.batch_id))
+            try:
+                await hub.send_frame(conn.agent_id, TaskAssign(task=spec, upload_token=token))
+            except Exception:  # noqa: BLE001 —— 下发失败（连接坏）：退回 QUEUED，结束本轮
+                logger.warning("send TaskAssign failed for req %s; requeue", req_id, exc_info=True)
+                # requeue 也失败则异常上抛给 dispatch_loop 退避重试；该请求暂留 ASSIGNED，租约 reaper 兜底。
+                await requeue_request(pyp, req_id)
+                return dispatched
+            hub.on_dispatched(conn.agent_id, spec.req_id)
+            dispatched += 1
+            progressed = True
+        if not progressed:  # 本批都无匹配节点/抢失败 → 结束本轮，等下一 tick（不忙转）
             return dispatched
-        hub.on_dispatched(conn.agent_id, spec.req_id)
-        dispatched += 1
 
 
 async def fire_due_schedules(pyp: AsyncEngine, now: datetime) -> int:

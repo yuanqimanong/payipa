@@ -46,3 +46,22 @@ def test_pick_free_prefers_most_free() -> None:
     hub.on_dispatched("a", "y")
     hub.on_dispatched("a", "z")  # a: 1 free, b: 1 free（平手取任意，非 None）
     assert hub.pick_free() is not None
+
+
+def test_pick_free_weight_tiebreak() -> None:
+    hub = AgentHub()
+    hub.register("light", _WS(), slot_n=2, weight=1)
+    hub.register("heavy", _WS(), slot_n=2, weight=5)  # 同空闲槽，权重高者优先
+    assert hub.pick_free().agent_id == "heavy"
+
+
+def test_pick_free_group_affinity() -> None:
+    hub = AgentHub()
+    hub.register("auto", _WS(), slot_n=2, group_name="automation")
+    hub.register("plain", _WS(), slot_n=2, group_name=None)
+    # 指定分组：只在同组里选
+    assert hub.pick_free("automation").agent_id == "auto"
+    # 无该分组的空闲节点 → None（宁可排队等同组，不错派）
+    assert hub.pick_free("gpu") is None
+    # 不分组任务：任意空闲节点可派
+    assert hub.pick_free(None) is not None

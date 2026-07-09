@@ -16,7 +16,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
 from payipa.crawl.ingest import Ingestor, build_data_table, create_data_table
-from payipa.db.pyp import Batch, Request, Rule, Schedule, Source, Task
+from payipa.db.pyp import Agent, Batch, Request, Rule, Schedule, Source, Task
 
 
 def url_fingerprint(url: str) -> str:
@@ -193,6 +193,64 @@ async def finalize_batch_if_done(engine_pyp: AsyncEngine, batch_id: int) -> bool
             .values(status="done", finished_at=func.now())
         )
     return bool(res.rowcount)
+
+
+# ── M2 节点注册表（agents 表落库；hub 是运行态视图，此为权威）────────────────────
+async def register_agent(
+    engine_pyp: AsyncEngine,
+    agent_id: str,
+    *,
+    hostname: str,
+    slot_n: int,
+    capabilities: dict,
+    node_token_hash: str,
+) -> tuple[int, str | None]:
+    """注册/重连时 upsert agents 行（status=online、刷新 last_heartbeat/能力/槽位/凭证 hash）。
+
+    返回 (weight, group_name)——由管理员在库中预置，回灌 hub 用于加权/分组派发；新节点默认 weight=1。
+    """
+    async with engine_pyp.begin() as conn:
+        await conn.execute(
+            pg_insert(Agent.__table__)
+            .values(
+                agent_id=agent_id,
+                hostname=hostname,
+                slot_n=slot_n,
+                capabilities=capabilities,
+                status="online",
+                node_token_hash=node_token_hash,
+                last_heartbeat=func.now(),
+            )
+            .on_conflict_do_update(
+                index_elements=["agent_id"],
+                set_={
+                    "hostname": hostname,
+                    "slot_n": slot_n,
+                    "capabilities": capabilities,
+                    "status": "online",
+                    "node_token_hash": node_token_hash,
+                    "last_heartbeat": func.now(),
+                },
+            )
+        )
+        row = (
+            await conn.execute(select(Agent.weight, Agent.group_name).where(Agent.agent_id == agent_id))
+        ).first()
+    return (row[0] if row else 1), (row[1] if row else None)
+
+
+async def touch_agent(engine_pyp: AsyncEngine, agent_id: str) -> None:
+    """心跳落库：刷新 last_heartbeat（供后续 liveness reaper/监控）。"""
+    async with engine_pyp.begin() as conn:
+        await conn.execute(
+            update(Agent.__table__).where(Agent.agent_id == agent_id).values(last_heartbeat=func.now())
+        )
+
+
+async def set_agent_offline(engine_pyp: AsyncEngine, agent_id: str) -> None:
+    """断连落库：status=offline（不删行，保留历史/权重/分组配置）。"""
+    async with engine_pyp.begin() as conn:
+        await conn.execute(update(Agent.__table__).where(Agent.agent_id == agent_id).values(status="offline"))
 
 
 # ── M2 派发/回收（PG 权威；由 server 的后台派发环调用，core 不启循环）─────────────

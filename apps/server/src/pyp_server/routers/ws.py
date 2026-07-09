@@ -13,11 +13,15 @@ from payipa.crawl.run import (
     enqueue_discovered,
     finalize_batch_if_done,
     handle_result,
+    register_agent,
     requeue_agent_inflight,
     resolve_ingest_context,
+    set_agent_offline,
     set_request_state,
+    touch_agent,
 )
 from payipa.db.engine import get_engine
+from payipa.security.tokens import new_node_token
 from payipa_contracts import (
     ClientFrame,
     ErrorFrame,
@@ -79,14 +83,27 @@ async def agent_ws(ws: WebSocket) -> None:
         return
 
     agent_id = register.agent_id
-    hub.register(agent_id, ws, register.slot_n)
-    await ws.send_text(RegisterAck(node_token="m1-stub-token").model_dump_json())  # M2：换取长期凭证
+    token, token_hash = new_node_token()  # 长期节点凭证：明文只此一次下发，库存 hash（红线9）
+    weight, group_name = await register_agent(
+        get_engine("pyp"),
+        agent_id,
+        hostname=register.hostname,
+        slot_n=register.slot_n,
+        capabilities=register.capabilities.model_dump(),
+        node_token_hash=token_hash,
+    )
+    hub.register(agent_id, ws, register.slot_n, weight=weight, group_name=group_name)
+    await ws.send_text(RegisterAck(node_token=token).model_dump_json())
 
     try:
         while True:
             frame = _client_frame.validate_python(await ws.receive_json())
             if isinstance(frame, Heartbeat):
                 hub.update_heartbeat(agent_id)  # 只刷新存活；槽位以 on_dispatched/on_finished 为准
+                try:
+                    await touch_agent(get_engine("pyp"), agent_id)  # last_heartbeat 落库（best-effort）
+                except Exception:  # noqa: BLE001 —— DB 抖动不该断连接
+                    logger.warning("touch_agent %s failed", agent_id, exc_info=True)
             elif isinstance(frame, ResultReport):
                 await _ingest_result(frame.result)
                 hub.on_finished(agent_id, frame.result.req_id)
@@ -107,3 +124,7 @@ async def agent_ws(ws: WebSocket) -> None:
                 await requeue_agent_inflight(get_engine("pyp"), agent_id, max_attempt=get_server_settings().max_attempt)
             except Exception:  # noqa: BLE001
                 logger.warning("requeue inflight for %s failed; lease reaper will recover", agent_id, exc_info=True)
+            try:
+                await set_agent_offline(get_engine("pyp"), agent_id)  # 标记离线（保留权重/分组配置）
+            except Exception:  # noqa: BLE001
+                logger.warning("set_agent_offline %s failed", agent_id, exc_info=True)

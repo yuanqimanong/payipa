@@ -10,7 +10,17 @@ import base64
 import hashlib
 import hmac
 import json
+import secrets
 import time
+
+
+def new_node_token() -> tuple[str, str]:
+    """签发长期节点凭证：返回 (明文, sha256 十六进制 hash)。
+
+    明文只在 RegisterAck 里下发一次；库里只存 hash（SDD 红线9：token 存 hash、脚本不接触明文）。
+    """
+    plain = secrets.token_urlsafe(32)
+    return plain, hashlib.sha256(plain.encode()).hexdigest()
 
 
 def _b64(data: bytes) -> str:

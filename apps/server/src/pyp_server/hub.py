@@ -21,14 +21,18 @@ class AgentConn:
     free_slots: int
     inflight: set[str] = field(default_factory=set)
     last_seen: float = 0.0  # 单调时钟：最近一次心跳（供后续 liveness reaper；本切片不做超时判定）
+    weight: int = 1  # 加权派发：来自 agents 表（管理员预置），平手时权重高者优先
+    group_name: str | None = None  # 能力分组：任务带 group 时只派给同组节点（分组亲和）
 
 
 class AgentHub:
     def __init__(self) -> None:
         self._agents: dict[str, AgentConn] = {}
 
-    def register(self, agent_id: str, ws: WebSocket, slot_n: int) -> None:
-        self._agents[agent_id] = AgentConn(agent_id, ws, slot_n, slot_n)
+    def register(
+        self, agent_id: str, ws: WebSocket, slot_n: int, *, weight: int = 1, group_name: str | None = None
+    ) -> None:
+        self._agents[agent_id] = AgentConn(agent_id, ws, slot_n, slot_n, weight=weight, group_name=group_name)
 
     def unregister(self, agent_id: str) -> None:
         self._agents.pop(agent_id, None)
@@ -41,10 +45,18 @@ class AgentHub:
         if conn is not None:
             conn.last_seen = time.monotonic()
 
-    def pick_free(self) -> AgentConn | None:
-        """取空闲槽最多的在线 agent（平手取任意）。"""
-        candidates = [c for c in self._agents.values() if c.free_slots > 0]
-        return max(candidates, key=lambda c: c.free_slots) if candidates else None
+    def pick_free(self, group: str | None = None) -> AgentConn | None:
+        """取一个可派发的在线 agent。按 (空闲槽, 权重) 择优（多空闲优先、平手权重高者优先）。
+
+        group 非空时只在同组节点里选（分组亲和：任务 group ↔ agent group_name）；无同组空闲则返回 None，
+        该任务留排队等同组节点空闲——不会错派到别组。group 为 None（未分组任务）可派给任意空闲节点。
+        """
+        candidates = [
+            c
+            for c in self._agents.values()
+            if c.free_slots > 0 and (group is None or c.group_name == group)
+        ]
+        return max(candidates, key=lambda c: (c.free_slots, c.weight)) if candidates else None
 
     def on_dispatched(self, agent_id: str, req_id: str) -> None:
         conn = self._agents.get(agent_id)
