@@ -16,6 +16,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from pyp_server.hub import AgentHub
+from pyp_server.ratelimit import SourceRateLimiter
 from pyp_server.routers import api, auth_routes, explore, health, internal, sources, ui, ws
 from pyp_server.scheduler import dispatch_loop
 from pyp_server.settings import get_server_settings
@@ -47,6 +48,7 @@ def create_app() -> FastAPI:
         lifespan=_lifespan,
     )
     app.state.hub = AgentHub()  # 在线 agent 连接注册表（进程内单例）
+    app.state.limiter = SourceRateLimiter()  # 每源令牌桶 + AIMD（派发环限流、结果回报调频）
     app.include_router(health.router)
     app.include_router(auth_routes.router)
     app.include_router(ui.router)

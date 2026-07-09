@@ -144,7 +144,10 @@ class AgentConnection:
     async def _heartbeat_loop(self, ws) -> None:
         while True:
             await anyio.sleep(self.heartbeat_s)
-            await ws.send(Heartbeat(free_slots=self.slot_n, inflight=[]).model_dump_json())
+            inflight = list(self._scopes)  # 诚实自报：真实在途 req_id 与空闲槽
+            await ws.send(
+                Heartbeat(free_slots=max(0, self.slot_n - len(inflight)), inflight=inflight).model_dump_json()
+            )
 
     async def _handle_task(self, ws, assign: TaskAssign) -> None:
         req_id = assign.task.req_id

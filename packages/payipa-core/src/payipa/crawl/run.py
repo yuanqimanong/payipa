@@ -239,6 +239,37 @@ async def register_agent(
     return (row[0] if row else 1), (row[1] if row else None)
 
 
+async def source_rate_limits(engine_pyp: AsyncEngine) -> dict[str, int]:
+    """有 running 批次的各源的 rate_limit（req/s）：{source_uuid: rate_limit}，供派发环限流。"""
+    async with engine_pyp.connect() as conn:
+        rows = (
+            await conn.execute(
+                select(Source.uuid, Source.rate_limit)
+                .select_from(Source.__table__)
+                .join(Task.__table__, Task.source_id == Source.id)
+                .join(Batch.__table__, Batch.task_id == Task.id)
+                .where(Batch.status == "running")
+                .distinct()
+            )
+        ).all()
+    return {u: int(r) for u, r in rows}
+
+
+async def source_of_request(engine_pyp: AsyncEngine, req_id: int) -> str | None:
+    """由 req_id 反解数据源短码（供 AIMD 封禁降频定位源）。"""
+    async with engine_pyp.connect() as conn:
+        return (
+            await conn.execute(
+                select(Source.uuid)
+                .select_from(Request.__table__)
+                .join(Batch.__table__, Request.batch_id == Batch.id)
+                .join(Task.__table__, Batch.task_id == Task.id)
+                .join(Source.__table__, Task.source_id == Source.id)
+                .where(Request.id == req_id)
+            )
+        ).scalar()
+
+
 async def touch_agent(engine_pyp: AsyncEngine, agent_id: str) -> None:
     """心跳落库：刷新 last_heartbeat（供后续 liveness reaper/监控）。"""
     async with engine_pyp.begin() as conn:

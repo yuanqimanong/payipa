@@ -23,6 +23,7 @@ from payipa.crawl.run import (
     mark_assigned,
     requeue_expired_leases,
     requeue_request,
+    source_rate_limits,
     sweep_canceling_batches,
 )
 from payipa.db.engine import get_engine
@@ -37,16 +38,18 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncEngine
 
     from pyp_server.hub import AgentHub
+    from pyp_server.ratelimit import SourceRateLimiter
 
 logger = logging.getLogger("pyp_server.scheduler")
 
 
-async def drain_once(hub: AgentHub, pyp: AsyncEngine, secret: str, lease_s: int) -> int:
+async def drain_once(hub: AgentHub, pyp: AsyncEngine, secret: str, lease_s: int, limiter: SourceRateLimiter) -> int:
     """把 QUEUED 请求填到匹配的空闲槽，直到无槽/无排队/本轮无进展。返回本轮成功下发数。
 
-    先按 (优先级,深度,序) 取一批候选，逐条选**同组**空闲节点（分组亲和 + 空闲槽/权重择优）；某条无匹配节点
-    则跳过换下一条，避免分组头阻塞。on_dispatched 递减空闲槽，故多 agent 间按空闲槽铺满。
+    先按 (优先级,深度,序) 取一批候选，逐条选**同组**空闲节点（分组亲和 + 空闲槽/权重择优）；每条还要过**每源限流**
+    令牌桶（红线3）。某条无匹配节点或被限流则跳过换下一条，避免头阻塞。on_dispatched 递减空闲槽，故多 agent 铺满。
     """
+    rates = await source_rate_limits(pyp)
     dispatched = 0
     while True:
         if hub.pick_free() is None:  # 全无空闲槽 → 本轮到此
@@ -59,6 +62,8 @@ async def drain_once(hub: AgentHub, pyp: AsyncEngine, secret: str, lease_s: int)
             conn = hub.pick_free(spec.group)  # 同组空闲节点（group=None 可派任意）
             if conn is None:
                 continue  # 该任务分组暂无空闲节点 → 跳过，换下一条（不阻塞别组）
+            if not limiter.take(spec.source, rates.get(spec.source, 0)):
+                continue  # 该源本 tick 令牌用尽 → 留排队，下一 tick 再派（每源限流）
             req_id = int(spec.req_id)
             lease_until = datetime.now(UTC) + timedelta(seconds=spec.timeout_s or lease_s)
             if await mark_assigned(pyp, req_id, conn.agent_id, lease_until) != 1:
@@ -100,6 +105,7 @@ async def dispatch_loop(app: FastAPI) -> None:
     """长驻后台环：触发到点 cron → 回收过期租约 → 排空队列。任何业务异常都不能让它退出（仅 cancel 时结束）。"""
     settings = get_server_settings()
     hub: AgentHub = app.state.hub
+    limiter: SourceRateLimiter = app.state.limiter
     pyp = get_engine("pyp")
     secret = get_db_settings().upload_secret
     interval, lease_s, max_attempt = settings.dispatch_interval_s, settings.task_lease_s, settings.max_attempt
@@ -110,7 +116,7 @@ async def dispatch_loop(app: FastAPI) -> None:
             await fire_due_schedules(pyp, datetime.now(UTC))
             await requeue_expired_leases(pyp, max_attempt=max_attempt)
             await sweep_canceling_batches(pyp)
-            await drain_once(hub, pyp, secret, lease_s)
+            await drain_once(hub, pyp, secret, lease_s, limiter)
             fails = 0
         except Exception:  # noqa: BLE001 —— anyio 取消是 BaseException，不会被这里吞掉
             fails += 1

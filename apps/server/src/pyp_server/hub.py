@@ -38,9 +38,11 @@ class AgentHub:
         self._agents.pop(agent_id, None)
 
     def update_heartbeat(self, agent_id: str) -> None:
-        """心跳只刷新存活标记。**槽位/在途以服务端 on_dispatched/on_finished 记账为准**——
-        agent 自报 free_slots/inflight 当前不可信（conn.py 占位恒报 slot_n/空），不能用来驱动派发，
-        否则心跳会周期性抹掉派发记账、导致超发。真实自报的对账留后续 M2 切片。"""
+        """心跳只刷新存活标记。**槽位/在途仍以服务端 on_dispatched/on_finished 记账为准**——
+
+        agent 现已诚实自报 free_slots/inflight（conn.py），但不据此改 hub 记账：派发在途窗口内
+        （已 on_dispatched、TaskAssign 尚未被 agent 收妥登记）自报会偏大，直接采纳会超发。基于自报的
+        安全对账（只补不减/检测漂移）留后续切片。"""
         conn = self._agents.get(agent_id)
         if conn is not None:
             conn.last_seen = time.monotonic()

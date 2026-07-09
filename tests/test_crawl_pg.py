@@ -54,6 +54,9 @@ def test_enqueue_discovered(require_pg: None) -> None:
             # 建批：seed 有 url_hash、depth=0
             rows = await _rows(pyp, batch_id)
             assert len(rows) == 1 and rows[0].depth == 0 and rows[0].url_hash
+            # 反解源 + 每源限流表（本批 running）
+            assert await run.source_of_request(pyp, seed) == _UUID
+            assert (await run.source_rate_limits(pyp)).get(_UUID) == 10  # Source.rate_limit 默认 10
 
             # 发现 3 条（含 a 与 a#frag 同指纹）→ 去重后入 2 条，depth=1
             n = await run.enqueue_discovered(pyp, seed, ["https://x.com/a", "https://x.com/b", "https://x.com/a#frag"])

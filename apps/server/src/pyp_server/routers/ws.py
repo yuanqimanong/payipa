@@ -18,12 +18,14 @@ from payipa.crawl.run import (
     resolve_ingest_context,
     set_agent_offline,
     set_request_state,
+    source_of_request,
     touch_agent,
 )
 from payipa.db.engine import get_engine
 from payipa.security.tokens import new_node_token
 from payipa_contracts import (
     ClientFrame,
+    ErrorCode,
     ErrorFrame,
     Heartbeat,
     RegisterAck,
@@ -36,6 +38,7 @@ from payipa_contracts import (
 )
 from pydantic import TypeAdapter, ValidationError
 
+from pyp_server.ratelimit import SourceRateLimiter
 from pyp_server.settings import get_server_settings
 
 logger = logging.getLogger("pyp_server.ws")
@@ -47,9 +50,9 @@ _CLOSE_PROTOCOL = 1002
 _CLOSE_UNSUPPORTED = 1003
 
 
-async def _ingest_result(result: ResultBatch) -> None:
+async def _ingest_result(result: ResultBatch, limiter: SourceRateLimiter) -> None:
     """多波续爬 + 入库 + 收尾。顺序：先把本页发现链接并入同批入队（新 QUEUED 落库、防跨波提前收尾）
-    → 写 data_center（指纹幂等）并置请求成功 → 尝试收尾批次。"""
+    → 写 data_center（指纹幂等）并置请求成功 → 尝试收尾批次 → AIMD 成功回升该源速率。"""
     pyp = get_engine("pyp")
     dc = get_engine("data_center")
     uuid, fingerprint_keys, indexed = await resolve_ingest_context(pyp, int(result.req_id))
@@ -57,6 +60,14 @@ async def _ingest_result(result: ResultBatch) -> None:
     await enqueue_discovered(pyp, int(result.req_id), result.discovered)
     await handle_result(pyp, dc, table, result, fingerprint_keys=fingerprint_keys)
     await finalize_batch_if_done(pyp, int(result.batch_id))
+    limiter.on_ok(uuid)  # 成功 → AIMD 加性增
+
+
+async def _signal_blocked(req_id: int, limiter: SourceRateLimiter) -> None:
+    """封禁回报 → 反解源并触发 AIMD 乘性降频（best-effort）。"""
+    uuid = await source_of_request(get_engine("pyp"), req_id)
+    if uuid:
+        limiter.on_blocked(uuid)
 
 
 @router.websocket("/ws/agent")
@@ -105,13 +116,17 @@ async def agent_ws(ws: WebSocket) -> None:
                 except Exception:  # noqa: BLE001 —— DB 抖动不该断连接
                     logger.warning("touch_agent %s failed", agent_id, exc_info=True)
             elif isinstance(frame, ResultReport):
-                await _ingest_result(frame.result)
+                await _ingest_result(frame.result, ws.app.state.limiter)
                 hub.on_finished(agent_id, frame.result.req_id)
             elif isinstance(frame, StatusReport) and (frame.state < 0 or frame.state == int(RequestState.CANCELED)):
                 await set_request_state(get_engine("pyp"), int(frame.req_id), frame.state)
+                if frame.state == int(ErrorCode.BLOCKED):
+                    await _signal_blocked(int(frame.req_id), ws.app.state.limiter)
                 hub.on_finished(agent_id, frame.req_id)
             elif isinstance(frame, ErrorFrame) and frame.req_id:
                 await set_request_state(get_engine("pyp"), int(frame.req_id), frame.code)
+                if frame.code == int(ErrorCode.BLOCKED):
+                    await _signal_blocked(int(frame.req_id), ws.app.state.limiter)
                 hub.on_finished(agent_id, frame.req_id)
     except WebSocketDisconnect:
         pass
