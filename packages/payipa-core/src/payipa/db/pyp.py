@@ -298,6 +298,14 @@ class Assembly(TimestampMixin, OwnedMixin, PypBase):
     trigger: Mapped[str] = mapped_column(String(16), default="manual")
     upstream_task_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     incremental: Mapped[bool] = mapped_column(Boolean, default=False)
+    # M3 slice-5：版本状态机 + 内容寻址 + 签名门 + 产物表配置
+    product_code: Mapped[str | None] = mapped_column(String(32), nullable=True)  # asm_{product_code}
+    content_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)  # 脚本内容寻址（版本 pin）
+    status: Mapped[str] = mapped_column(String(16), default="draft")  # draft/testing/active
+    script_ref: Mapped[str | None] = mapped_column(Text, nullable=True)  # 脚本内容寻址引用（固定方法名）
+    signature: Mapped[str | None] = mapped_column(String(128), nullable=True)  # 发布签名（HMAC，执行器校验）
+    fingerprint_keys: Mapped[list] = mapped_column(JSONB, default=list)  # 产物指纹字段
+    indexed_fields: Mapped[list] = mapped_column(JSONB, default=list)  # 产物勾索引字段
 
 
 # ══ 公共配置 ════════════════════════════════════════════════════════════════
