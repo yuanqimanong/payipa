@@ -16,8 +16,9 @@ from payipa.db.settings import get_settings
 from payipa.security.job_token import decode_job_token, token_allows_table
 from payipa.security.tokens import verify_upload_token
 from payipa.storage import get_storage, record_artifact
+from payipa.studio.cursor import decode_cursor, encode_cursor
 from payipa.studio.gateway import QueryGateway
-from payipa_contracts import ArtifactRef, RulePack, TableQueryRequest
+from payipa_contracts import ArtifactRef, KeysetCursor, QuotaMeta, RulePack, TableQueryRequest
 
 router = APIRouter(prefix="/internal", tags=["internal"])
 
@@ -57,23 +58,46 @@ async def upload_raw(
     return ref
 
 
-@router.post("/query", summary="Query Gateway：沙箱经此结构化取数（job_token 鉴权 + scope 授权，红线2）")
+@router.post("/query", summary="Query Gateway：沙箱经此结构化取数（job_token 鉴权 + scope 授权 + 行数配额，红线2）")
 async def query_gateway(
     req: TableQueryRequest,
     x_job_token: str = Header(..., description="组装作业令牌（JWT；scope=可读表 + 行数配额）"),
 ) -> dict:
-    """用户/AI 代码读数的**唯一**受控入口：验 job_token（签名+有效期）→ 查 scope 是否含 data_{source} →
-    结构化 SELECT（无 SQL 串）→ 回 {rows, next_cursor, quota}。越权表 403、令牌无效 401。M3 首版 JSON 传输，
-    Arrow IPC 与只读 PG 角色在后续硬化切片。"""
-    claims = decode_job_token(get_settings().upload_secret, x_job_token)
+    """用户/AI 代码读数的**唯一**受控入口：验 job_token（签名+有效期）→ scope 授权（表白名单，越权 403）
+    → 配额强制（scope.row_quota；已消费行数编码进签名游标累计，耗尽 403）→ 结构化 SELECT（无 SQL 串）
+    → 回 {rows, next_cursor(签名不透明), quota}。伪造/跨作业游标 400。JSON 传输；Arrow/只读角色留硬化切片。"""
+    secret = get_settings().upload_secret
+    claims = decode_job_token(secret, x_job_token)
     if claims is None:
         raise HTTPException(status_code=401, detail="invalid or expired job token")
     table = data_table_name(req.source)
     if not token_allows_table(claims, table):
         raise HTTPException(status_code=403, detail=f"job token scope does not allow table {table}")
-    rows, cursor, quota = await QueryGateway().read(get_engine("data_center"), req)
-    return {
-        "rows": rows,
-        "next_cursor": cursor.model_dump() if cursor else None,
-        "quota": quota.model_dump(),
-    }
+
+    jti = str(claims.get("jti"))
+    quota_limit = (claims.get("scope") or {}).get("row_quota")
+    after_id, consumed = 0, 0
+    if req.cursor_token:  # 翻页：验签 + jti/source 绑定；伪造/篡改/跨作业 → 400
+        cur = decode_cursor(secret, req.cursor_token, jti=jti, source=req.source)
+        if cur is None:
+            raise HTTPException(status_code=400, detail="invalid cursor")
+        after_id, consumed = cur["a"], cur["c"]
+
+    limit = req.limit
+    if quota_limit is not None:
+        remaining = int(quota_limit) - consumed
+        if remaining <= 0:
+            raise HTTPException(status_code=403, detail="row quota exhausted")
+        limit = min(limit, remaining)
+
+    inner = TableQueryRequest(
+        source=req.source, columns=req.columns, filters=req.filters, limit=limit, cursor=KeysetCursor(after_id=after_id)
+    )
+    rows, cursor, _ = await QueryGateway().read(get_engine("data_center"), inner)
+    consumed += len(rows)
+    remaining_after = (int(quota_limit) - consumed) if quota_limit is not None else None
+    next_token = None
+    if cursor is not None and (remaining_after is None or remaining_after > 0):
+        next_token = encode_cursor(secret, after_id=cursor.after_id, consumed=consumed, jti=jti, source=req.source)
+    quota = QuotaMeta(rows_returned=len(rows), quota=quota_limit, rows_remaining=remaining_after)
+    return {"rows": rows, "next_cursor": next_token, "quota": quota.model_dump()}

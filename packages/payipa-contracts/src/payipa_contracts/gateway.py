@@ -35,7 +35,10 @@ class TableQueryRequest(BaseModel):
     columns: list[str] | None = active("投影列（None=返回系统列 + fields 袋）", default=None, since="M3")
     filters: list[ColumnFilter] = active("过滤条件（AND）", default_factory=list, since="M3")
     limit: int = active("单页最大行数", default=500, gt=0, le=10000, since="M3")
-    cursor: KeysetCursor | None = active("键集游标（翻页）", default=None, since="M3")
+    cursor: KeysetCursor | None = active("键集游标（进程内直调用）", default=None, since="M3")
+    cursor_token: str | None = active(
+        "签名不透明游标（HTTP 网关翻页用；由上一页响应下发，沙箱不可伪造/跨作业重用）", default=None, since="M3"
+    )
 
 
 class QuotaMeta(BaseModel):
