@@ -46,6 +46,17 @@ def verify_job_token(secret: str, token: str, job_id: str) -> dict | None:
         return None
 
 
+def decode_job_token(secret: str, token: str) -> dict | None:
+    """网关侧校验：只验**签名 + 有效期**（不强求某个 aud——服务端签发即可信），返回 claims（含 aud/scope）。
+
+    授权由 claims.scope（可读表白名单 + 行数配额）承担；aud=job_id 供审计/吊销定位。过期/篡改/格式错均归 None。
+    """
+    try:
+        return jwt.decode(token, secret, algorithms=[_ALG], options={"verify_aud": False})
+    except jwt.InvalidTokenError:
+        return None
+
+
 def token_allows_table(claims: dict, table: str) -> bool:
     """claims 的 scope 是否允许读该表（按 tables 白名单）。"""
     return table in (claims.get("scope") or {}).get("tables", [])
