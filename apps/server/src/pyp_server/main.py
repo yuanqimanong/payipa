@@ -18,7 +18,7 @@ from fastapi.templating import Jinja2Templates
 from pyp_server.consumer import consumer_loop
 from pyp_server.hub import AgentHub
 from pyp_server.ratelimit import SourceRateLimiter
-from pyp_server.routers import api, auth_routes, datasets, explore, health, internal, sources, ui, ws
+from pyp_server.routers import ai, api, auth_routes, datasets, explore, health, internal, sources, ui, ws
 from pyp_server.scheduler import dispatch_loop
 from pyp_server.settings import get_server_settings
 
@@ -60,6 +60,7 @@ def create_app() -> FastAPI:
     app.include_router(sources.router)
     app.include_router(api.router)
     app.include_router(explore.router)
+    app.include_router(ai.router)
     app.include_router(internal.router)
     app.include_router(datasets.router)
     app.include_router(ws.router)

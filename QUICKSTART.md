@@ -78,6 +78,7 @@ curl "http://127.0.0.1:8000/api/monitor/batches/<batch_id>"
 ## 还不能测（后续里程碑）
 
 - **任务调度进阶（M2 后续切片）**：cron/定时触发、Redis 队列、优先级排序、限流/自动调频、Cancel 取消、分组亲和、权重均衡。当前已具备：**持久化队列 + 自动派发环 + 租约回收 + 断连重排 + 监控端点实时聚合**。
-- **组装 / 推送 / 对外 Dataset API / AI 帮写 / 受控出口 / 浏览器兼容采集**（M3–M5）。
+- **组装 / 推送 / 对外 Dataset API**（M3–M4，已具备）；**AI/LLM Gateway**（M5，已具备——`llm.manage` 权限，管理员登记模型/凭证 KEK 加密，`POST /api/llm/complete` 经 Gateway 调模型、成本挂 task_id 记审计；本地无 key 用 `provider=echo` 冒烟）。
+- **受控出口 / 浏览器兼容采集**（M5 剩余，代理 provider adapter + 标准 Playwright）。
 - **镜像发布**：`docker pull` / `pip install pyp-agent` 尚未发到 registry/PyPI（现为本地 `docker build`，见 §4）。
 - **RBAC 管理界面**：权限矩阵（角色×资源×动作）已落库生效（M5，`payipa.security.rbac` + `require_perm` 闸门，开关 `PYP_SERVER_RBAC_ENABLED`）；用户/角色的**页面化管理**（现走 `pyp-admin` CLI）归 06 界面后续轮。

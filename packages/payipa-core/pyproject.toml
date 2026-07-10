@@ -16,6 +16,7 @@ dependencies = [
     "pyjwt>=2.9",
     "cryptography>=43",
     "httpx>=0.27",
+    "anthropic>=0.69",         # core.ai LLM Gateway 一等 provider（官方 SDK；惰性导入，无 key 不阻断）
 ]
 
 [build-system]
