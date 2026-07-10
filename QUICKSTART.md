@@ -72,6 +72,8 @@ curl "http://127.0.0.1:8000/api/monitor/batches/<batch_id>"
 > 返回里 `dispatched` 恒为 0：派发不在建批次时同步发生，改由后台环负责（见上）。
 > 页面（`/data`、`/sources`）需登录；JSON API 的 RBAC 权限闸门默认关（`PYP_SERVER_RBAC_ENABLED=false`，保持开放便于本地起步）。
 > 生产启用：`uv run pyp-admin seed-rbac` 播种权限目录+四角色 → `uv run pyp-admin grant-role <用户> <角色>` → `.env` 置 `PYP_SERVER_RBAC_ENABLED=true`。
+> **SQL 窗口**（管理员/技术特权，`sql_query` 权限）：`POST /api/query/sql` body `{"db":"data_center","sql":"SELECT ...","limit":100}`——
+> 四件套守护（子查询包装/只读事务/语句超时/行数封顶），执行记审计；可选独立只读角色：`uv run pyp-admin setup-sql-readonly pyp_readonly <密码>` 后在 `.env` 配 `PG_RO_USER/PG_RO_PASSWORD`。
 
 ## 还不能测（后续里程碑）
 

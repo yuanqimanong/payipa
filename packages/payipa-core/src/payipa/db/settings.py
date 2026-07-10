@@ -32,6 +32,11 @@ class Settings(BaseSettings):
     pg_db_data_center: str = "data_center"  # 采集数据库
     pg_db_business: str = "business"  # 组装产物库
 
+    # SQL 窗口共享只读角色（03 §2.2 四件套之只读防线；M5）。未配 = 主用户 + 事务级
+    # READ ONLY（窗口恒定 READ ONLY，配角色是双保险）。用 pyp-admin setup-sql-readonly 创建。
+    pg_ro_user: str | None = None
+    pg_ro_password: str | None = None
+
     # 运行时可选组件（M2/M5 接线；缺省 None = 降级）
     redis_url: str | None = None
     s3_endpoint: str | None = None
@@ -66,6 +71,19 @@ class Settings(BaseSettings):
     def async_url(self, key: DbKey) -> URL:
         """asyncpg 驱动的连接 URL（运行时用）。"""
         return self._url("postgresql+asyncpg", key)
+
+    def ro_async_url(self, key: DbKey) -> URL | None:
+        """SQL 窗口只读角色的 asyncpg URL；未配置 PG_RO_USER 返回 None（降级主用户）。"""
+        if not self.pg_ro_user:
+            return None
+        return URL.create(
+            drivername="postgresql+asyncpg",
+            username=self.pg_ro_user,
+            password=self.pg_ro_password or "",
+            host=self.pg_host,
+            port=self.pg_port,
+            database=self._db_name(key),
+        )
 
     def sync_url(self, key: DbKey) -> URL:
         """psycopg（同步）驱动的连接 URL（Alembic 迁移用）。"""
