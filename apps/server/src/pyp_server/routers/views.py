@@ -10,9 +10,11 @@ from fastapi import APIRouter, Depends, Query
 from payipa import views
 from payipa.db.engine import get_engine
 
-from pyp_server.auth import require_perm
+from pyp_server.auth import require_perm, require_user
 
-router = APIRouter(prefix="/api/views", tags=["views"])
+# 路由级强制登录：即便 RBAC 关闭（require_perm 直通），这些数据端点也必须已登录——它们回显
+# 用户清单/审计日志等敏感数据，与其背后受登录保护的页面外壳（ui.py）保持一致，杜绝匿名直连读取。
+router = APIRouter(prefix="/api/views", tags=["views"], dependencies=[Depends(require_user)])
 
 
 @router.get("/tasks", summary="任务清单", dependencies=[Depends(require_perm("tasks.read"))])

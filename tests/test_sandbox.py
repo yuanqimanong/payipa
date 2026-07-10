@@ -122,6 +122,34 @@ def test_gateway_proxy_conf_whitelists_single_path() -> None:
     assert conf.count("proxy_pass") == 1  # 只此一个放行
 
 
+def test_lockdown_workdir_no_world_write(tmp_path) -> None:
+    """POSIX 上 job/out 目录不得世界可写（防共享 /tmp 竞态注入 result.json）；返回合法 --user 实参。"""
+    import os
+
+    from payipa.studio.sandbox import SandboxExecutor
+
+    workdir, jobdir, outdir = tmp_path / "w", tmp_path / "w" / "job", tmp_path / "w" / "out"
+    jobdir.mkdir(parents=True)
+    outdir.mkdir()
+    (jobdir / "child.py").write_text("x=1\n")
+    sbx = SandboxExecutor("secret")
+    user_arg = sbx._lock_down_workdir(workdir, jobdir, outdir)
+    assert user_arg.count(":") == 1 and all(p.isdigit() for p in user_arg.split(":"))
+    if hasattr(os, "getuid"):
+        assert (outdir.stat().st_mode & 0o077) == 0, "outdir 不应对 group/other 开放"
+        assert (jobdir.stat().st_mode & 0o077) == 0
+
+
+def test_sandbox_runtime_and_ulimit_flags() -> None:
+    """可选 gVisor 运行时与 fsize 上限落在构造参数上（不需容器即可核对）。"""
+    from payipa.studio.sandbox import SandboxExecutor
+
+    sbx = SandboxExecutor("secret", runtime="runsc", max_output_bytes=1234)
+    assert sbx._runtime == "runsc"
+    assert sbx._max_output_bytes == 1234
+    assert SandboxExecutor("secret")._runtime is None  # 默认走 runc
+
+
 # ── 真容器层（无 Linux 容器运行时自动跳过） ──────────────────────────────────
 
 

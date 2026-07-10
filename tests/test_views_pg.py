@@ -49,8 +49,10 @@ def test_view_pages_and_endpoints(require_pg: None) -> None:
     asyncio.run(_seed_user())
     try:
         with TestClient(create_app()) as client:
-            # 未登录 → 页面跳登录
+            # 未登录 → 页面跳登录；数据端点即便 RBAC 关闭也必须 401（不得匿名读用户/审计）
             assert client.get("/monitor", follow_redirects=False).status_code == 303
+            assert client.get("/api/views/users").status_code == 401
+            assert client.get("/api/views/audit").status_code == 401
 
             client.post("/login", data={"username": _USER, "password": _PW})
 

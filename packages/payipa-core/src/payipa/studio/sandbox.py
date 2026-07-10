@@ -19,6 +19,7 @@ Linux 容器宿主（linux/amd64 + cgroup v2 + runc），04A 要求的全部隔�
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -173,6 +174,8 @@ class SandboxExecutor:
         pids_limit: int = 256,
         timeout_s: float = 120.0,
         page_limit: int = 500,
+        max_output_bytes: int = 256 * 1024 * 1024,
+        runtime: str | None = None,
         docker: str = "docker",
     ) -> None:
         self._secret = secret
@@ -183,7 +186,34 @@ class SandboxExecutor:
         self._pids_limit = pids_limit
         self._timeout_s = timeout_s
         self._page_limit = page_limit
+        self._max_output_bytes = max_output_bytes
+        # 可选更强隔离运行时（如 gVisor 的 "runsc"）：OCI 兼容，装好后一个标志即叠加，
+        # 不改架构。Linux/WSL2 可用；None 走 docker 默认 runc。见 04A / 决策记录。
+        self._runtime = runtime
         self._docker = docker
+
+    def _lock_down_workdir(self, workdir: Path, jobdir: Path, outdir: Path) -> str:
+        """锁定 job/out 目录属主与权限，返回容器 --user 实参。
+
+        原生 Linux：mkdtemp 落在共享 /tmp，若 /out 世界可写，其他本地用户可竞态写伪造 result.json
+        注入业务库。故容器以**宿主当前 uid** 运行、目录 0700（仅属主可访问）；主控以 root 跑时把目录
+        交给 nobody(65534) 并以之运行。Windows(Docker Desktop) 挂载权限是虚拟的、单用户宿主，无此竞态，
+        直接用 nobody 且不改权限。
+        """
+        if not hasattr(os, "getuid"):  # Windows
+            return "65534:65534"
+        uid, gid = os.getuid(), os.getgid()  # type: ignore[attr-defined]
+        if uid == 0:  # 主控以 root 运行：不让容器也用 root，交给 nobody
+            run_uid, run_gid = 65534, 65534
+            for path in (jobdir, outdir, jobdir / "child.py"):
+                os.chown(path, run_uid, run_gid)  # type: ignore[attr-defined]
+        else:
+            run_uid, run_gid = uid, gid
+        workdir.chmod(0o700)
+        jobdir.chmod(0o700)
+        outdir.chmod(0o700)
+        (jobdir / "child.py").chmod(0o600)
+        return f"{run_uid}:{run_gid}"
 
     async def run_source(
         self,
@@ -196,6 +226,9 @@ class SandboxExecutor:
     ) -> tuple[list[dict], dict[str, int]]:
         """跑一份组装脚本源码，返回 (产物行, 各源新水位)。失败抛 SandboxScriptError/SandboxTimeout。"""
         await ensure_sandbox_infra(self._gateway_port, docker=self._docker)
+        # 镜像先就绪：job_token 的租约时钟自签发起算，若在冷镜像拉取（可能数十秒）之前签发，
+        # token 会在执行窗口结束前过期，网关中途 401。故拉取在前、签发在后，紧贴实际执行起点。
+        await _ensure_image(self._image, docker=self._docker)
         token, _jti = issue_job_token(
             self._secret,
             job_id,
@@ -211,7 +244,6 @@ class SandboxExecutor:
             "watermarks": dict(watermarks or {}),
             "page_limit": self._page_limit,
         }
-        await _ensure_image(self._image, docker=self._docker)
         workdir = Path(tempfile.mkdtemp(prefix="pyp-sandbox-"))
         name = f"pyp-sbx-{re.sub(r'[^a-zA-Z0-9_.-]', '-', job_id)[:40]}-{uuid.uuid4().hex[:6]}"
         try:
@@ -221,15 +253,11 @@ class SandboxExecutor:
             (jobdir / "child.py").write_text(
                 Path(__file__).with_name("_sandbox_child.py").read_text(encoding="utf-8"), encoding="utf-8"
             )
-            # 容器内以 nobody(65534) 运行：原生 Linux 上挂载目录须对其可读（/job）可写（/out）；
-            # mkdtemp 默认 0700 会挡住。Windows(Docker Desktop) 挂载权限是虚拟的，chmod 无害。
-            workdir.chmod(0o755)
-            jobdir.chmod(0o755)
-            (jobdir / "child.py").chmod(0o644)
-            outdir.chmod(0o777)
+            user_arg = self._lock_down_workdir(workdir, jobdir, outdir)
             cmd = [
                 self._docker, "run", "--rm", "-i",
                 "--name", name,
+                *(("--runtime", self._runtime) if self._runtime else ()),
                 "--network", SANDBOX_NETWORK,
                 "--read-only",
                 "--cap-drop", "ALL",
@@ -238,7 +266,8 @@ class SandboxExecutor:
                 "--memory", self._memory,
                 "--memory-swap", self._memory,  # 禁 swap 逃逸内存限额
                 "--cpus", self._cpus,
-                "--user", "65534:65534",  # nobody
+                "--ulimit", f"fsize={self._max_output_bytes}",  # 单文件写出上限（/out 撑爆宿主盘防护）
+                "--user", user_arg,
                 "--tmpfs", "/tmp:rw,size=64m",
                 "-v", f"{jobdir}:/job:ro",
                 "-v", f"{outdir}:/out",
