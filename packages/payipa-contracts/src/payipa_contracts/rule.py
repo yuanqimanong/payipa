@@ -74,6 +74,11 @@ class RulePack(BaseModel):
     script_ref: str | None = reserved(
         "挂载 Python 脚本的内容寻址引用（固定方法名，签名后执行）", default=None, since="M1"
     )
+    proxy_config_id: int | None = reserved(
+        "受控出口「代理配置」引用（11 下拉项：出口组/单一/不用代理）；task 携带下发、中转据此选路",
+        default=None,
+        since="M5",
+    )
 
 
 class RulePointer(BaseModel):
