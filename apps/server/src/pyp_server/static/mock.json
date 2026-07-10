@@ -178,7 +178,7 @@
       { "metric": "解析成功率", "value": "98.6%", "trend": "↗ 上升", "status": "active" },
       { "metric": "空白率", "value": "0.8%", "trend": "→ 平稳", "status": "active" },
       { "metric": "429/503 触发", "value": "12 / 分钟", "trend": "↗ 上升", "status": "testing" },
-      { "metric": "封禁换出口", "value": "3 / 分钟", "trend": "→ 平稳", "status": "active" }
+      { "metric": "访问暂停", "value": "3 / 分钟", "trend": "→ 平稳", "status": "active" }
     ]
   },
   "storage": {

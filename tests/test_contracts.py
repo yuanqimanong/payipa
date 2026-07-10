@@ -8,8 +8,10 @@ from pydantic import TypeAdapter
 
 
 def test_contract_version_handshake() -> None:
-    assert c.CONTRACT_VERSION >= 1
+    assert c.CONTRACT_VERSION == 2
+    assert c.MIN_SUPPORTED_CONTRACT_VERSION == 2
     assert c.is_compatible(c.CONTRACT_VERSION)
+    assert not c.is_compatible(1)
     assert not c.is_compatible(c.CONTRACT_VERSION + 1)
     with pytest.raises(ValueError):
         c.assert_compatible(0)
@@ -18,6 +20,8 @@ def test_contract_version_handshake() -> None:
 def test_error_codes_first_batch_are_negative() -> None:
     for code in c.ErrorCode:
         assert code < 0
+    assert int(c.ErrorCode.ACCESS_PAUSED) == -3
+    assert c.label(-3) == "访问暂停"
     assert int(c.ErrorCode.SOFT_FAIL) == -4
     assert c.label(-4) == "软失败"
     assert c.label(-999).startswith("未知")
@@ -72,7 +76,7 @@ def test_client_frame_discriminated_union_roundtrip() -> None:
     assert isinstance(frame, c.StatusReport)
     assert frame.state == 3
     # 错误码作为负数 state 也能承载
-    err = adapter.validate_python({"type": "status", "req_id": "r2", "state": int(c.ErrorCode.BLOCKED)})
+    err = adapter.validate_python({"type": "status", "req_id": "r2", "state": int(c.ErrorCode.ACCESS_PAUSED)})
     assert err.state == -3
 
 

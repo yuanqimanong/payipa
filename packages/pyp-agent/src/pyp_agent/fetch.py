@@ -1,6 +1,6 @@
 """抓取引擎（M1：niquests 直连 http）。
 
-三引擎（http/impersonate/browser）按 engine_hint 选；impersonate(curl_cffi)/browser 留 M5。
+按 ``engine_hint`` 选择采集引擎；当前实现常规 HTTP，标准浏览器能力留 M5。
 M1 直连出网（代理中转随 M5）。全部经代理中转是 M5 的事，M1 不依赖未验证组件。
 """
 
@@ -29,7 +29,7 @@ async def fetch(
     headers: dict[str, str] | None = None,
 ) -> FetchResult:
     if engine_hint is not EngineHint.HTTP:
-        raise NotImplementedError(f"引擎 {engine_hint} 留 M5（curl_cffi / CloakBrowser）")
+        raise NotImplementedError(f"采集引擎 {engine_hint} 尚未实现；M5 接入标准 Playwright 浏览器能力")
     async with niquests.AsyncSession() as session:
         resp = await session.get(url, timeout=timeout, headers=headers or {})
     return FetchResult(

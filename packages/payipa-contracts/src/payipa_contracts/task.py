@@ -24,8 +24,8 @@ class TaskSpec(BaseModel):
     priority: Priority = active("优先级（高插队）", default=Priority.MID)
     timeout_s: int = active("单任务硬超时（秒）", default=1800, gt=0)
     params: dict[str, Any] = active("运行参数（能力参数化：页数/范围等）", default_factory=dict)
-    engine_hint: EngineHint = active("引擎提示 http/impersonate/browser", default=EngineHint.HTTP)
+    engine_hint: EngineHint = active("采集引擎提示；当前使用 http，browser 为可选能力", default=EngineHint.HTTP)
     # 以下为后续里程碑接线的预留位
     group: str | None = reserved("分发分组（test/prod 集群、自动化能力集群）", default=None, since="M2")
-    proxy_config_id: str | None = reserved("代理配置引用（代理池出口）", default=None, since="M5")
+    proxy_config_id: str | None = reserved("代理配置引用（受控出口）", default=None, since="M5")
     account: str | None = reserved("采集账号/凭证维度（按账号限流）", default=None, since="M5")

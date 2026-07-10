@@ -7,10 +7,10 @@ agent 连接时上报其契约版本，主控据此接受/拒绝（过旧或过�
 from __future__ import annotations
 
 # 整数协议号。破坏性变更时 +1。
-CONTRACT_VERSION: int = 1
+CONTRACT_VERSION: int = 2
 
 # 主控可接受的最低 agent 协议版本（低于此拒连并提示升级）。
-MIN_SUPPORTED_CONTRACT_VERSION: int = 1
+MIN_SUPPORTED_CONTRACT_VERSION: int = 2
 
 
 def is_compatible(peer_version: int) -> bool:

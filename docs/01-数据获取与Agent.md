@@ -8,7 +8,7 @@
 
 - 爬虫调度**按任务分发**。
 - 有一个独立的 **pyp-agent**：可通过 **pip / docker 快速部署**到其他节点机器；主节点与 N 个子节点互联。
-- 互联方式开放讨论：主节点主动连接子节点？子节点反弹连接主节点？或有更好的互联注册方案？
+- 互联方式开放讨论：主节点主动连接子节点？子节点主动出站连接主节点？或有更好的互联注册方案？
 - pyp-agent 是否也放在 pyp 目录（仓库）下？
 - agent 职责边界待定：是**自带下载、解析、入库全功能**，还是**回传数据到主控端再处理**？
   - 数据量大的时候怎么办？
@@ -30,7 +30,7 @@
 
 ### 2.0 主↔子节点互联模式（已完成）
 
-**核心结论：业界几乎一致采用「agent 主动出站发起连接（长轮询/流/连 broker），只需 outbound、无需入站」——不要用「反弹连接」这个词。**
+**核心结论：业界几乎一致采用「agent 主动出站发起连接（长轮询/流/连 broker），只需 outbound、无需入站」；全文统一使用“agent 主动出站连接”。**
 
 - 逐个查证的连接模型（谁发起、协议、NAT 后可用性）：
 
@@ -46,7 +46,7 @@
 
   除 scrapyd 外全是「agent 出站 + 拉模型」。scrapyd 的中心入站模型**不适合 NAT 后节点**。
 
-- **「反弹连接」措辞问题**：在安全语境里 reverse connection ≈ reverse shell（connect-back / C2 回连），观感强烈负面，评审/安全团队会联想到后门。技术本身（agent 主动外连绕过 NAT）是正当且主流的，但**正式文档应改用中性表述**：「agent 主动出站长轮询 / pull 拉模型 / outbound-only / call-home 心跳」。GitHub/GitLab/Temporal 文档都说 "worker connects outbound / poll"，从不用 reverse。
+- **术语统一**：正式文档使用「agent 主动出站连接 / outbound worker / pull 模型」。该表述准确说明连接由 agent 发起，主控不需要访问节点地址，也与 GitHub、GitLab、Temporal 的公开文档一致。
 
 - **三种连接技术在 2026 的现状与取舍**：
 
@@ -73,7 +73,7 @@
 
 **行业共识：控制面/数据面分离——小结构化结果走 API/队列回控制面，大 blob 走对象存储直传，控制面只收「指针」（key + ETag + size + hash）。**
 
-- **「主控只发凭证、数据不经手」是标杆模式**：GitHub Actions Artifacts v4 即此实现——后端签发 scoped 到特定路径的临时凭证（SAS/presigned URL），runner 分块直传对象存储，取消中间代理后上传最高提速约 90%（github.blog，2026-07-04 核验）。反例是 GitLab Runner 让数据全量过服务端，GitLab 自己也在服务端内部尽力绕开应用进程——说明「数据过主控」是历史包袱不是优选。
+- **「主控只发凭证、数据不经手」是标杆模式**：GitHub Actions Artifacts v4 即此实现——后端签发 scoped 到特定路径的临时凭证（SAS/presigned URL），runner 分块直传对象存储，取消中间代理后上传最高提速约 90%（github.blog，2026-07-04 核验）。反例是 GitLab Runner 让数据全量过服务端，GitLab 自己也在服务端内部尽量不经过应用进程——说明「数据过主控」是历史包袱不是优选。
 - **S3 presigned URL / multipart 硬限制**（AWS 官方 qfacts）：单 PUT ≤5 GiB；multipart 每块 5 MiB–5 GiB、最多 10,000 块、单对象上限约 5 TiB；presigned URL 用 IAM 长期凭证签最长 7 天，**用临时凭证签则随凭证过期提前失效**（长任务需支持按需补签）。>100 MB 即建议走 multipart。断点续传用 multipart 原生机制（持久化 UploadId → ListParts 查已传 → 补传 → Complete），**不需要引入 tus 协议**；必须配 `AbortIncompleteMultipartUpload` lifecycle 清理孤儿分块。
 - **自托管对象存储选型（重要变化）**：**MinIO 已出局**——GitHub 仓库 2026-04-25 正式归档（read-only），README 明示不再维护，社区版控制台/二进制自 2025 年逐步移除，导流到商业版 AIStor。替代品现状：**SeaweedFS**（Apache-2.0，4.37 版 2026-06-29，约每周一版，Haystack 架构对海量小文件 O(1) 读，最契合采集场景，社区判断为原 MinIO 场景默认替代）；Garage（AGPLv3，小规模/异地分布、单二进制 1GB RAM 可跑）；Ceph RGW（S3 兼容面最广但运维最重）；RustFS（1.0 beta，观望）。三者都支持 presigned URL + multipart 直传。
 - **Python 客户端分工**：主控端用 boto3 签 URL、管 multipart 生命周期；agent 端上传 presigned URL 只需 HTTP 客户端 PUT（无需 AWS SDK），或用 obstore（Rust 绑定、原生 async，未到 1.0）。
@@ -83,7 +83,7 @@
 ### 2.2 规则 / 脚本下发到 agent（已完成，随回传一并调研）
 
 - **分发模式**：内容寻址包（按 hash 命名、immutable、可无限缓存）+ 通道指针文件（stable/canary，含 {version, sha256, url}）+ ETag 条件 GET 轮询；或复用任务长轮询通道捎带版本号。灰度靠切 canary 指针。参照 GitLab Runner「领任务即原子下发完整 job payload + 任务级短期 token」。
-- **信任边界（关键）**：**分发通道 ≠ 信任来源**。agent 不能因为「包从主控/TLS 正常拉来」就执行命令式代码，应校验独立发布签名（ed25519/minisign/cosign），**签名私钥离线保管、不放主控端**——这样主控被攻破 ≠ 全体 agent 被 RCE。体系化可参考 TUF（角色分层、阈值签名、防回滚），最小可行方案 = 离线密钥签名 + agent 验签 + 版本 pin + 沙箱执行 + hash 审计。声明式规则（选择器/JSON，agent 内置解释器）风险远低于命令式脚本，可放宽分发流程。
+- **信任边界（关键）**：**分发通道 ≠ 信任来源**。agent 不能因为「包从主控/TLS 正常拉来」就执行命令式代码，应校验独立发布签名（ed25519/minisign/cosign），**签名私钥离线保管、不放主控端**。即使主控状态异常，agent 也只执行经过独立签名和版本固定的内容。体系化可参考 TUF（角色分层、阈值签名、防回滚），最小可行方案 = 离线密钥签名 + agent 验签 + 版本 pin + 沙箱执行 + hash 审计。声明式规则（选择器/JSON，agent 内置解释器）风险远低于命令式脚本，可简化分发流程。
 - **反向边界**：每 agent 独立身份与最小 scope 凭证（presigned URL/STS policy 只允许写 `results/{agent_id}/` 前缀），可单独吊销。
 
 ### 2.4 第 3 轮问题的设计澄清（2026-07-04）
@@ -173,12 +173,12 @@
 4. **无对象存储兜底 = 主控端本地盘**（agent 经主控 HTTP 流式分块上传，不走 WS）；主控做磁盘水位检查与告警；UI 提示建议配 S3。
 5. **规则获取 = 任务带 (rule_id, version, hash) 指针 + agent 内容寻址缓存 + 未命中拉取**；缓存不可变无需失效通知；配版本状态机 + test/prod 测试通道 + 节点分组防污染。
 6. **pyp-agent 为 monorepo workspace 成员**，独立发 PyPI + Docker（见 [00 §3.5](00-总纲与全局约束.md)）。
-7. **agent 自动化能力（可选，2026-07-05）**：自动化（动态页/交互采集）是 **agent 的一项可选能力**，非全 agent 必备；当分配的任务需要自动化完成时才启动调用。引擎抽象 = **Playwright 兼容 API**，可用标准 Playwright 或 **CloakBrowser**（反检测 Chromium、drop-in、自带代理位——每会话绑一个 [11 代理池](11-代理池.md) 出口 + 指纹）；引擎不锁定、可换。agent **注册时上报能力**（是否支持自动化）；需要自动化的任务经 **agent 分组** 分发到有该能力的集群（[07 §4-16](07-任务与调度.md)）。
-8. **HTTP 下载引擎分层（2026-07-05）**：普通下载用 **niquests**（HTTP/2/3、连接复用、requests 兼容）；需**绕过 TLS/JA3 指纹检测**的站点用 **curl_cffi 0.15**（libcurl + curl-impersonate，模拟浏览器 TLS/JA3/HTTP2 指纹，requests 兼容 API + AsyncSession，含 3.14）。与自动化引擎构成**三层反检测**：curl_cffi（HTTP 层指纹）→ CloakBrowser（浏览器层指纹）→ [代理池](11-代理池.md)出口（网络层）；按规则/站点难度选用。
+7. **agent 自动化能力（可选，2026-07-05；2026-07-10 收紧边界）**：动态页渲染与交互采集是 **agent 的一项可选能力**，非全 agent 必备；统一使用标准 **Playwright**，仅执行正常页面交互和已授权登录流程。agent **注册时上报能力**（是否支持自动化）；需要自动化的任务经 **agent 分组** 分发到有该能力的集群（[07 §4-16](07-任务与调度.md)）。浏览器上下文可绑定经批准的中转出口以保持会话路由稳定，但不得用于改变访问身份或绕开站点访问控制。
+8. **HTTP 下载引擎（2026-07-10 修订）**：常规 HTTP 数据源统一使用 **niquests**（HTTP/2/3、连接复用、requests 兼容）。动态渲染或正常交互改用标准 Playwright；如果数据提供方要求专用客户端、认证方式或协议参数，只按其公开文档和授权配置接入，无法兼容时暂停并人工处理，不模拟其他客户端身份。
 
 ## 5. 遗留问题
 
 - 命令式脚本签名：已定 **管理员统一签名、用户无感**（[02 §定案-2](02-数据清洗.md)）；离线密钥保管的运维细节留实现期。
 - agent↔主控的 WS 消息 schema（注册/心跳/任务/状态/取消帧）——在 `payipa-contracts` 中定义（见 [00 §3.5](00-总纲与全局约束.md)）。
 - 节点分组、per-source 容量配额、artifact 保留期策略的具体默认值——待任务调度/部署模块。
-- 自动化引擎最终选型（CloakBrowser v146 免费 / v148+ Pro 取舍、Manager 多 profile 是否引入）——有真实自动化需求时定（[11](11-代理池.md) 出口绑定已通）。
+- Playwright 浏览器版本、镜像体积和 Win/Linux 冒烟矩阵——有真实自动化需求时定（[11](11-代理池.md) 出口绑定已通）。

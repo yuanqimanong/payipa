@@ -65,11 +65,11 @@ async def _ingest_result(result: ResultBatch, limiter: SourceRateLimiter) -> Non
     limiter.on_ok(uuid)  # 成功 → AIMD 加性增
 
 
-async def _signal_blocked(req_id: int, limiter: SourceRateLimiter) -> None:
-    """封禁回报 → 反解源并触发 AIMD 乘性降频（best-effort）。"""
+async def _signal_backoff(req_id: int, limiter: SourceRateLimiter) -> None:
+    """访问暂停回报 → 反解数据源并触发 AIMD 乘性降频（best-effort）。"""
     uuid = await source_of_request(get_engine("pyp"), req_id)
     if uuid:
-        limiter.on_blocked(uuid)
+        limiter.on_backoff_signal(uuid)
 
 
 @router.websocket("/ws/agent")
@@ -128,13 +128,13 @@ async def agent_ws(ws: WebSocket) -> None:
                 hub.on_finished(agent_id, frame.result.req_id)
             elif isinstance(frame, StatusReport) and (frame.state < 0 or frame.state == int(RequestState.CANCELED)):
                 await set_request_state(get_engine("pyp"), int(frame.req_id), frame.state)
-                if frame.state == int(ErrorCode.BLOCKED):
-                    await _signal_blocked(int(frame.req_id), ws.app.state.limiter)
+                if frame.state == int(ErrorCode.ACCESS_PAUSED):
+                    await _signal_backoff(int(frame.req_id), ws.app.state.limiter)
                 hub.on_finished(agent_id, frame.req_id)
             elif isinstance(frame, ErrorFrame) and frame.req_id:
                 await set_request_state(get_engine("pyp"), int(frame.req_id), frame.code)
-                if frame.code == int(ErrorCode.BLOCKED):
-                    await _signal_blocked(int(frame.req_id), ws.app.state.limiter)
+                if frame.code == int(ErrorCode.ACCESS_PAUSED):
+                    await _signal_backoff(int(frame.req_id), ws.app.state.limiter)
                 hub.on_finished(agent_id, frame.req_id)
     except WebSocketDisconnect:
         pass

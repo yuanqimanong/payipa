@@ -1,8 +1,8 @@
 """每源令牌桶限流 + AIMD 自动降频（M2）。
 
-进程内、运行态；权威限流在派发环（红线3：抓取不绕限流）。每个数据源一个令牌桶，桶容量≈额定速率
-（约 1s 突发），按**有效速率** eff 补充。eff 起始=source.rate_limit，AIMD：agent 回报封禁(429/503/BLOCKED)
-→ 乘性减半（降到 min_rate），成功 → 加性增（回升到额定）。rate_limit≤0 视为不限。
+进程内、运行态；权威限流在派发环（红线3：所有采集都必须经过统一限流）。每个数据源一个令牌桶，桶容量≈额定速率
+（约 1s 突发），按**有效速率** eff 补充。eff 起始=source.rate_limit。当前 M2 切片收到容量限制或访问暂停信号时
+先乘性减半（降到 min_rate），成功则加性增（回升到额定）；完整的数据源暂停状态在后续切片接入。rate_limit≤0 视为不限。
 """
 
 from __future__ import annotations
@@ -49,8 +49,8 @@ class SourceRateLimiter:
         if b is not None:
             b.eff = min(b.base, b.eff + self.increase)
 
-    def on_blocked(self, source: str) -> None:
-        """封禁回报（BLOCKED/429/503）→ 乘性减，eff 降到 min_rate 地板。"""
+    def on_backoff_signal(self, source: str) -> None:
+        """容量限制或访问暂停回报触发乘性减；完整暂停状态由后续切片接入。"""
         b = self._b.get(source)
         if b is not None:
             b.eff = max(self.min_rate, b.eff * self.decrease)

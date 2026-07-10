@@ -2,6 +2,13 @@
 
 > 权威设计文档在 `docs/`（实现方案；`软件需求与详细设计说明书.md` 即 SDD + `决策记录.md`）。**冲突时以 SDD + 决策记录为准。** 本文件是给 Claude/开发者的落地约定速查。
 
+## 项目用途与数据访问边界
+
+- payipa 用于处理**用户有权访问**的数据源：自有系统、已授权 API、明确允许自动访问的公开页面，以及经数据提供方书面许可的其他来源。
+- Connector 必须遵守数据源的服务条款、API 文档、`robots.txt`、认证边界和速率限制；授权依据、账号归属与数据保留要求应随数据源配置留档。
+- 认证失败、授权拒绝、需人工确认的访问挑战或明确拒绝自动访问的响应，一律暂停对应数据源并提示人工复核；不得通过更换账号、会话或出口自动继续请求。
+- 代理中转只承担受控路由、供应商故障转移和审计，不用于改变访问身份或突破地域、账号及访问控制。浏览器自动化只使用标准 Playwright 完成正常渲染和已授权登录流程。
+
 ## 不可违背的铁律（来自已定决策）
 
 - **Python 3.14 固定**（payipa `>=3.14`，生产普通 GIL 构建，不开 free-threaded）；**uv** 管理；**ruff** + **import-linter**（CI 强制模块边界）。
@@ -9,7 +16,7 @@
 - **依赖方向**：`server → core → contracts`，`agent → contracts`；**pyp-agent 禁止依赖 payipa-core**。contracts 零 I/O、零逻辑、仅依赖 pydantic。
 - **契约先行**：`payipa-contracts` 的 Pydantic schema + 负数错误码枚举是第一产出；字段带 description 并标注「已生效/未生效」。
 - **PG 三库**：`pyp`(平台) / `data_center`(采集数据 `data_*`) / `business`(组装产物 `asm_*`)；库名可配、从 `.env` 读；迁移用 Alembic。跨 database 不 join。
-- **架构红线（SDD 00 §3.8，10 条，CI/评审对照）**：API 不直接跑爬虫；用户/AI 代码不直连 DB（沙箱 + Query Gateway）；抓取不绕限流/调频/代理；大对象走对象存储不进控制面（Redis/WS/HTTP JSON）；raw 留存；Connector/规则/组装/推送 版本化；AI 产物必经 test 验证 + 签名；契约字段诚实标注；凭证分层、脚本不接触明文、token 存 hash；默认开 TLS 校验。
+- **架构红线（SDD 00 §3.8，10 条，CI/评审对照）**：API 不直接跑爬虫；用户/AI 代码不直连 DB（沙箱 + Query Gateway）；外部采集不超出授权与站点规则；大对象走对象存储不进控制面（Redis/WS/HTTP JSON）；raw 留存；Connector/规则/组装/推送版本化；AI 产物必经 test 验证 + 签名；契约字段诚实标注；凭证分层、脚本不接触明文、token 存 hash；默认开 TLS 校验。
 
 ## 双仓纪律（务必遵守）
 

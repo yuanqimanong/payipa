@@ -289,7 +289,7 @@ async def source_rate_limits(engine_pyp: AsyncEngine) -> dict[str, int]:
 
 
 async def source_of_request(engine_pyp: AsyncEngine, req_id: int) -> str | None:
-    """由 req_id 反解数据源短码（供 AIMD 封禁降频定位源）。"""
+    """由 req_id 反解数据源短码（供 AIMD 回退信号定位数据源）。"""
     async with engine_pyp.connect() as conn:
         return (
             await conn.execute(

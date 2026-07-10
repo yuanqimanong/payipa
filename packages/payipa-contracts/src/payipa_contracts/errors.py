@@ -17,7 +17,7 @@ class ErrorCode(IntEnum):
 
     NETWORK = -1  # 网络失败（连接/DNS/重置等）
     TIMEOUT = -2  # 超时
-    BLOCKED = -3  # 封禁（403 / 验证码 / 风控）——走换出口而非降速
+    ACCESS_PAUSED = -3  # 访问暂停（认证、授权或需人工确认的访问挑战）
     SOFT_FAIL = -4  # 软失败（HTTP 200 但内容为错误页，命中 fail_when）
     PARSE_FAIL = -5  # 解析失败（规则未命中/结构变更）
     NODE_LOST = -6  # 节点失联（心跳超时回收，不计业务重试）
@@ -27,7 +27,7 @@ class ErrorCode(IntEnum):
 ERROR_LABELS: dict[ErrorCode, str] = {
     ErrorCode.NETWORK: "网络失败",
     ErrorCode.TIMEOUT: "超时",
-    ErrorCode.BLOCKED: "封禁",
+    ErrorCode.ACCESS_PAUSED: "访问暂停",
     ErrorCode.SOFT_FAIL: "软失败",
     ErrorCode.PARSE_FAIL: "解析失败",
     ErrorCode.NODE_LOST: "节点失联",

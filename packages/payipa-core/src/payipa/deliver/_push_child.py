@@ -2,11 +2,11 @@
 
 父进程（主控可信侧）以 ``sys.executable <此文件>`` 拉起本进程，环境已擦洗（无 PG_*/CRED_KEK/S3 等）。
 本进程从 stdin 读一份 JSON：``{code, entry, rows, creds, allow_domains}``，构造**受限 HTTP 客户端**
-（仅放行 allow_domains 内主机；越界即 PushBlocked，请求根本不发出），exec 组件代码取固定方法 entry，
+（仅放行 allow_domains 内主机；越界即 PushTargetRejected，请求根本不发出），exec 组件代码取固定方法 entry，
 调用 ``entry(ctx)`` 完成投递，最后向 stdout 写 ``{ok, sent, error}``。
 
 只依赖 stdlib + httpx；**不导入 payipa 包**（无 DB / 无 KEK / 无对象存储句柄）——隔离即容器。
-真正的内核级出网封禁（仅放行目标域）与 04A 组装沙箱同属 Linux 加固项，本层为应用级白名单 + env 擦洗。
+真正的内核级出网限制（仅放行目标域）与 04A 组装沙箱同属 Linux 加固项，本层为应用级白名单 + env 擦洗。
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ from urllib.parse import urlparse
 import httpx
 
 
-class PushBlocked(RuntimeError):
+class PushTargetRejected(RuntimeError):
     """组件试图访问白名单外的主机——请求被拦下（未发出）。"""
 
 
@@ -32,7 +32,7 @@ def _host_allowed(host: str | None, allow: list[str]) -> bool:
 
 
 class _WhitelistedHTTP:
-    """注入组件的唯一出网句柄：每次请求先校验目标主机在白名单内，否则 PushBlocked。"""
+    """注入组件的唯一出网句柄：每次请求先校验目标主机在白名单内，否则拒绝目标。"""
 
     def __init__(self, allow_domains: list[str], *, timeout: float = 30.0) -> None:
         self._allow = allow_domains
@@ -40,7 +40,7 @@ class _WhitelistedHTTP:
 
     def _check(self, url: str) -> None:
         if not _host_allowed(urlparse(url).hostname, self._allow):
-            raise PushBlocked(f"target host not in whitelist: {url} (allow={self._allow})")
+            raise PushTargetRejected(f"target host not in whitelist: {url} (allow={self._allow})")
 
     def request(self, method: str, url: str, **kw: Any) -> httpx.Response:
         self._check(url)
@@ -80,8 +80,8 @@ def _run(spec: dict) -> dict:
             return {"ok": False, "sent": 0, "error": f"component missing callable {entry!r}"}
         sent = fn(ctx)
         return {"ok": True, "sent": int(sent) if isinstance(sent, int) else len(ctx.rows), "error": None}
-    except PushBlocked as exc:
-        return {"ok": False, "sent": 0, "error": f"PushBlocked: {exc}"}
+    except PushTargetRejected as exc:
+        return {"ok": False, "sent": 0, "error": f"PushTargetRejected: {exc}"}
     except Exception as exc:  # noqa: BLE001 —— 组件任意异常都上报父进程决定退避/死信
         return {"ok": False, "sent": 0, "error": f"{type(exc).__name__}: {exc}"}
     finally:

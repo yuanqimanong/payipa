@@ -30,26 +30,26 @@ def test_aimd_decrease_and_recover() -> None:
     t = 0.0
     rl.take("s", 8, now=t)  # 建桶，eff=8
     assert rl.effective_rate("s") == 8
-    rl.on_blocked("s")  # 8→4
+    rl.on_backoff_signal("s")  # 8→4
     assert rl.effective_rate("s") == 4
-    rl.on_blocked("s")  # 4→2
-    rl.on_blocked("s")  # 2→1
-    rl.on_blocked("s")  # 1→0.5（地板）
-    rl.on_blocked("s")  # 保持 0.5
+    rl.on_backoff_signal("s")  # 4→2
+    rl.on_backoff_signal("s")  # 2→1
+    rl.on_backoff_signal("s")  # 1→0.5（地板）
+    rl.on_backoff_signal("s")  # 保持 0.5
     assert rl.effective_rate("s") == 0.5
     for _ in range(20):  # 成功回报加性增，封顶额定 8
         rl.on_ok("s")
     assert rl.effective_rate("s") == 8
 
 
-def test_blocked_throttles_refill() -> None:
+def test_backoff_signal_throttles_refill() -> None:
     rl = SourceRateLimiter(min_rate=0.5, decrease=0.5)
     t = 0.0
     # 额定 4：取尽初始 4 个令牌
     for _ in range(4):
         assert rl.take("s", 4, now=t) is True
     assert rl.take("s", 4, now=t) is False
-    rl.on_blocked("s")  # eff 4→2
+    rl.on_backoff_signal("s")  # eff 4→2
     # 过 1s：按降后 eff=2 补 2 个（而非额定 4）
     assert rl.take("s", 4, now=t + 1.0) is True
     assert rl.take("s", 4, now=t + 1.0) is True

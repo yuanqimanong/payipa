@@ -64,11 +64,10 @@ class ConnectorType(StrEnum):
 
 
 class EngineHint(StrEnum):
-    """抓取引擎提示（三层反检测）。browser 需 agent 自动化能力分组。"""
+    """采集引擎提示。browser 需 agent 自动化能力分组。"""
 
     HTTP = "http"  # niquests
-    IMPERSONATE = "impersonate"  # curl_cffi（TLS/JA3 指纹）
-    BROWSER = "browser"  # Playwright 兼容 / CloakBrowser
+    BROWSER = "browser"  # 标准 Playwright
 
 
 class FieldType(StrEnum):
