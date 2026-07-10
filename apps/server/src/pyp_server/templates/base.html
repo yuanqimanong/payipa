@@ -5,6 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{% block title %}payipa{% endblock %} · payipa</title>
     <link rel="stylesheet" href="/static/app.css" />
+    <script>
+      /* 渲染前套用已存皮肤，避免闪烁（FOUC） */
+      (function () { try { var s = localStorage.getItem("pyp-skin"); if (s) document.documentElement.dataset.skin = s; } catch (e) {} })();
+    </script>
     {% block head %}{% endblock %}
   </head>
   <body>
@@ -70,6 +74,12 @@
             </a>
           </div>
         </nav>
+        <div class="skin-picker" role="group" aria-label="界面皮肤">
+          <button type="button" data-skin="neo" title="野兽派" style="background: linear-gradient(135deg, #f3eee1 50%, #2436e8 50%)"></button>
+          <button type="button" data-skin="minimal" title="简约" style="background: linear-gradient(135deg, #ffffff 50%, #5b5bd6 50%)"></button>
+          <button type="button" data-skin="western" title="欧美" style="background: linear-gradient(135deg, #f7f9fc 50%, #4f46e5 50%)"></button>
+          <button type="button" data-skin="jp-kr" title="日韩" style="background: linear-gradient(135deg, #f5f6f8 50%, #ce3350 50%)"></button>
+        </div>
         <div class="sidebar-foot">
           <div class="avatar">{{ (user.username[0] | upper) if user else "?" }}</div>
           <div class="who"><b>{{ user.username if user else "未登录" }}</b><span>管理员</span></div>
@@ -85,5 +95,22 @@
         <div class="content">{% block content %}{% endblock %}</div>
       </div>
     </div>
+    <script>
+      /* 皮肤切换：写 <html data-skin> + 记忆 localStorage（前端即时生效，无需后端） */
+      (function () {
+        var root = document.documentElement, KEY = "pyp-skin";
+        var btns = document.querySelectorAll(".skin-picker button");
+        var cur = root.dataset.skin || "neo";
+        btns.forEach(function (b) {
+          b.setAttribute("aria-pressed", b.dataset.skin === cur ? "true" : "false");
+          b.addEventListener("click", function () {
+            var s = b.dataset.skin;
+            root.dataset.skin = s;
+            try { localStorage.setItem(KEY, s); } catch (e) {}
+            btns.forEach(function (x) { x.setAttribute("aria-pressed", x.dataset.skin === s ? "true" : "false"); });
+          });
+        });
+      })();
+    </script>
   </body>
 </html>

@@ -5,6 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>登录 · payipa</title>
     <link rel="stylesheet" href="/static/app.css" />
+    <script>
+      (function () { try { var s = localStorage.getItem("pyp-skin"); if (s) document.documentElement.dataset.skin = s; } catch (e) {} })();
+    </script>
     <style>
       body { display: flex; min-height: 100vh; align-items: center; justify-content: center; }
       .login { width: 340px; }
