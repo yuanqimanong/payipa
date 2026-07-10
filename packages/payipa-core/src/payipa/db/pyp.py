@@ -178,6 +178,11 @@ class Request(TimestampMixin, PypBase):
     error_code: Mapped[int | None] = mapped_column(SmallInteger, nullable=True)
     url_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)  # URL 指纹：批内去重（唯一索引见迁移）
     # 见迁移 c1d2e3f4a5b6 的唯一索引 uq_requests_batch_url_hash (batch_id, url_hash)
+    # 每请求解析计数（agent ExecSummary 回报，handle_result 回填）+ 耗时——喂 core.monitor 数据质量/时延（M5）
+    count_ok: Mapped[int | None] = mapped_column(Integer, nullable=True)  # 解析成功条数
+    count_fail: Mapped[int | None] = mapped_column(Integer, nullable=True)  # 解析失败条数
+    count_blank: Mapped[int | None] = mapped_column(Integer, nullable=True)  # 空白（无内容）条数
+    duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)  # 执行耗时（毫秒）
 
 
 class TaskEvent(TimestampMixin, PypBase):

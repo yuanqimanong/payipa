@@ -148,15 +148,27 @@ async def handle_result(
     *,
     fingerprint_keys: Sequence[str] = (),
 ) -> int:
-    """收到 ResultBatch：先入库 data_center（指纹幂等）→ 再置 request 成功。返回入库行数。"""
+    """收到 ResultBatch：先入库 data_center（指纹幂等）→ 再置 request 成功。返回入库行数。
+
+    同时把 agent 回报的执行摘要计数（解析成功/失败/空白 + 耗时）落到 request 行，供 core.monitor
+    聚合数据质量与时延（M5）。计数缺省 0（旧 agent 无 summary 字段时 pydantic 已补默认）。
+    """
     written = await Ingestor(engine_dc).upsert(
         table, result.items, batch_id=int(result.batch_id), fingerprint_keys=fingerprint_keys
     )
+    s = result.summary
     async with engine_pyp.begin() as conn:
         await conn.execute(
             update(Request.__table__)
             .where(Request.id == int(result.req_id))
-            .values(state=int(RequestState.SUCCESS), lease_until=None)  # 完成即释放租约，免遭 reaper 回收
+            .values(
+                state=int(RequestState.SUCCESS),
+                lease_until=None,  # 完成即释放租约，免遭 reaper 回收
+                count_ok=int(s.count_ok),
+                count_fail=int(s.count_fail),
+                count_blank=int(s.count_blank),
+                duration_ms=int(s.elapsed_s * 1000),
+            )
         )
     return written
 

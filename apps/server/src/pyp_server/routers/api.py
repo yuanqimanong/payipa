@@ -16,13 +16,19 @@ from payipa.db.engine import get_engine
 from payipa.db.settings import get_settings as get_db_settings
 from payipa.deliver.notify import NotifyError, notify
 from payipa.deliver.outbox import enqueue_push
+from payipa.monitor import node_metrics as compute_node_metrics
+from payipa.monitor import source_health as compute_source_health
+from payipa.monitor import system_overview as compute_system_overview
 from payipa_contracts import (
     BatchProgress,
     Cancel,
     Channel,
+    NodeMetric,
     NodeSnapshot,
     QueueStat,
     RulePack,
+    SourceHealth,
+    SystemOverview,
     TaskAssign,
     TaskSpec,
 )
@@ -80,6 +86,37 @@ async def queue_stat() -> QueueStat:
 )
 async def batch_progress(batch_id: int) -> BatchProgress:
     return BatchProgress(**await compute_batch_progress(get_engine("pyp"), batch_id))
+
+
+@router.get(
+    "/monitor/overview",
+    response_model=SystemOverview,
+    summary="系统监控总览（节点/队列/请求成败/整体数据质量，主控侧聚合）",
+    dependencies=[Depends(require_perm("monitor.read"))],
+)
+async def monitor_overview() -> SystemOverview:
+    return await compute_system_overview(get_engine("pyp"))
+
+
+@router.get(
+    "/monitor/nodes",
+    response_model=list[NodeMetric],
+    summary="各节点聚合指标（在线态/槽位 + 历史成败；运行态已占槽取自 AgentHub）",
+    dependencies=[Depends(require_perm("monitor.read"))],
+)
+async def monitor_nodes(request: Request) -> list[NodeMetric]:
+    live = {s.agent_id: s.slot_used for s in request.app.state.hub.snapshots()}
+    return await compute_node_metrics(get_engine("pyp"), live_slots=live)
+
+
+@router.get(
+    "/monitor/sources",
+    response_model=list[SourceHealth],
+    summary="各数据源健康度（成败率 + 数据质量 + 错误码分布）",
+    dependencies=[Depends(require_perm("monitor.read"))],
+)
+async def monitor_sources() -> list[SourceHealth]:
+    return await compute_source_health(get_engine("pyp"))
 
 
 @router.post("/tasks/preview", response_model=TaskAssign, summary="校验并回显 TaskSpec（演示契约，M0）")

@@ -75,11 +75,14 @@ async def process_task(
         artifacts.append(ref)
 
     parsed = interpret_page(rule, fetched.body, task.target, fetched.content_type)
+    # 数据质量原始计数（主控 core.monitor 聚合）：有非空字段=ok，全空=blank；
+    # 解析失败在请求级以 PARSE_FAIL 状态体现，不在此计 count_fail。
+    blank = sum(1 for it in parsed.items if not any(v not in (None, "", [], {}) for v in it.fields.values()))
     summary = ExecSummary(
         elapsed_s=round(time.monotonic() - started, 3),
-        count_ok=len(parsed.items),
+        count_ok=len(parsed.items) - blank,
         count_fail=0,
-        count_blank=0,
+        count_blank=blank,
     )
     return ResultReport(
         result=ResultBatch(

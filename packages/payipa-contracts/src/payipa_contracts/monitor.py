@@ -50,3 +50,40 @@ class ProxyStat(BaseModel):
     """代理出口统计（喂 07 调频与 monitor）。"""
 
     by_egress_domain: dict[str, float] = active("每 (出口×域) 成功率", default_factory=dict, since="M5")
+
+
+class NodeMetric(BaseModel):
+    """单节点聚合指标（在线态 + 历史成败，主控侧从 agents + requests 汇总）。"""
+
+    agent_id: str = active("节点 id", since="M5")
+    online: bool = active("是否在线", since="M5")
+    slot_n: int = active("并发槽容量 N", ge=0, since="M5")
+    slot_used: int = active("已占用槽数（运行态）", ge=0, default=0, since="M5")
+    ok: int = active("历史成功请求数", ge=0, default=0, since="M5")
+    fail: int = active("历史失败请求数", ge=0, default=0, since="M5")
+    success_rate: float = active("成功率 0–1（无样本记 1.0）", ge=0, le=1, default=1.0, since="M5")
+
+
+class SourceHealth(BaseModel):
+    """单数据源健康度（成败率 + 数据质量），主控侧聚合。"""
+
+    source: str = active("数据源短码", since="M5")
+    total: int = active("请求总数（终态）", ge=0, default=0, since="M5")
+    ok: int = active("成功数", ge=0, default=0, since="M5")
+    fail: int = active("失败数", ge=0, default=0, since="M5")
+    success_rate: float = active("成功率 0–1（无样本记 1.0）", ge=0, le=1, default=1.0, since="M5")
+    quality: QualityMetric | None = active("数据质量（解析成功·失败·空白率）", default=None, since="M5")
+    by_error: dict[str, int] = active("失败错误码分布（错误码字符串→计数）", default_factory=dict, since="M5")
+
+
+class SystemOverview(BaseModel):
+    """系统监控总览（一屏聚合：节点/队列/请求成败/数据质量）。"""
+
+    nodes_online: int = active("在线节点数", ge=0, default=0, since="M5")
+    nodes_total: int = active("已注册节点数", ge=0, default=0, since="M5")
+    queue_depth: int = active("当前排队请求数（running 批次 QUEUED）", ge=0, default=0, since="M5")
+    requests_total: int = active("请求总数（终态样本）", ge=0, default=0, since="M5")
+    ok: int = active("成功数", ge=0, default=0, since="M5")
+    fail: int = active("失败数", ge=0, default=0, since="M5")
+    success_rate: float = active("整体成功率 0–1（无样本记 1.0）", ge=0, le=1, default=1.0, since="M5")
+    quality: QualityMetric | None = active("整体数据质量", default=None, since="M5")
