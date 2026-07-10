@@ -1,11 +1,13 @@
-"""鉴权：argon2 密码哈希 + PyJWT 签名会话（HttpOnly cookie）+ current_user 依赖（06 定案）。
+"""鉴权：argon2 密码哈希 + PyJWT 签名会话（HttpOnly cookie）+ current_user / require_perm 依赖（06 定案）。
 
-会话走 HttpOnly cookie（防 XSS）；程序化/对外用 PyJWT/api_key（后续）。RBAC 权限矩阵留后续里程碑。
+会话走 HttpOnly cookie（防 XSS）；程序化/对外用 PyJWT/api_key。RBAC（M5）：require_perm 闸门，
+由 payipa.security.rbac 解析有效权限（角色∪直授，管理员通配 ``*``）；开关 settings.rbac_enabled。
 """
 
 from __future__ import annotations
 
 import time
+from collections.abc import Awaitable, Callable
 
 import jwt
 from argon2 import PasswordHasher
@@ -13,6 +15,7 @@ from argon2.exceptions import Argon2Error
 from fastapi import HTTPException, Request
 from payipa.db.engine import get_engine
 from payipa.db.pyp import User
+from payipa.security.rbac import effective_permissions, has_permission
 from sqlalchemy import select
 
 from pyp_server.settings import get_server_settings
@@ -68,3 +71,19 @@ async def require_user(request: Request) -> dict:
     if user is None:
         raise HTTPException(status_code=401, detail="login required")
     return user
+
+
+def require_perm(code: str) -> Callable[[Request], Awaitable[dict | None]]:
+    """RBAC 权限闸门依赖工厂。rbac_enabled=False → 直通（保持现网开放）；
+    True → 未登录 401、缺权限 403（管理员通配 ``*`` 放行）。返回当前用户（关时 None）。"""
+
+    async def _dep(request: Request) -> dict | None:
+        if not get_server_settings().rbac_enabled:
+            return None  # 闸门未启用：直通
+        user = await require_user(request)
+        perms = await effective_permissions(get_engine("pyp"), int(user["id"]))
+        if not has_permission(perms, code):
+            raise HTTPException(status_code=403, detail=f"missing permission: {code}")
+        return user
+
+    return _dep

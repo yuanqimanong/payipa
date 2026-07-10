@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from payipa.crawl.ingest import build_data_table
 from payipa.db.engine import get_engine
@@ -12,7 +12,7 @@ from payipa.explore.query import query_data
 from sqlalchemy.exc import ProgrammingError
 from starlette.datastructures import QueryParams
 
-from pyp_server.auth import get_current_user
+from pyp_server.auth import get_current_user, require_perm
 
 router = APIRouter(tags=["explore"])
 
@@ -35,7 +35,11 @@ def _parse_tabulator(qp: QueryParams) -> tuple[int, int, list[dict], list[dict]]
     return page, size, _collect(qp, "sort"), _collect(qp, "filter")
 
 
-@router.get("/api/data/{source}", summary="查询数据源产出（Tabulator remote：filter/sort/page）")
+@router.get(
+    "/api/data/{source}",
+    summary="查询数据源产出（Tabulator remote：filter/sort/page）",
+    dependencies=[Depends(require_perm("data.read"))],
+)
 async def get_data(source: str, request: Request) -> dict:
     page, size, sorters, filters = _parse_tabulator(request.query_params)
     table = build_data_table(source)  # 查询无需生成列，基础列即可

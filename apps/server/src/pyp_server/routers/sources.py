@@ -1,4 +1,7 @@
-"""建源界面（SSR）：源列表 / 建源表单 / 提交运行。页面级登录保护（未登录跳 /login）。"""
+"""建源界面（SSR）：源列表 / 建源表单 / 提交运行。页面级登录保护（未登录跳 /login）。
+
+建源提交实际会触发采集（与 /api/sources/{uuid}/run 同效），故 RBAC 开启时同样要过
+`sources.write` 权限（M5 闸门，SSR 侧渲染友好错误而非裸 403 JSON）。"""
 
 from __future__ import annotations
 
@@ -6,11 +9,13 @@ from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from payipa.db.engine import get_engine
 from payipa.db.pyp import Source
+from payipa.security.rbac import effective_permissions, has_permission
 from payipa_contracts import CleanOp, FieldRule, FieldType, Locator, LocatorType, RulePack
 from sqlalchemy import select
 
 from pyp_server.auth import get_current_user
 from pyp_server.service import dispatch_source_run
+from pyp_server.settings import get_server_settings
 
 router = APIRouter(tags=["sources-ui"])
 
@@ -51,6 +56,15 @@ async def sources_create(request: Request):
     user = await get_current_user(request)
     if user is None:
         return _login_redirect()
+    if get_server_settings().rbac_enabled:
+        perms = await effective_permissions(get_engine("pyp"), int(user["id"]))
+        if not has_permission(perms, "sources.write"):
+            return request.app.state.templates.TemplateResponse(
+                request,
+                "source_new.html",
+                {"user": user, "error": "缺少权限：sources.write（创建/编辑数据源）", "active": "sources"},
+                status_code=403,
+            )
     form = await request.form()
     name = (str(form.get("name") or "")).strip()
     uuid = (str(form.get("uuid") or "")).strip()

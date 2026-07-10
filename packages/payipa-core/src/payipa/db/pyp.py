@@ -71,6 +71,15 @@ class UserPermission(PypBase):
     permission_id: Mapped[int] = mapped_column(ForeignKey("permissions.id"), primary_key=True)
 
 
+class RolePermission(PypBase):
+    """角色→权限（标准 RBAC：用户经角色获得权限，另可经 user_permissions 直授）。"""
+
+    __tablename__ = "role_permissions"
+
+    role_id: Mapped[int] = mapped_column(ForeignKey("roles.id"), primary_key=True)
+    permission_id: Mapped[int] = mapped_column(ForeignKey("permissions.id"), primary_key=True)
+
+
 class AuditLog(TimestampMixin, PypBase):
     __tablename__ = "audit_log"
 

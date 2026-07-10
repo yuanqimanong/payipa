@@ -1,13 +1,14 @@
-"""应用 REST API。/api/agents（在线节点）+ /api/sources/{uuid}/run（触发单源）+ 契约 stub。
+"""应用 REST API。/api/agents（在线节点）+ /api/sources/{uuid}/run（触发单源）+ 推送/通知 + 契约 stub。
 
-完整端点清单见 SDD §6.5；JSON API 的细粒度鉴权（RBAC）留后续安全里程碑。
+完整端点清单见 SDD §6.5。敏感端点经 require_perm 权限闸门（M5 RBAC，settings.rbac_enabled 开关；
+关时直通保持现网开放，开时按 payipa.security.rbac 权限矩阵放行/拒绝）。
 """
 
 from __future__ import annotations
 
 import json
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from payipa.crawl.run import batch_progress as compute_batch_progress
 from payipa.crawl.run import cancel_batch as run_cancel_batch
 from payipa.crawl.run import queue_depth as compute_queue_depth
@@ -27,6 +28,7 @@ from payipa_contracts import (
 )
 from pydantic import BaseModel, Field
 
+from pyp_server.auth import require_perm
 from pyp_server.service import dispatch_source_run
 
 router = APIRouter(prefix="/api", tags=["api"])
@@ -50,17 +52,32 @@ class CancelResponse(BaseModel):
     canceling_inflight: int = Field(..., description="已通知 agent 优雅收尾的在途请求数")
 
 
-@router.get("/agents", response_model=list[NodeSnapshot], summary="在线节点快照（来自 AgentHub）")
+@router.get(
+    "/agents",
+    response_model=list[NodeSnapshot],
+    summary="在线节点快照（来自 AgentHub）",
+    dependencies=[Depends(require_perm("nodes.read"))],
+)
 async def list_agents(request: Request) -> list[NodeSnapshot]:
     return request.app.state.hub.snapshots()
 
 
-@router.get("/monitor/queue", response_model=QueueStat, summary="队列统计（QUEUED 排队深度，实时）")
+@router.get(
+    "/monitor/queue",
+    response_model=QueueStat,
+    summary="队列统计（QUEUED 排队深度，实时）",
+    dependencies=[Depends(require_perm("monitor.read"))],
+)
 async def queue_stat() -> QueueStat:
     return QueueStat(by_priority=await compute_queue_depth(get_engine("pyp")))
 
 
-@router.get("/monitor/batches/{batch_id}", response_model=BatchProgress, summary="批次进度（按 state 实时聚合）")
+@router.get(
+    "/monitor/batches/{batch_id}",
+    response_model=BatchProgress,
+    summary="批次进度（按 state 实时聚合）",
+    dependencies=[Depends(require_perm("monitor.read"))],
+)
 async def batch_progress(batch_id: int) -> BatchProgress:
     return BatchProgress(**await compute_batch_progress(get_engine("pyp"), batch_id))
 
@@ -70,7 +87,12 @@ async def preview_task(spec: TaskSpec) -> TaskAssign:
     return TaskAssign(task=spec)
 
 
-@router.post("/sources/{uuid}/run", response_model=RunResponse, summary="触发单源一次采集")
+@router.post(
+    "/sources/{uuid}/run",
+    response_model=RunResponse,
+    summary="触发单源一次采集",
+    dependencies=[Depends(require_perm("sources.run"))],
+)
 async def run_source(uuid: str, body: RunRequest) -> RunResponse:
     result = await dispatch_source_run(
         uuid=uuid,
@@ -87,6 +109,7 @@ async def run_source(uuid: str, body: RunRequest) -> RunResponse:
     "/batches/{batch_id}/cancel",
     response_model=CancelResponse,
     summary="取消一个批次（清排队 + 通知在途 agent 优雅收尾）",
+    dependencies=[Depends(require_perm("tasks.cancel"))],
 )
 async def cancel_batch(batch_id: int, request: Request) -> CancelResponse:
     pyp = get_engine("pyp")
@@ -119,6 +142,7 @@ class NotifyTestRequest(BaseModel):
     "/push/components/{component_id}/enqueue",
     response_model=PushEnqueueResponse,
     summary="手动触发推送：把一次投递入 outbox（Consumer 隔离子进程投递）",
+    dependencies=[Depends(require_perm("push.enqueue"))],
 )
 async def enqueue_push_api(component_id: int, body: PushEnqueueRequest) -> PushEnqueueResponse:
     if body.rows is not None:
@@ -133,7 +157,11 @@ async def enqueue_push_api(component_id: int, body: PushEnqueueRequest) -> PushE
     return PushEnqueueResponse(enqueued=n)
 
 
-@router.post("/notify/{bot_id}/test", summary="给通知机器人发一条测试通知")
+@router.post(
+    "/notify/{bot_id}/test",
+    summary="给通知机器人发一条测试通知",
+    dependencies=[Depends(require_perm("push.manage"))],
+)
 async def notify_test(bot_id: int, body: NotifyTestRequest) -> dict:
     try:
         await notify(get_engine("pyp"), bot_id, title=body.title, text=body.text, kek=get_db_settings().cred_kek)

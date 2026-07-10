@@ -22,6 +22,11 @@ class ServerSettings(BaseSettings):
     session_secret: str = "dev-session-secret-change-me-in-production-please"  # 生产走 env 注入（≥32B）
     session_ttl_s: int = 7 * 24 * 3600  # 会话有效期
 
+    # ── M5 RBAC ────────────────────────────────────────────────────────
+    # JSON API 权限闸门开关。默认关（保持现网开放行为、不破坏既有用例）；生产播种角色后置 True 启用。
+    # 关时 require_perm 直通（连登录都不强制）；开时未登录 401、缺权限 403，管理员(通配 *)放行一切。
+    rbac_enabled: bool = False
+
     # ── M2 派发环（后台调度）─────────────────────────────────────────────
     dispatch_enabled: bool = True  # 后台派发环开关（测试关闭，避免与用例抢 QUEUED 请求）
     dispatch_interval_s: float = 1.0  # 派发/回收扫描间隔（秒）

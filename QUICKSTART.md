@@ -1,4 +1,4 @@
-# QUICKSTART —— 本地手动测试（M1 + 登录 + 建源界面）
+﻿# QUICKSTART —— 本地手动测试（M1 + 登录 + 建源界面）
 
 > 现可用：**登录 → 建源界面 → 采集 → 查看页（Tabulator）** 全流程，agent 可**多容器**运行（见 §4）。
 > 尚未做（见文末）：任务调度/队列、组装/推送、RBAC 全量 API 鉴权、镜像发布到 registry。
@@ -70,11 +70,12 @@ curl -X POST "http://127.0.0.1:8000/api/sources/books/run" \
 curl "http://127.0.0.1:8000/api/monitor/batches/<batch_id>"
 ```
 > 返回里 `dispatched` 恒为 0：派发不在建批次时同步发生，改由后台环负责（见上）。
-> 页面（`/data`、`/sources`）需登录；JSON API 目前开放，细粒度 RBAC 鉴权在后续安全里程碑接入。
+> 页面（`/data`、`/sources`）需登录；JSON API 的 RBAC 权限闸门默认关（`PYP_SERVER_RBAC_ENABLED=false`，保持开放便于本地起步）。
+> 生产启用：`uv run pyp-admin seed-rbac` 播种权限目录+四角色 → `uv run pyp-admin grant-role <用户> <角色>` → `.env` 置 `PYP_SERVER_RBAC_ENABLED=true`。
 
 ## 还不能测（后续里程碑）
 
 - **任务调度进阶（M2 后续切片）**：cron/定时触发、Redis 队列、优先级排序、限流/自动调频、Cancel 取消、分组亲和、权重均衡。当前已具备：**持久化队列 + 自动派发环 + 租约回收 + 断连重排 + 监控端点实时聚合**。
-- **组装 / 推送 / 对外 Dataset API / AI 帮写 / 代理中转 / 反检测引擎**（M3–M5）。
+- **组装 / 推送 / 对外 Dataset API / AI 帮写 / 受控出口 / 浏览器兼容采集**（M3–M5）。
 - **镜像发布**：`docker pull` / `pip install pyp-agent` 尚未发到 registry/PyPI（现为本地 `docker build`，见 §4）。
-- **完整权限（RBAC）**：现仅"登录"门槛 + 页面保护；角色×资源×动作矩阵在 06/09 里程碑。
+- **RBAC 管理界面**：权限矩阵（角色×资源×动作）已落库生效（M5，`payipa.security.rbac` + `require_perm` 闸门，开关 `PYP_SERVER_RBAC_ENABLED`）；用户/角色的**页面化管理**（现走 `pyp-admin` CLI）归 06 界面后续轮。
