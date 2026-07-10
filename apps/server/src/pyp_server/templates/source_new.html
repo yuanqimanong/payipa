@@ -2,8 +2,10 @@
 {% block title %}新建数据源{% endblock %}
 {% block head %}
 <style>
-  .fld-row { display: grid; grid-template-columns: 1fr 1.8fr 130px 34px; gap: 8px; margin-bottom: 8px; align-items: center; }
+  .fld-row { display: grid; grid-template-columns: 1fr 1.8fr 34px 130px 34px; gap: 8px; margin-bottom: 8px; align-items: center; }
   .fld-row input, .fld-row select { margin: 0; }
+  .pick-btn { padding: 4px 0; font-size: 13px; }
+  #pick-hint { display: none; margin-top: 6px; color: var(--muted, #6b7280); font-size: 12px; }
 </style>
 {% endblock %}
 {% block content %}
@@ -38,17 +40,20 @@
       <div class="fld-row">
         <input name="field_name" value="title" placeholder="字段名" />
         <input name="field_css" value="h3 a@title" placeholder="CSS 选择器" />
+        <button type="button" class="btn ghost sm pick-btn" onclick="pickInto(this)" title="点选（需装浏览器插件）">◎</button>
         <select name="field_type"><option value="store">store</option><option value="link">link</option><option value="store+link">store+link</option></select>
         <button type="button" class="btn ghost sm" onclick="this.closest('.fld-row').remove()">✕</button>
       </div>
       <div class="fld-row">
         <input name="field_name" value="price" placeholder="字段名" />
         <input name="field_css" value="p.price_color" placeholder="CSS 选择器" />
+        <button type="button" class="btn ghost sm pick-btn" onclick="pickInto(this)" title="点选（需装浏览器插件）">◎</button>
         <select name="field_type"><option value="store">store</option><option value="link">link</option><option value="store+link">store+link</option></select>
         <button type="button" class="btn ghost sm" onclick="this.closest('.fld-row').remove()">✕</button>
       </div>
     </div>
     <button type="button" class="btn ghost sm" onclick="addRow()" style="margin-top: 4px">＋ 添加字段</button>
+    <div id="pick-hint">点选已启动：切到目标网站标签页，点击要采集的元素（Esc 取消）。未装插件则此按钮无效。</div>
   </div>
   <div class="field">
     <label>数据指纹字段 <span class="hint">逗号分隔；用于去重 + 建索引</span></label>
@@ -67,5 +72,20 @@
     row.querySelector("select").selectedIndex = 0;
     document.getElementById("fields").appendChild(row);
   }
+
+  // 浏览器插件点选桥（10 定案：content script + window.postMessage）。
+  // 点「◎」→ postMessage 通知插件开始点选；插件在目标页点选后回传 CSS，填入本行的 field_css 输入。
+  let _pickTarget = null; // 正在等待回填的 field_css input
+  function pickInto(btn) {
+    _pickTarget = btn.closest(".fld-row").querySelector('input[name="field_css"]');
+    document.getElementById("pick-hint").style.display = "block";
+    window.postMessage({ channel: "payipa-picker-req", type: "start", field: "field_css" }, window.origin);
+  }
+  window.addEventListener("message", (ev) => {
+    if (ev.source !== window || !ev.data || ev.data.channel !== "payipa-picker-res") return;
+    document.getElementById("pick-hint").style.display = "none";
+    if (ev.data.type === "picked" && _pickTarget) _pickTarget.value = ev.data.css || "";
+    _pickTarget = null;
+  });
 </script>
 {% endblock %}
