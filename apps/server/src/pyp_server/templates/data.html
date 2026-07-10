@@ -6,8 +6,17 @@
 <script src="/static/vendor/htmx/htmx.min.js"></script>
 <style>
   .tabulator { border: 0; background: transparent; font-size: 13.5px; }
-  .tabulator .tabulator-header { border-bottom: 1px solid var(--border); background: var(--surface-2); }
-  .tabulator-row.tabulator-row-even { background: var(--surface-2); }
+  .tabulator .tabulator-header { border-bottom: 3px solid var(--ink); background: var(--surface-2);
+    font-weight: 800; text-transform: uppercase; letter-spacing: .04em; }
+  .tabulator .tabulator-col { border-right: 1.5px solid var(--gray-bg); }
+  .tabulator-row { border-bottom: 1.5px solid var(--gray-bg); }
+  .tabulator-row.tabulator-row-even { background: color-mix(in srgb, var(--surface-2) 50%, transparent); }
+  .tabulator-row.tabulator-selectable:hover,
+  .tabulator-row:hover { background: var(--accent-weak) !important; }
+  .tabulator .tabulator-header-filter input { border: 2px solid var(--border-strong);
+    border-radius: var(--radius-sm); padding: 4px 7px; }
+  .tabulator .tabulator-footer { border-top: 3px solid var(--ink); background: var(--surface-2); }
+  .tabulator .tabulator-page.active { background: var(--accent); color: #fff; border: 2px solid var(--ink); }
 </style>
 {% endblock %}
 {% block content %}
