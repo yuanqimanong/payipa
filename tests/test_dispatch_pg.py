@@ -62,7 +62,14 @@ def test_dispatch_and_reaper_helpers(require_pg: None) -> None:
         try:
             await drop_data_table(dc, table)
             await run.ensure_data_table(dc, _UUID, ["title"])
-            source_id, task_id = await run.setup_source(pyp, _UUID, "M2 Dispatch")
+            source_id, task_id = await run.setup_source(
+                pyp,
+                _UUID,
+                "M2 Dispatch",
+                access_basis="owned",
+                access_reference="test fixture",
+                access_confirmed=True,
+            )
             ptr = await RuleStore(pyp).put(source_id, _rule())
             batch_id, specs = await run.create_batch_with_requests(
                 pyp, task_id=task_id, source_uuid=_UUID, targets=["u1", "u2", "u3"], rule_ptr=ptr

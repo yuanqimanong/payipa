@@ -40,13 +40,11 @@ PERMISSIONS: dict[str, str] = {
     "nodes.manage": "管理节点（权重/分组/下线）",
     "monitor.read": "查看系统监控",
     "storage.manage": "管理对象存储配置",
-    "proxy.manage": "管理代理池/中转",
     "llm.manage": "管理 AI 模型/提示词网关",
     "config.manage": "管理公共配置",
     "users.manage": "管理用户",
     "roles.manage": "管理角色与权限",
     "audit.read": "查看操作日志",
-    "sql_query": "高危：结构化查询闸门外的直查",
     "force_insert": "高危：强制写入",
 }
 
@@ -72,7 +70,6 @@ DEFAULT_ROLES: dict[str, list[str]] = {
         "tasks.cancel",
         "monitor.read",
         "config.manage",
-        "sql_query",
     ],
     "运营": [
         "sources.read",
@@ -92,7 +89,6 @@ DEFAULT_ROLES: dict[str, list[str]] = {
         "nodes.manage",
         "monitor.read",
         "storage.manage",
-        "proxy.manage",
         "config.manage",
         "audit.read",
         "tasks.read",

@@ -12,18 +12,22 @@
   <div class="table-wrap">
     <table class="tbl">
       <thead>
-        <tr><th>名称</th><th>短码</th><th>创建时间</th><th style="text-align:right">操作</th></tr>
+        <tr><th>名称</th><th>短码</th><th>访问状态</th><th>创建时间</th><th style="text-align:right">操作</th></tr>
       </thead>
       <tbody>
         {% for s in sources %}
         <tr>
           <td><b>{{ s.name }}</b></td>
           <td><code>{{ s.uuid }}</code></td>
+          <td><span class="badge {{ s.access_class }}"><span class="dot"></span>{{ s.access_status }}</span></td>
           <td class="muted">{{ s.created_at }}</td>
-          <td style="text-align:right"><a class="btn ghost sm" href="/data/{{ s.uuid }}">查看数据</a></td>
+          <td style="text-align:right">
+            <a class="btn ghost sm" href="/sources/{{ s.uuid }}/access-review">访问复核</a>
+            <a class="btn ghost sm" href="/data/{{ s.uuid }}">查看数据</a>
+          </td>
         </tr>
         {% else %}
-        <tr><td colspan="4"><div class="empty">还没有数据源，点右上角「新建数据源」创建并采集。</div></td></tr>
+        <tr><td colspan="5"><div class="empty">还没有数据源，点右上角「新建数据源」创建并采集。</div></td></tr>
         {% endfor %}
       </tbody>
     </table>

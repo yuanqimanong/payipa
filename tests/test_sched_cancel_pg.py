@@ -44,7 +44,15 @@ def test_priority_cancel_schedule(require_pg: None) -> None:
         try:
             await drop_data_table(dc, table)
             await run.ensure_data_table(dc, _UUID, [])
-            source_id, task0 = await run.setup_source(pyp, _UUID, "M2 SC", seed_urls=["https://x.com/seed"])
+            source_id, task0 = await run.setup_source(
+                pyp,
+                _UUID,
+                "M2 SC",
+                seed_urls=["https://x.com/seed"],
+                access_basis="owned",
+                access_reference="test fixture",
+                access_confirmed=True,
+            )
             ptr = await RuleStore(pyp).put(source_id, _rule())
 
             # ── 优先级排序：按 low→high→mid 顺序建（created_at 递增），claim 应回 high→mid→low ──

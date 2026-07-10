@@ -51,7 +51,14 @@ def test_run_end_to_end_logic(require_pg: None) -> None:
                 src_id = (
                     await conn.execute(
                         pg_insert(Source.__table__)
-                        .values(uuid=_UUID, name="M1 Run", connector_type="web")
+                        .values(
+                            uuid=_UUID,
+                            name="M1 Run",
+                            connector_type="web",
+                            access_basis="owned",
+                            access_reference="test fixture",
+                            access_confirmed_at=func.now(),
+                        )
                         .returning(Source.id)
                     )
                 ).scalar_one()

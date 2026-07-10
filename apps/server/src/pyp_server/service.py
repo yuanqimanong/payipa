@@ -16,6 +16,9 @@ async def dispatch_source_run(
     rule: RulePack,
     indexed_fields: list[str] | None = None,
     channel: Channel = Channel.PROD,
+    access_basis: str | None = None,
+    access_reference: str | None = None,
+    access_confirmed: bool = False,
 ) -> dict:
     """建源+存规则+建表+建批次；请求以 QUEUED 落库，实际下发由后台派发环负责。
 
@@ -24,7 +27,15 @@ async def dispatch_source_run(
     """
     pyp = get_engine("pyp")
     dc = get_engine("data_center")
-    source_id, task_id = await setup_source(pyp, uuid, name, seed_urls=seed_urls)  # 存档种子供 cron 重跑
+    source_id, task_id = await setup_source(
+        pyp,
+        uuid,
+        name,
+        seed_urls=seed_urls,
+        access_basis=access_basis,
+        access_reference=access_reference,
+        access_confirmed=access_confirmed,
+    )
     ptr = await RuleStore(pyp).put(source_id, rule)
     fields_indexed = indexed_fields or [f.name for f in rule.fields if f.index]
     await ensure_data_table(dc, uuid, fields_indexed)

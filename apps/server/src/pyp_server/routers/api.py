@@ -7,11 +7,13 @@
 from __future__ import annotations
 
 import json
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from payipa.crawl.run import batch_progress as compute_batch_progress
 from payipa.crawl.run import cancel_batch as run_cancel_batch
 from payipa.crawl.run import queue_depth as compute_queue_depth
+from payipa.crawl.run import review_source_access
 from payipa.db.engine import get_engine
 from payipa.db.settings import get_settings as get_db_settings
 from payipa.deliver.notify import NotifyError, notify
@@ -19,6 +21,7 @@ from payipa.deliver.outbox import enqueue_push
 from payipa.monitor import node_metrics as compute_node_metrics
 from payipa.monitor import source_health as compute_source_health
 from payipa.monitor import system_overview as compute_system_overview
+from payipa.security.audit import record_audit_best_effort
 from payipa_contracts import (
     BatchProgress,
     Cancel,
@@ -34,7 +37,7 @@ from payipa_contracts import (
 )
 from pydantic import BaseModel, Field
 
-from pyp_server.auth import require_perm
+from pyp_server.auth import get_current_user, require_perm
 from pyp_server.service import dispatch_source_run
 
 router = APIRouter(prefix="/api", tags=["api"])
@@ -51,6 +54,18 @@ class RunResponse(BaseModel):
     batch_id: int
     requests: int
     dispatched: int
+
+
+class AccessReviewRequest(BaseModel):
+    access_basis: Literal["owned", "contracted", "public_policy"]
+    access_reference: str = Field(..., min_length=1, max_length=2000)
+    approved: bool
+    reason: str | None = Field(None, max_length=1000)
+
+
+class AccessReviewResponse(BaseModel):
+    uuid: str
+    approved: bool
 
 
 class CancelResponse(BaseModel):
@@ -131,15 +146,58 @@ async def preview_task(spec: TaskSpec) -> TaskAssign:
     dependencies=[Depends(require_perm("sources.run"))],
 )
 async def run_source(uuid: str, body: RunRequest) -> RunResponse:
-    result = await dispatch_source_run(
-        uuid=uuid,
-        name=uuid,
-        seed_urls=body.seed_urls,
-        rule=body.rule,
-        indexed_fields=body.indexed_fields,
-        channel=body.channel,
-    )
+    try:
+        result = await dispatch_source_run(
+            uuid=uuid,
+            name=uuid,
+            seed_urls=body.seed_urls,
+            rule=body.rule,
+            indexed_fields=body.indexed_fields,
+            channel=body.channel,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except (PermissionError, ValueError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     return RunResponse(**result)
+
+
+@router.post(
+    "/sources/{uuid}/access-review",
+    response_model=AccessReviewResponse,
+    summary="记录数据源访问复核并批准或暂停",
+    dependencies=[Depends(require_perm("sources.write"))],
+)
+async def access_review(uuid: str, body: AccessReviewRequest, request: Request) -> AccessReviewResponse:
+    user = await get_current_user(request)
+    if user is None:
+        raise HTTPException(status_code=401, detail="访问复核需要登录")
+    pyp = get_engine("pyp")
+    updated = await review_source_access(
+        pyp,
+        uuid,
+        access_basis=body.access_basis,
+        access_reference=body.access_reference,
+        approved=body.approved,
+        reason=body.reason,
+    )
+    if not updated:
+        raise HTTPException(status_code=404, detail=f"数据源 {uuid!r} 不存在")
+    await record_audit_best_effort(
+        pyp,
+        action="source.access_review",
+        actor_id=int(user["id"]),
+        object_type="source",
+        object_id=uuid,
+        after={
+            "access_basis": body.access_basis,
+            "access_reference": body.access_reference,
+            "approved": body.approved,
+            "reason": body.reason,
+        },
+        source="api",
+    )
+    return AccessReviewResponse(uuid=uuid, approved=body.approved)
 
 
 @router.post(

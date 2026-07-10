@@ -31,6 +31,24 @@
     <textarea name="seed_urls">https://books.toscrape.com/</textarea>
   </div>
   <div class="field">
+    <label>访问依据类型</label>
+    <select name="access_basis" required>
+      <option value="owned">自有系统或数据</option>
+      <option value="contracted">合同、委托或书面授权</option>
+      <option value="public_policy">公开访问政策明确允许</option>
+    </select>
+  </div>
+  <div class="field">
+    <label>访问依据 <span class="hint">合同编号、授权记录、API 文档或公开政策链接</span></label>
+    <input name="access_reference" required />
+  </div>
+  <div class="field">
+    <label class="check-row">
+      <input type="checkbox" name="access_confirmed" required />
+      <span>已核验该数据源允许本系统按当前规则访问</span>
+    </label>
+  </div>
+  <div class="field">
     <label>列表行选择器 item_locator <span class="hint">CSS；列表页每行一条记录，留空 = 整页一条</span></label>
     <input name="item_locator" value="article.product_pod" />
   </div>

@@ -8,8 +8,8 @@ from pydantic import TypeAdapter
 
 
 def test_contract_version_handshake() -> None:
-    assert c.CONTRACT_VERSION == 2
-    assert c.MIN_SUPPORTED_CONTRACT_VERSION == 2
+    assert c.CONTRACT_VERSION == 3
+    assert c.MIN_SUPPORTED_CONTRACT_VERSION == 3
     assert c.is_compatible(c.CONTRACT_VERSION)
     assert not c.is_compatible(1)
     assert not c.is_compatible(c.CONTRACT_VERSION + 1)

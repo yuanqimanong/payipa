@@ -60,7 +60,7 @@ class Permission(TimestampMixin, PypBase):
     __tablename__ = "permissions"
 
     id: Mapped[int] = _pk()
-    code: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)  # 如 sql_query/force_insert
+    code: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)  # 如 sources.write/force_insert
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
@@ -104,7 +104,11 @@ class Source(TimestampMixin, OwnedMixin, PypBase):
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     connector_type: Mapped[str] = mapped_column(String(16), default="web")  # web/api/feed/push/file_db
     channel_default: Mapped[str] = mapped_column(String(8), default="prod")
-    proxy_config_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    access_basis: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    access_reference: Mapped[str | None] = mapped_column(Text, nullable=True)
+    access_confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    paused_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    pause_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     agent_group: Mapped[str | None] = mapped_column(String(64), nullable=True)
     rate_limit: Mapped[int] = mapped_column(Integer, default=10)  # 请求/秒（子域天花板，UI 可改）
     retry: Mapped[int] = mapped_column(Integer, default=3)
@@ -208,38 +212,6 @@ class Agent(TimestampMixin, PypBase):
     version: Mapped[str | None] = mapped_column(String(32), nullable=True)
     node_token_hash: Mapped[str | None] = mapped_column(String(128), nullable=True)  # 存 hash
     last_heartbeat: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-
-
-# ══ 代理池 ══════════════════════════════════════════════════════════════════
-class ProxyProvider(TimestampMixin, PypBase):
-    __tablename__ = "proxy_providers"
-
-    id: Mapped[int] = _pk()
-    name: Mapped[str] = mapped_column(String(128), nullable=False)
-    kind: Mapped[str] = mapped_column(String(16), nullable=False)  # tunnel/longlived/iplist
-    api_config: Mapped[dict | None] = mapped_column(JSONB, nullable=True)  # 加密存储
-    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
-
-
-class ProxyConfig(TimestampMixin, OwnedMixin, PypBase):
-    __tablename__ = "proxy_configs"
-
-    id: Mapped[int] = _pk()
-    name: Mapped[str] = mapped_column(String(128), nullable=False)
-    mode: Mapped[str] = mapped_column(String(8), default="single")  # mix/single
-    provider_refs: Mapped[dict] = mapped_column(JSONB, default=dict)
-
-
-class ProxyUsage(TimestampMixin, PypBase):
-    __tablename__ = "proxy_usage"
-
-    id: Mapped[int] = _pk()
-    egress_ip: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    target_domain: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    account: Mapped[str | None] = mapped_column(String(128), nullable=True)
-    success: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
-    latency: Mapped[int | None] = mapped_column(Integer, nullable=True)  # ms
-    status_code: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
 class Credential(TimestampMixin, PypBase):

@@ -35,6 +35,7 @@ from pyp_agent.rules import RuleCache
 from pyp_agent.upload import upload_raw_via_server
 
 _server_frame = TypeAdapter(ServerFrame)
+_ACCESS_PAUSE_STATUSES = frozenset({401, 403, 451})
 
 
 def _ws_url(server_base: str) -> str:
@@ -53,11 +54,17 @@ async def process_task(
     server_base: str,
     rule_cache: RuleCache,
     agent_id: str,
-) -> ResultReport:
-    """执行一个请求任务 → ResultReport（拉规则→fetch→解析→上传 raw→回传）。"""
+) -> ResultReport | StatusReport:
+    """执行一个请求；访问被明确拒绝时不解析、不归档并请求主控暂停整源。"""
     started = time.monotonic()
     rule = await rule_cache.get(task.rule_ptr)
     fetched = await fetch(task.target, engine_hint=task.engine_hint, timeout=task.timeout_s)
+    if fetched.status in _ACCESS_PAUSE_STATUSES:
+        return StatusReport(
+            req_id=task.req_id,
+            state=int(ErrorCode.ACCESS_PAUSED),
+            message=f"target returned HTTP {fetched.status}; manual access review required",
+        )
 
     artifacts = []
     if upload_token:  # local 兜底：raw 经主控回传（S3 直传走 M5）

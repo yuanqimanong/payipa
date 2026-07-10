@@ -118,36 +118,6 @@ def upgrade_pyp() -> None:
     sa.PrimaryKeyConstraint('id', name=op.f('pk_permissions')),
     sa.UniqueConstraint('code', name=op.f('uq_permissions_code'))
     )
-    op.create_table('proxy_configs',
-    sa.Column('id', sa.BigInteger(), autoincrement=True, nullable=False),
-    sa.Column('name', sa.String(length=128), nullable=False),
-    sa.Column('mode', sa.String(length=8), nullable=False),
-    sa.Column('provider_refs', postgresql.JSONB(astext_type=sa.Text()), nullable=False),
-    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
-    sa.Column('owner_id', sa.BigInteger(), nullable=True),
-    sa.Column('tenant_id', sa.BigInteger(), nullable=True),
-    sa.PrimaryKeyConstraint('id', name=op.f('pk_proxy_configs'))
-    )
-    op.create_table('proxy_providers',
-    sa.Column('id', sa.BigInteger(), autoincrement=True, nullable=False),
-    sa.Column('name', sa.String(length=128), nullable=False),
-    sa.Column('kind', sa.String(length=16), nullable=False),
-    sa.Column('api_config', postgresql.JSONB(astext_type=sa.Text()), nullable=True),
-    sa.Column('enabled', sa.Boolean(), nullable=False),
-    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
-    sa.PrimaryKeyConstraint('id', name=op.f('pk_proxy_providers'))
-    )
-    op.create_table('proxy_usage',
-    sa.Column('id', sa.BigInteger(), autoincrement=True, nullable=False),
-    sa.Column('egress_ip', sa.String(length=64), nullable=True),
-    sa.Column('target_domain', sa.String(length=255), nullable=True),
-    sa.Column('account', sa.String(length=128), nullable=True),
-    sa.Column('success', sa.Boolean(), nullable=True),
-    sa.Column('latency', sa.Integer(), nullable=True),
-    sa.Column('status_code', sa.Integer(), nullable=True),
-    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
-    sa.PrimaryKeyConstraint('id', name=op.f('pk_proxy_usage'))
-    )
     op.create_table('push_components',
     sa.Column('id', sa.BigInteger(), autoincrement=True, nullable=False),
     sa.Column('name', sa.String(length=128), nullable=False),
@@ -177,7 +147,6 @@ def upgrade_pyp() -> None:
     sa.Column('description', sa.Text(), nullable=True),
     sa.Column('connector_type', sa.String(length=16), nullable=False),
     sa.Column('channel_default', sa.String(length=8), nullable=False),
-    sa.Column('proxy_config_id', sa.BigInteger(), nullable=True),
     sa.Column('agent_group', sa.String(length=64), nullable=True),
     sa.Column('rate_limit', sa.Integer(), nullable=False),
     sa.Column('retry', sa.Integer(), nullable=False),
@@ -353,9 +322,6 @@ def downgrade_pyp() -> None:
     op.drop_table('sources')
     op.drop_table('roles')
     op.drop_table('push_components')
-    op.drop_table('proxy_usage')
-    op.drop_table('proxy_providers')
-    op.drop_table('proxy_configs')
     op.drop_table('permissions')
     op.drop_table('notify_bots')
     op.drop_table('llm_models')

@@ -1,7 +1,7 @@
 """审计写入（03 §2.5：`pyp.audit_log` 覆盖 SQL 查询、规则发布、强制入库、权限变更…）。
 
 形状对齐 contracts `AuditEvent`（actor/action/object/前后值/来源；时间由 TimestampMixin 落库补）。
-首个写入方是 SQL 窗口（03 §2.2「每次执行记入操作日志」）；后续功能复用本模块。
+数据源访问复核、管理操作和后续功能统一复用本模块。
 """
 
 from __future__ import annotations

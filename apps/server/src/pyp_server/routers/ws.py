@@ -12,18 +12,20 @@ from payipa.crawl.ingest import build_data_table
 from payipa.crawl.run import (
     enqueue_discovered,
     finalize_batch_if_done,
+    finalize_request_batch,
     handle_result,
+    pause_source_for_request,
     register_agent,
     requeue_agent_inflight,
     resolve_ingest_context,
     set_agent_offline,
     set_request_state,
-    source_of_request,
     touch_agent,
 )
 from payipa.db.engine import get_engine
 from payipa.security.tokens import new_node_token
 from payipa_contracts import (
+    Cancel,
     ClientFrame,
     ErrorCode,
     ErrorFrame,
@@ -65,11 +67,26 @@ async def _ingest_result(result: ResultBatch, limiter: SourceRateLimiter) -> Non
     limiter.on_ok(uuid)  # 成功 → AIMD 加性增
 
 
-async def _signal_backoff(req_id: int, limiter: SourceRateLimiter) -> None:
-    """访问暂停回报 → 反解数据源并触发 AIMD 乘性降频（best-effort）。"""
-    uuid = await source_of_request(get_engine("pyp"), req_id)
-    if uuid:
-        limiter.on_backoff_signal(uuid)
+async def _pause_source(req_id: int, message: str | None, hub) -> None:
+    """暂停整源并取消同源其他在途任务。"""
+    pyp = get_engine("pyp")
+    _, inflight, batch_ids = await pause_source_for_request(pyp, req_id, message)
+    for other_req_id in inflight:
+        conn = hub.find_by_req(other_req_id)
+        if conn is not None:
+            try:
+                await hub.send_frame(conn.agent_id, Cancel(req_id=other_req_id))
+            except Exception:  # noqa: BLE001
+                logger.warning("cancel paused-source request %s failed", other_req_id, exc_info=True)
+    for batch_id in batch_ids:
+        if await finalize_batch_if_done(pyp, batch_id):
+            await on_batch_finalized(batch_id)
+
+
+async def _finalize_terminal_request(req_id: int) -> None:
+    batch_id = await finalize_request_batch(get_engine("pyp"), req_id)
+    if batch_id is not None:
+        await on_batch_finalized(batch_id)
 
 
 @router.websocket("/ws/agent")
@@ -127,15 +144,19 @@ async def agent_ws(ws: WebSocket) -> None:
                 await _ingest_result(frame.result, ws.app.state.limiter)
                 hub.on_finished(agent_id, frame.result.req_id)
             elif isinstance(frame, StatusReport) and (frame.state < 0 or frame.state == int(RequestState.CANCELED)):
-                await set_request_state(get_engine("pyp"), int(frame.req_id), frame.state)
                 if frame.state == int(ErrorCode.ACCESS_PAUSED):
-                    await _signal_backoff(int(frame.req_id), ws.app.state.limiter)
+                    await _pause_source(int(frame.req_id), frame.message, hub)
+                else:
+                    await set_request_state(get_engine("pyp"), int(frame.req_id), frame.state)
                 hub.on_finished(agent_id, frame.req_id)
+                await _finalize_terminal_request(int(frame.req_id))
             elif isinstance(frame, ErrorFrame) and frame.req_id:
-                await set_request_state(get_engine("pyp"), int(frame.req_id), frame.code)
                 if frame.code == int(ErrorCode.ACCESS_PAUSED):
-                    await _signal_backoff(int(frame.req_id), ws.app.state.limiter)
+                    await _pause_source(int(frame.req_id), frame.message, hub)
+                else:
+                    await set_request_state(get_engine("pyp"), int(frame.req_id), frame.code)
                 hub.on_finished(agent_id, frame.req_id)
+                await _finalize_terminal_request(int(frame.req_id))
     except WebSocketDisconnect:
         pass
     finally:

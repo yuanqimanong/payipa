@@ -5,7 +5,7 @@
   （未装 playwright extra 时 `browser_available()` 返回 False、注册时不上报 automation 能力，
   主控据能力分组只把 browser 任务派给有能力的 agent）。
 
-代理中转（受控出口，11）由中转网关承载，agent 只连中转地址；本层不接管出口选型。
+网络出口由部署环境统一配置；任务和数据源不能动态修改出口。
 访问边界（决策 2026-07-10）：认证失败/授权拒绝/交互式验证由上层判定为访问暂停，不在此自动重试换出口。
 """
 
@@ -51,11 +51,7 @@ async def _fetch_http(url: str, timeout: float, headers: dict[str, str] | None) 
 
 
 async def _fetch_browser(url: str, timeout: float, headers: dict[str, str] | None) -> FetchResult:
-    """标准 Playwright 渲染取页（惰性导入）。渲染后回传 HTML（content-type 恒 text/html）。
-
-    proxy：若上层经受控出口下发中转地址，可在 context 注入 proxy=中转地址 + sticky session key
-    （11 §定案-5），本层先按 headers/UA 起 headless chromium；出口注入待中转网关接线。
-    """
+    """标准 Playwright 渲染取页（惰性导入）。渲染后回传 HTML（content-type 恒 text/html）。"""
     from playwright.async_api import async_playwright  # 惰性导入：仅 browser 任务才需运行时
 
     timeout_ms = int(timeout * 1000)

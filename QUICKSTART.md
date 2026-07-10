@@ -61,7 +61,7 @@ docker compose -f deploy/docker-compose.agents.yml down
 所以**请求数超过总槽数也不会丢**——多的排队、随空闲槽腾出陆续下发；某容器中途挂掉，它的在途请求自动回队重排到存活容器（`/api/agents` 的 `slot_used`/`inflight` 会随之变化）。抓完数据进 `/data/{短码}`。
 进度可观测：`GET /api/monitor/batches/{batch_id}`（按 state 实时聚合 total/ok/fail/running/pct）、`GET /api/monitor/queue`（排队深度）。
 
-## 也可用 API（curl，无需登录）
+## 也可用 API 触发已确认的数据源
 
 ```bash
 curl -X POST "http://127.0.0.1:8000/api/sources/books/run" \
@@ -70,16 +70,15 @@ curl -X POST "http://127.0.0.1:8000/api/sources/books/run" \
 curl "http://127.0.0.1:8000/api/monitor/batches/<batch_id>"
 ```
 > 返回里 `dispatched` 恒为 0：派发不在建批次时同步发生，改由后台环负责（见上）。
+> API 运行只接受已经留存访问依据且未暂停的数据源；首次创建请使用 `/sources/new`，或由管理员先完成访问复核。
 > 页面（`/data`、`/sources`）需登录；JSON API 的 RBAC 权限闸门默认关（`PYP_SERVER_RBAC_ENABLED=false`，保持开放便于本地起步）。
 > 生产启用：`uv run pyp-admin seed-rbac` 播种权限目录+四角色 → `uv run pyp-admin grant-role <用户> <角色>` → `.env` 置 `PYP_SERVER_RBAC_ENABLED=true`。
-> **SQL 窗口**（管理员/技术特权，`sql_query` 权限）：`POST /api/query/sql` body `{"db":"data_center","sql":"SELECT ...","limit":100}`——
-> 四件套守护（子查询包装/只读事务/语句超时/行数封顶），执行记审计；可选独立只读角色：`uv run pyp-admin setup-sql-readonly pyp_readonly <密码>` 后在 `.env` 配 `PG_RO_USER/PG_RO_PASSWORD`。
 
 ## 还不能测（后续里程碑）
 
 - **任务调度进阶（M2 后续切片）**：cron/定时触发、Redis 队列、优先级排序、限流/自动调频、Cancel 取消、分组亲和、权重均衡。当前已具备：**持久化队列 + 自动派发环 + 租约回收 + 断连重排 + 监控端点实时聚合**。
 - **组装 / 推送 / 对外 Dataset API**（M3–M4，已具备）；**AI/LLM Gateway**（M5，已具备——`llm.manage` 权限，管理员登记模型/凭证 KEK 加密，`POST /api/llm/complete` 经 Gateway 调模型、成本挂 task_id 记审计；本地无 key 用 `provider=echo` 冒烟）。
-- **受控出口/代理池**（M5，已具备——`proxy.manage` 权限，管理员登记 provider（tunnel/longlived/iplist，凭证 KEK 加密）+ 建「代理配置」下拉项，`select_egress` 按传输健康选路、溯源统计喂调频/监控；**中转网关网络转发服务延后**，按采购接入真实 provider API）。
+- **访问边界**（M5，已具备——新源留存访问依据；401/403/451 在解析和归档前暂停整源；调度停止；页面或 `POST /api/sources/{uuid}/access-review` 人工复核后恢复）。网络路径由部署环境固定配置。
 - **浏览器采集**（M5，agent 标准 Playwright 引擎已实现——`engine_hint=browser` 起 headless chromium 渲染；agent 装 `[browser]` extra + `playwright install chromium` 后自动上报 automation 能力、主控按能力分组派发。真浏览器冒烟需浏览器运行时）。
 - **镜像发布**：`docker pull` / `pip install pyp-agent` 尚未发到 registry/PyPI（现为本地 `docker build`，见 §4）。
 - **RBAC 管理界面**：权限矩阵（角色×资源×动作）已落库生效（M5，`payipa.security.rbac` + `require_perm` 闸门，开关 `PYP_SERVER_RBAC_ENABLED`）；用户/角色的**页面化管理**（现走 `pyp-admin` CLI）归 06 界面后续轮。

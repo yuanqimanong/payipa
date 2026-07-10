@@ -18,6 +18,18 @@ from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 from payipa.crawl.ingest import Ingestor, build_data_table, create_data_table
 from payipa.db.pyp import Agent, Batch, Request, Rule, Schedule, Source, Task
 
+ACCESS_BASES = frozenset({"owned", "contracted", "public_policy"})
+
+
+def _validate_access_record(access_basis: str | None, access_reference: str | None) -> tuple[str, str]:
+    basis = (access_basis or "").strip()
+    reference = (access_reference or "").strip()
+    if basis not in ACCESS_BASES:
+        raise ValueError(f"access_basis 必须是 {', '.join(sorted(ACCESS_BASES))} 之一")
+    if not reference:
+        raise ValueError("access_reference 必须记录授权文件、合同、API 文档或公开访问政策")
+    return basis, reference
+
 
 def url_fingerprint(url: str) -> str:
     """URL 去重指纹：最小规范化（去 fragment + 去首尾空白）后 sha256。
@@ -35,18 +47,46 @@ async def setup_source(
     name: str = "M1 source",
     *,
     seed_urls: Sequence[str] | None = None,
+    access_basis: str | None = None,
+    access_reference: str | None = None,
+    access_confirmed: bool = False,
 ) -> tuple[int, int]:
-    """确保 source + 一个 task 存在（幂等）；返回 (source_id, task_id)。
+    """确保已确认访问依据的 source + 一个 task 存在；返回 (source_id, task_id)。
 
     seed_urls 存档进 task.params（最近一次为准），供 cron/重跑无需重新提交种子（07 定时触发）。
+    新数据源必须显式确认访问依据；既有数据源一旦暂停，只能经人工复核接口恢复。
     """
     async with engine_pyp.begin() as conn:
-        await conn.execute(
-            pg_insert(Source.__table__)
-            .values(uuid=uuid, name=name, connector_type="web")
-            .on_conflict_do_nothing(index_elements=["uuid"])
-        )
-        source_id = (await conn.execute(select(Source.id).where(Source.uuid == uuid))).scalar_one()
+        source = (
+            await conn.execute(
+                select(Source.id, Source.access_confirmed_at, Source.paused_at).where(Source.uuid == uuid)
+            )
+        ).first()
+        if source is None:
+            if not access_confirmed:
+                raise PermissionError("新数据源必须由操作者确认访问授权")
+            basis, reference = _validate_access_record(access_basis, access_reference)
+            source_id = (
+                await conn.execute(
+                    pg_insert(Source.__table__)
+                    .values(
+                        uuid=uuid,
+                        name=name,
+                        connector_type="web",
+                        access_basis=basis,
+                        access_reference=reference,
+                        access_confirmed_at=func.now(),
+                    )
+                    .returning(Source.id)
+                )
+            ).scalar_one()
+        else:
+            source_id, confirmed_at, paused_at = source
+            if confirmed_at is None:
+                raise PermissionError("数据源尚未完成人工访问授权复核")
+            if paused_at is not None:
+                raise PermissionError("数据源已暂停，须完成人工复核后才能恢复")
+            await conn.execute(update(Source.__table__).where(Source.id == source_id).values(name=name))
         task_id = (await conn.execute(select(Task.id).where(Task.source_id == source_id).limit(1))).scalar()
         params = {"seed_urls": list(seed_urls)} if seed_urls else None
         if task_id is None:
@@ -60,6 +100,29 @@ async def setup_source(
         elif params:
             await conn.execute(update(Task.__table__).where(Task.id == task_id).values(params=params))
     return source_id, task_id
+
+
+async def review_source_access(
+    engine_pyp: AsyncEngine,
+    uuid: str,
+    *,
+    access_basis: str,
+    access_reference: str,
+    approved: bool,
+    reason: str | None = None,
+) -> bool:
+    """记录人工访问复核。批准会恢复调度；拒绝会保持整源暂停。"""
+    basis, reference = _validate_access_record(access_basis, access_reference)
+    values: dict = {
+        "access_basis": basis,
+        "access_reference": reference,
+        "access_confirmed_at": func.now() if approved else None,
+        "paused_at": None if approved else func.now(),
+        "pause_reason": None if approved else (reason or "人工访问复核未通过")[:1000],
+    }
+    async with engine_pyp.begin() as conn:
+        result = await conn.execute(update(Source.__table__).where(Source.uuid == uuid).values(**values))
+    return bool(result.rowcount)
 
 
 async def resolve_ingest_context(engine_pyp: AsyncEngine, req_id: int) -> tuple[str, list[str], list[str]]:
@@ -100,9 +163,23 @@ async def create_batch_with_requests(
     rule_ptr: RulePointer,
     channel: Channel = Channel.PROD,
 ) -> tuple[int, list[TaskSpec]]:
-    """建一个批次 + 每个 target 一条 request；返回 (batch_id, [TaskSpec])。"""
+    """为已批准且未暂停的数据源建批次；返回 ``(batch_id, TaskSpec 列表)``。"""
     specs: list[TaskSpec] = []
     async with engine_pyp.begin() as conn:
+        source = (
+            await conn.execute(
+                select(Source.access_confirmed_at, Source.paused_at)
+                .select_from(Task.__table__)
+                .join(Source.__table__, Task.source_id == Source.id)
+                .where(Task.id == task_id, Source.uuid == source_uuid)
+            )
+        ).first()
+        if source is None:
+            raise LookupError(f"task {task_id} 与数据源 {source_uuid!r} 不匹配")
+        if source.access_confirmed_at is None:
+            raise PermissionError("数据源尚未完成人工访问授权复核")
+        if source.paused_at is not None:
+            raise PermissionError("数据源已暂停，不能创建新批次")
         batch_id = (
             await conn.execute(
                 pg_insert(Batch.__table__)
@@ -207,6 +284,15 @@ async def finalize_batch_if_done(engine_pyp: AsyncEngine, batch_id: int) -> bool
     return bool(res.rowcount)
 
 
+async def finalize_request_batch(engine_pyp: AsyncEngine, req_id: int) -> int | None:
+    """尝试收尾请求所属批次；仅在本次完成 ``running -> done`` 时返回批次 id。"""
+    async with engine_pyp.connect() as conn:
+        batch_id = (await conn.execute(select(Request.batch_id).where(Request.id == req_id))).scalar()
+    if batch_id is None:
+        return None
+    return int(batch_id) if await finalize_batch_if_done(engine_pyp, int(batch_id)) else None
+
+
 async def batch_trigger_context(engine_pyp: AsyncEngine, batch_id: int) -> dict | None:
     """批次收尾自动触发所需上下文：所属任务的 params（含通知/推送绑定）+ 批次状态 + 成功计数。
 
@@ -293,7 +379,11 @@ async def source_rate_limits(engine_pyp: AsyncEngine) -> dict[str, int]:
                 .select_from(Source.__table__)
                 .join(Task.__table__, Task.source_id == Source.id)
                 .join(Batch.__table__, Batch.task_id == Task.id)
-                .where(Batch.status == "running")
+                .where(
+                    Batch.status == "running",
+                    Source.access_confirmed_at.is_not(None),
+                    Source.paused_at.is_(None),
+                )
                 .distinct()
             )
         ).all()
@@ -315,6 +405,70 @@ async def source_of_request(engine_pyp: AsyncEngine, req_id: int) -> str | None:
         ).scalar()
 
 
+async def pause_source_for_request(
+    engine_pyp: AsyncEngine, req_id: int, reason: str | None = None
+) -> tuple[str | None, list[str], list[int]]:
+    """因访问拒绝暂停整源，并终止该源所有尚未派发的请求。
+
+    返回 ``(source_uuid, 其他在途 req_id, running batch_id)``；调用方负责取消在途任务并收尾已无在途请求的批次。
+    """
+    message = (reason or "目标系统拒绝访问，等待人工复核")[:1000]
+    async with engine_pyp.begin() as conn:
+        source = (
+            await conn.execute(
+                select(Source.id, Source.uuid)
+                .select_from(Request.__table__)
+                .join(Batch.__table__, Request.batch_id == Batch.id)
+                .join(Task.__table__, Batch.task_id == Task.id)
+                .join(Source.__table__, Task.source_id == Source.id)
+                .where(Request.id == req_id)
+            )
+        ).first()
+        if source is None:
+            return None, [], []
+        source_id, source_uuid = source
+        batch_ids = list(
+            (
+                await conn.execute(
+                    select(Batch.id)
+                    .join(Task.__table__, Batch.task_id == Task.id)
+                    .where(Task.source_id == source_id, Batch.status == "running")
+                )
+            )
+            .scalars()
+            .all()
+        )
+        other_inflight = list(
+            (
+                await conn.execute(
+                    select(Request.id).where(
+                        Request.batch_id.in_(batch_ids),
+                        Request.state.in_(_INFLIGHT),
+                        Request.id != req_id,
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        await conn.execute(
+            update(Source.__table__).where(Source.id == source_id).values(paused_at=func.now(), pause_reason=message)
+        )
+        await conn.execute(
+            update(Request.__table__)
+            .where(
+                Request.batch_id.in_(batch_ids),
+                (Request.state == int(RequestState.QUEUED)) | (Request.id == req_id),
+            )
+            .values(
+                state=int(ErrorCode.ACCESS_PAUSED),
+                error_code=int(ErrorCode.ACCESS_PAUSED),
+                lease_until=None,
+            )
+        )
+    return str(source_uuid), [str(value) for value in other_inflight], [int(value) for value in batch_ids]
+
+
 async def touch_agent(engine_pyp: AsyncEngine, agent_id: str) -> None:
     """心跳落库：刷新 last_heartbeat（供后续 liveness reaper/监控）。"""
     async with engine_pyp.begin() as conn:
@@ -332,6 +486,19 @@ _INFLIGHT = (int(RequestState.ASSIGNED), int(RequestState.RUNNING))  # 「在途
 
 
 _PRIORITY_RANK = case((Task.priority == "high", 0), (Task.priority == "mid", 1), else_=2)  # 高优先插队
+
+
+def _active_running_batch_ids():
+    return (
+        select(Batch.id)
+        .join(Task.__table__, Batch.task_id == Task.id)
+        .join(Source.__table__, Task.source_id == Source.id)
+        .where(
+            Batch.status == "running",
+            Source.access_confirmed_at.is_not(None),
+            Source.paused_at.is_(None),
+        )
+    )
 
 
 async def claim_queued_for_dispatch(engine_pyp: AsyncEngine, *, limit: int = 16) -> list[TaskSpec]:
@@ -361,7 +528,12 @@ async def claim_queued_for_dispatch(engine_pyp: AsyncEngine, *, limit: int = 16)
                 .join(Task.__table__, Batch.task_id == Task.id)
                 .join(Source.__table__, Task.source_id == Source.id)
                 .join(Rule.__table__, Rule.content_hash == Request.rule_hash)
-                .where(Request.state == int(RequestState.QUEUED), Batch.status == "running")
+                .where(
+                    Request.state == int(RequestState.QUEUED),
+                    Batch.status == "running",
+                    Source.access_confirmed_at.is_not(None),
+                    Source.paused_at.is_(None),
+                )
                 .order_by(_PRIORITY_RANK, Request.depth, Request.created_at, Request.id)
                 .limit(limit)
             )
@@ -392,7 +564,11 @@ async def mark_assigned(engine_pyp: AsyncEngine, req_id: int, agent_id: str, lea
     async with engine_pyp.begin() as conn:
         res = await conn.execute(
             update(Request.__table__)
-            .where(Request.id == req_id, Request.state == int(RequestState.QUEUED))
+            .where(
+                Request.id == req_id,
+                Request.state == int(RequestState.QUEUED),
+                Request.batch_id.in_(_active_running_batch_ids()),
+            )
             .values(state=int(RequestState.ASSIGNED), agent_id=agent_id, lease_until=lease_until)
         )
     return res.rowcount
@@ -401,12 +577,42 @@ async def mark_assigned(engine_pyp: AsyncEngine, req_id: int, agent_id: str, lea
 async def requeue_request(engine_pyp: AsyncEngine, req_id: int) -> int:
     """把一条已 ASSIGNED 但下发失败（WS 发送异常）的请求退回 QUEUED；未真正执行，不计 attempt。"""
     async with engine_pyp.begin() as conn:
-        res = await conn.execute(
+        running = select(Batch.id).where(Batch.status == "running")
+        active = _active_running_batch_ids()
+        requeued = await conn.execute(
             update(Request.__table__)
-            .where(Request.id == req_id, Request.state == int(RequestState.ASSIGNED))
+            .where(
+                Request.id == req_id,
+                Request.state == int(RequestState.ASSIGNED),
+                Request.batch_id.in_(active),
+            )
             .values(state=int(RequestState.QUEUED), lease_until=None, agent_id=None)
         )
-    return res.rowcount
+        canceled = await conn.execute(
+            update(Request.__table__)
+            .where(
+                Request.id == req_id,
+                Request.state == int(RequestState.ASSIGNED),
+                Request.batch_id.not_in(running),
+            )
+            .values(state=int(RequestState.CANCELED), lease_until=None, agent_id=None)
+        )
+        paused = await conn.execute(
+            update(Request.__table__)
+            .where(
+                Request.id == req_id,
+                Request.state == int(RequestState.ASSIGNED),
+                Request.batch_id.in_(running),
+                Request.batch_id.not_in(active),
+            )
+            .values(
+                state=int(ErrorCode.ACCESS_PAUSED),
+                error_code=int(ErrorCode.ACCESS_PAUSED),
+                lease_until=None,
+                agent_id=None,
+            )
+        )
+    return (requeued.rowcount or 0) + (canceled.rowcount or 0) + (paused.rowcount or 0)
 
 
 async def _requeue_or_giveup(conn: AsyncConnection, base_where: list, max_attempt: int) -> int:
@@ -414,27 +620,49 @@ async def _requeue_or_giveup(conn: AsyncConnection, base_where: list, max_attemp
 
     仅对 running 批次重排；批次已取消/收尾的在途请求直接置 CANCELED（不再回队、也不计失联）。
     """
-    running = select(Batch.id).where(Batch.status == "running").scalar_subquery()
+    running = select(Batch.id).where(Batch.status == "running")
+    active = _active_running_batch_ids()
     canceled = await conn.execute(
         update(Request.__table__)
         .where(*base_where, Request.state.in_(_INFLIGHT), Request.batch_id.not_in(running))
         .values(state=int(RequestState.CANCELED), lease_until=None)
     )
+    access_paused = await conn.execute(
+        update(Request.__table__)
+        .where(
+            *base_where,
+            Request.state.in_(_INFLIGHT),
+            Request.batch_id.in_(running),
+            Request.batch_id.not_in(active),
+        )
+        .values(
+            state=int(ErrorCode.ACCESS_PAUSED),
+            error_code=int(ErrorCode.ACCESS_PAUSED),
+            lease_until=None,
+            agent_id=None,
+        )
+    )
     give_up = await conn.execute(
         update(Request.__table__)
         .where(
-            *base_where, Request.state.in_(_INFLIGHT), Request.batch_id.in_(running), Request.attempt + 1 >= max_attempt
+            *base_where,
+            Request.state.in_(_INFLIGHT),
+            Request.batch_id.in_(active),
+            Request.attempt + 1 >= max_attempt,
         )
         .values(state=int(ErrorCode.NODE_LOST), error_code=int(ErrorCode.NODE_LOST), lease_until=None)
     )
     requeue = await conn.execute(
         update(Request.__table__)
         .where(
-            *base_where, Request.state.in_(_INFLIGHT), Request.batch_id.in_(running), Request.attempt + 1 < max_attempt
+            *base_where,
+            Request.state.in_(_INFLIGHT),
+            Request.batch_id.in_(active),
+            Request.attempt + 1 < max_attempt,
         )
         .values(state=int(RequestState.QUEUED), attempt=Request.attempt + 1, lease_until=None, agent_id=None)
     )
-    return (canceled.rowcount or 0) + (give_up.rowcount or 0) + (requeue.rowcount or 0)
+    return (canceled.rowcount or 0) + (access_paused.rowcount or 0) + (give_up.rowcount or 0) + (requeue.rowcount or 0)
 
 
 async def requeue_expired_leases(engine_pyp: AsyncEngine, *, max_attempt: int = 3) -> int:
@@ -463,14 +691,26 @@ async def enqueue_discovered(engine_pyp: AsyncEngine, parent_req_id: int, urls: 
     async with engine_pyp.begin() as conn:
         parent = (
             await conn.execute(
-                select(Request.batch_id, Request.depth, Request.rule_hash, Request.rule_version).where(
-                    Request.id == parent_req_id
+                select(
+                    Request.batch_id,
+                    Request.depth,
+                    Request.rule_hash,
+                    Request.rule_version,
+                    Source.access_confirmed_at,
+                    Source.paused_at,
                 )
+                .select_from(Request.__table__)
+                .join(Batch.__table__, Request.batch_id == Batch.id)
+                .join(Task.__table__, Batch.task_id == Task.id)
+                .join(Source.__table__, Task.source_id == Source.id)
+                .where(Request.id == parent_req_id)
             )
         ).first()
         if parent is None:
             return 0
-        batch_id, parent_depth, rule_hash, rule_version = parent
+        batch_id, parent_depth, rule_hash, rule_version, confirmed_at, paused_at = parent
+        if confirmed_at is None or paused_at is not None:
+            return 0
         child_depth = (parent_depth or 0) + 1
         spec = None
         if rule_hash:
@@ -609,6 +849,8 @@ async def due_schedules(engine_pyp: AsyncEngine) -> list[tuple[int, int, str, st
                 .join(Source.__table__, Task.source_id == Source.id)
                 .where(
                     Schedule.enabled.is_(True),
+                    Source.access_confirmed_at.is_not(None),
+                    Source.paused_at.is_(None),
                     (Schedule.next_run_at.is_(None)) | (Schedule.next_run_at <= func.now()),
                 )
             )

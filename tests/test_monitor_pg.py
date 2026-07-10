@@ -80,7 +80,14 @@ def test_monitor_aggregation(require_pg: None) -> None:
         try:
             await _purge(pyp, dc)  # 起点先清历史（防上次失败残留污染精确断言）
             table = await run.ensure_data_table(dc, _UUID, ["title"])
-            source_id, task_id = await run.setup_source(pyp, _UUID, "M5 Monitor")
+            source_id, task_id = await run.setup_source(
+                pyp,
+                _UUID,
+                "M5 Monitor",
+                access_basis="owned",
+                access_reference="test fixture",
+                access_confirmed=True,
+            )
             ptr = await RuleStore(pyp).put(source_id, _rule())
             batch_id, specs = await run.create_batch_with_requests(
                 pyp, task_id=task_id, source_uuid=_UUID, targets=["u1", "u2", "u3", "u4"], rule_ptr=ptr

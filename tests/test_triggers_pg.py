@@ -16,7 +16,7 @@ from payipa.db.settings import get_settings
 from payipa.deliver.notify import NotifyBotStore
 from pyp_server.main import app
 from pyp_server.triggers import on_batch_finalized
-from sqlalchemy import text
+from sqlalchemy import func, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import create_async_engine
 
@@ -46,7 +46,16 @@ def _serve() -> tuple[HTTPServer, int]:
 async def _make_source_task(conn, params: dict) -> tuple[int, int]:
     src_id = (
         await conn.execute(
-            pg_insert(Source.__table__).values(uuid=_UUID, name="M4 Trig", connector_type="web").returning(Source.id)
+            pg_insert(Source.__table__)
+            .values(
+                uuid=_UUID,
+                name="M4 Trig",
+                connector_type="web",
+                access_basis="owned",
+                access_reference="test fixture",
+                access_confirmed_at=func.now(),
+            )
+            .returning(Source.id)
         )
     ).scalar_one()
     task_id = (

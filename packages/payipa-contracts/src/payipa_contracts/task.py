@@ -27,5 +27,4 @@ class TaskSpec(BaseModel):
     engine_hint: EngineHint = active("采集引擎提示；当前使用 http，browser 为可选能力", default=EngineHint.HTTP)
     # 以下为后续里程碑接线的预留位
     group: str | None = reserved("分发分组（test/prod 集群、自动化能力集群）", default=None, since="M2")
-    proxy_config_id: str | None = reserved("代理配置引用（受控出口）", default=None, since="M5")
     account: str | None = reserved("采集账号/凭证维度（按账号限流）", default=None, since="M5")

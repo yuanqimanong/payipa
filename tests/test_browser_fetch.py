@@ -113,11 +113,14 @@ def test_browser_fetch_renders_html() -> None:
         _uninstall_fake()
 
 
-def test_http_engine_unaffected() -> None:
+def test_http_engine_unaffected(monkeypatch) -> None:
     """http 引擎不碰 playwright（browser_available 与它无关）。"""
     _uninstall_fake()
-    # 不实际发网络：只断言 EngineHint.HTTP 不因缺 playwright 报 NotImplementedError（走 niquests 分支）。
-    # 这里用一个不可达地址会抛网络异常而非 NotImplementedError，足以证明分支选择正确。
-    with pytest.raises(Exception) as ei:  # noqa: PT011 —— 网络异常类型随实现，明确排除 NotImplementedError
-        asyncio.run(fetch_mod.fetch("http://127.0.0.1:1/never", engine_hint=EngineHint.HTTP, timeout=0.2))
-    assert not isinstance(ei.value, NotImplementedError)
+
+    async def fake_http(url: str, timeout: float, headers: dict[str, str] | None) -> fetch_mod.FetchResult:
+        return fetch_mod.FetchResult(status=200, url=url, body=b"ok", content_type="text/plain")
+
+    monkeypatch.setattr(fetch_mod, "_fetch_http", fake_http)
+    result = asyncio.run(fetch_mod.fetch("https://example.test/", engine_hint=EngineHint.HTTP, timeout=0.2))
+    assert result.status == 200
+    assert result.body == b"ok"

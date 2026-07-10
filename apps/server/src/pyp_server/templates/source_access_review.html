@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}访问复核{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div class="titles">
+    <h2>访问复核</h2>
+    <p>{{ source.name }} · <code>{{ source.uuid }}</code></p>
+  </div>
+  <div class="actions"><a class="btn ghost" href="/sources">返回列表</a></div>
+</div>
+<form class="card card-pad" method="post" action="/sources/{{ source.uuid }}/access-review" style="max-width: 680px">
+  {% if error %}<div class="form-error">{{ error }}</div>{% endif %}
+  <div class="field">
+    <label>访问依据类型</label>
+    <select name="access_basis" required>
+      <option value="owned" {% if source.access_basis == "owned" %}selected{% endif %}>自有系统或数据</option>
+      <option value="contracted" {% if source.access_basis == "contracted" %}selected{% endif %}>合同、委托或书面授权</option>
+      <option value="public_policy" {% if source.access_basis == "public_policy" %}selected{% endif %}>公开访问政策明确允许</option>
+    </select>
+  </div>
+  <div class="field">
+    <label>访问依据</label>
+    <input name="access_reference" value="{{ source.access_reference or '' }}" required />
+  </div>
+  <div class="field">
+    <label>复核说明</label>
+    <textarea name="reason">{{ source.pause_reason or '' }}</textarea>
+  </div>
+  <div class="form-actions">
+    <button class="btn" type="submit" name="decision" value="approve">批准并恢复</button>
+    <button class="btn ghost" type="submit" name="decision" value="pause">维持暂停</button>
+  </div>
+</form>
+{% endblock %}

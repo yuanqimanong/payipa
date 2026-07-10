@@ -46,12 +46,6 @@ class QualityMetric(BaseModel):
     blank_rate: float = active("空白率 0–1", ge=0, le=1, since="M5")
 
 
-class ProxyStat(BaseModel):
-    """代理出口统计（喂 07 调频与 monitor）。"""
-
-    by_egress_domain: dict[str, float] = active("每 (出口×域) 成功率", default_factory=dict, since="M5")
-
-
 class NodeMetric(BaseModel):
     """单节点聚合指标（在线态 + 历史成败，主控侧从 agents + requests 汇总）。"""
 

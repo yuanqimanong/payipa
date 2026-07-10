@@ -104,7 +104,7 @@
     ]
   },
   "roles": {
-    "desc": "RBAC：角色 × 资源 × 动作 + 特殊权限（如 SQL 窗口、强制入库）。",
+    "desc": "RBAC：角色 × 资源 × 动作 + 特殊权限（如强制入库）。",
     "columns": [
       { "key": "role", "label": "角色" },
       { "key": "scope", "label": "资源范围" },

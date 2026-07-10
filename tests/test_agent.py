@@ -94,3 +94,38 @@ def test_process_task_full_flow(monkeypatch) -> None:
     assert report.result.summary.count_ok == 3
     assert len(report.result.artifacts) == 1  # raw 上传回指针
     assert uploaded["source_uuid"] == "books"  # 上传带对了 source/batch
+
+
+def test_process_task_pauses_before_parse_or_archive(monkeypatch) -> None:
+    """明确的访问拒绝必须在解析和 raw 归档前停止。"""
+    called = {"upload": False}
+
+    class FakeCache:
+        async def get(self, ptr: c.RulePointer) -> c.RulePack:
+            return _books_rule()
+
+    async def fake_fetch(url: str, **_kw) -> FetchResult:
+        return FetchResult(status=403, url=url, body=b"not archived", content_type="text/html")
+
+    async def fake_upload(*_args, **_kwargs):
+        called["upload"] = True
+        raise AssertionError("access-refused response must not be archived")
+
+    monkeypatch.setattr(conn_mod, "fetch", fake_fetch)
+    monkeypatch.setattr(conn_mod, "upload_raw_via_server", fake_upload)
+    task = c.TaskSpec(
+        task_id="t2",
+        req_id="rq2",
+        batch_id="b2",
+        source="books",
+        target="https://example.test/private",
+        rule_ptr=c.RulePointer(rule_id="2", version=1, content_hash="h2"),
+    )
+
+    report = asyncio.run(
+        conn_mod.process_task(task, upload_token="tok", server_base="http://x", rule_cache=FakeCache(), agent_id="a1")
+    )
+
+    assert isinstance(report, c.StatusReport)
+    assert report.state == int(c.ErrorCode.ACCESS_PAUSED)
+    assert called["upload"] is False

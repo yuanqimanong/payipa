@@ -27,10 +27,6 @@ class ServerSettings(BaseSettings):
     # 关时 require_perm 直通（连登录都不强制）；开时未登录 401、缺权限 403，管理员(通配 *)放行一切。
     rbac_enabled: bool = False
 
-    # ── M5 SQL 窗口（03 §2.2 四件套默认值）───────────────────────────────
-    sql_window_timeout_ms: int = 30_000  # ③语句超时（SET LOCAL statement_timeout）
-    sql_window_max_rows: int = 10_000  # ④行数硬顶（全量走异步导出，后续 Exporter）
-
     # ── M2 派发环（后台调度）─────────────────────────────────────────────
     dispatch_enabled: bool = True  # 后台派发环开关（测试关闭，避免与用例抢 QUEUED 请求）
     dispatch_interval_s: float = 1.0  # 派发/回收扫描间隔（秒）

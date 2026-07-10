@@ -20,6 +20,8 @@ var/
 .mypy_cache/
 .coverage
 htmlcov/
+# 外部工具遗留的临时目录（属主 ACL 异常，暂时删不掉，先屏蔽）
+.codex-pytest-tmp-*/
 
 # IDE / OS
 .idea/

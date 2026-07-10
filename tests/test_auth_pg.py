@@ -93,6 +93,9 @@ def test_login_and_create_source(require_pg: None) -> None:
                 "name": "Auth UI Test",
                 "uuid": _UUID,
                 "seed_urls": "https://books.toscrape.com/",
+                "access_basis": "public_policy",
+                "access_reference": "https://books.toscrape.com/",
+                "access_confirmed": "on",
                 "item_locator": "article.product_pod",
                 "field_name": "title",
                 "field_css": "h3 a@title",
@@ -102,6 +105,35 @@ def test_login_and_create_source(require_pg: None) -> None:
             created = client.post("/sources/create", data=form, follow_redirects=False)
             assert created.status_code == 303
             assert created.headers["location"] == f"/data/{_UUID}"
+            review_page = client.get(f"/sources/{_UUID}/access-review")
+            assert review_page.status_code == 200
+            # 复核「维持暂停」→ 源保持暂停，页面回显暂停原因
+            rejected = client.post(
+                f"/sources/{_UUID}/access-review",
+                data={
+                    "access_basis": "public_policy",
+                    "access_reference": "https://books.toscrape.com/",
+                    "reason": "pending manual re-check",
+                    "decision": "pause",
+                },
+                follow_redirects=False,
+            )
+            assert rejected.status_code == 303
+            paused_page = client.get(f"/sources/{_UUID}/access-review")
+            assert paused_page.status_code == 200
+            assert "pending manual re-check" in paused_page.text
+            reviewed = client.post(
+                f"/sources/{_UUID}/access-review",
+                data={
+                    "access_basis": "public_policy",
+                    "access_reference": "https://books.toscrape.com/",
+                    "reason": "reviewed in UI test",
+                    "decision": "approve",
+                },
+                follow_redirects=False,
+            )
+            assert reviewed.status_code == 303
+            assert reviewed.headers["location"] == "/sources"
 
         src_ok, table_ok = asyncio.run(_source_and_table_exist())
         assert src_ok  # 源已建

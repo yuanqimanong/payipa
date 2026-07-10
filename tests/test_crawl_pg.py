@@ -44,7 +44,14 @@ def test_enqueue_discovered(require_pg: None) -> None:
         try:
             await drop_data_table(dc, table)
             await run.ensure_data_table(dc, _UUID, ["title"])
-            src_id, task_id = await run.setup_source(pyp, _UUID, "M2 Crawl")
+            src_id, task_id = await run.setup_source(
+                pyp,
+                _UUID,
+                "M2 Crawl",
+                access_basis="owned",
+                access_reference="test fixture",
+                access_confirmed=True,
+            )
             ptr = await RuleStore(pyp).put(src_id, _rule(max_depth=2))
             batch_id, specs = await run.create_batch_with_requests(
                 pyp, task_id=task_id, source_uuid=_UUID, targets=["https://x.com/p1"], rule_ptr=ptr
