@@ -16,6 +16,11 @@ dependencies = [
     "dateparser>=1.2",   # 业务时间解析（parse_date 清洗算子）
 ]
 
+# 可选：浏览器自动化能力（M5，标准 Playwright）。装了才上报 automation 能力、接 browser 引擎任务。
+# uv sync --package pyp-agent --extra browser 后需 `uv run playwright install chromium` 装浏览器运行时。
+[project.optional-dependencies]
+browser = ["playwright>=1.49"]
+
 [project.scripts]
 pyp-agent = "pyp_agent.cli:main"
 

@@ -29,7 +29,7 @@ from payipa_contracts import (
 )
 from pydantic import TypeAdapter
 
-from pyp_agent.fetch import fetch
+from pyp_agent.fetch import browser_available, fetch
 from pyp_agent.interpret import interpret_page
 from pyp_agent.rules import RuleCache
 from pyp_agent.upload import upload_raw_via_server
@@ -123,11 +123,15 @@ class AgentConnection:
         async with websockets.connect(
             _ws_url(self.server), additional_headers={"authorization": f"Bearer {self.token}"}
         ) as ws:
+            has_browser = browser_available()  # 装了 playwright extra 才上报 automation 能力（分组派发据此）
             await ws.send(
                 RegisterReq(
                     agent_id=self.agent_id,
                     hostname=self.hostname,
-                    capabilities=Capabilities(),
+                    capabilities=Capabilities(
+                        automation=has_browser,
+                        engines=["http", "browser"] if has_browser else ["http"],
+                    ),
                     slot_n=self.slot_n,
                 ).model_dump_json()
             )
