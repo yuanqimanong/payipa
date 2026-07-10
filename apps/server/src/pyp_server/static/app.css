@@ -148,6 +148,11 @@ table.tbl tbody tr:last-child td { border-bottom: 0; }
 table.tbl tbody tr:hover { background: var(--accent-weak); }
 .empty { padding: 34px; text-align: center; color: var(--text-faint); font-size: 13.5px; font-weight: var(--wt-body);
   border: var(--bw) dashed var(--ink); border-radius: var(--radius); background: var(--surface-2); margin: 8px; }
+.empty.err { color: var(--red); border-color: var(--red); border-style: solid; background: var(--red-bg); }
+
+/* 内联标签（角色名 / 白名单域等短列表） */
+.pill { display: inline-block; font-size: 11.5px; font-weight: var(--wt-strong); padding: 1px 8px; margin: 1px 0;
+  border: var(--bw) solid var(--border-strong); border-radius: 999px; background: var(--surface-2); color: var(--text); }
 
 /* ── 按钮：触觉块 ──────────────────────────────────────────────── */
 .btn { display: inline-flex; align-items: center; gap: 6px; padding: 8px 15px; border-radius: var(--radius-sm);
@@ -201,9 +206,6 @@ textarea { min-height: 72px; resize: vertical; }
 /* 工具类 */
 .muted { color: var(--text-muted); } .faint { color: var(--text-faint); }
 .mono { font-family: var(--mono); }
-.mock-tag { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: var(--wt-strong);
-  color: var(--amber); background: var(--amber-bg); padding: 2px 8px; border: var(--bw-thin) solid var(--ink);
-  border-radius: var(--radius-sm); vertical-align: middle; }
 
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; }

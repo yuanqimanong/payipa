@@ -11,9 +11,10 @@
 |---|---|---|
 | M0 骨架 | ✅ 已实现 · CI 绿 | 双仓 + uv workspace、contracts 全 schema、三库 Alembic、server 空壳、agent 骨架、import-linter |
 | M1 Walking Skeleton | ✅ 已实现 · 活体验证 | 单源端到端（建源 → agent WS 抓取 → raw 存档 → 入库 data_center → Tabulator 查看页）+ 声明式解释器/FieldMeta |
-| 登录 + 建源界面 | ✅ 已实现 | argon2 + HttpOnly cookie 登录、建源表单、页面级保护、`pyp-admin` 建管理员 |
-| M2 调度与分布式 | 🔧 进行中 | 已实现：持久化派发环（槽位派发/自动排空）+ 租约回收 + 断连重排 + 监控端点实时聚合 + agent Docker 多容器。待做：cron/定时 · Redis 队列 · 优先级 · 限流调频 · Cancel · 分组亲和 |
-| M3 组装沙箱 · M4 推送对外 · M5 智能增强 | ⏳ 计划 | 见 SDD §12 |
+| 管理界面 | ✅ 已实现 | argon2 + HttpOnly cookie 登录、建源表单、页面级保护、`pyp-admin` 建管理员；**12 个功能页全量接真数据**（仪表盘/监控/节点/任务/规则/组装/推送/用户/角色/配置/存储/审计，数据经 `/api/views/*` + `/api/monitor/*`，RBAC 在数据端点强制） |
+| M2 调度与分布式 | ✅ 已实现 | 持久化派发环 + 租约回收 + 断连重排 + 多波爬行 + 优先级 + cron + 取消 + 节点注册/加权分组 + 每源限流/AIMD + 监控实时聚合 + agent Docker 多容器 |
+| M3 组装沙箱 | ✅ 已实现 | Query Gateway（红线2 唯一取数）+ job_token + 签名游标/配额 + 版本签名门 + 增量水位 + SchemaEvolver + **真 SandboxExecutor（Docker/WSL2 锁定容器 + 路径白名单 egress，含降级）** |
+| M4 推送对外 · M5 智能增强 | ✅ 已实现 | 见 SDD §12 与决策记录（outbox/Dataset API/隔离子进程投递/通知；RBAC/monitor/AI Gateway/受控出口/Playwright/点选插件） |
 
 > 契约字段的「已生效/未生效 + since_milestone」标注即反映各字段的实现里程碑（见 `payipa-contracts`）。
 

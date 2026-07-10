@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}数据推送{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div class="titles">
+    <h2>数据推送</h2>
+    <p>推送组件（隔离子进程 + 目标域白名单 + 发布签名门）与投递 outbox 状态。</p>
+  </div>
+</div>
+<div class="grid cols-4" id="stats" style="margin-bottom:16px"></div>
+<div class="card"><div class="card-head">推送组件</div><div id="box"><div class="empty">加载中…</div></div></div>
+<script src="/static/views.js"></script>
+<script>
+  (async () => {
+    const box = document.getElementById("box");
+    try {
+      const d = await PypViews.fetchJSON("/api/views/push");
+      const ob = d.outbox || {};
+      PypViews.renderStats(document.getElementById("stats"), [
+        { k: "待投递", v: ob.pending || 0 },
+        { k: "投递中", v: ob.inflight || 0 },
+        { k: "已送达", v: ob.sent || 0 },
+        { k: "死信", v: ob.dead || 0 },
+      ]);
+      PypViews.renderTable(box, [
+        { key: "id", label: "#", type: "mono" },
+        { key: "name", label: "组件" },
+        { key: "version", label: "版本", type: "mono" },
+        { key: "status", label: "状态", type: "badge" },
+        { key: "allow_domains", label: "出网白名单域", type: "list" },
+        { key: "signed", label: "已签名", type: "bool" },
+        { key: "created_at", label: "创建时间", type: "time" },
+      ], d.components || []);
+    } catch (e) {
+      box.innerHTML = `<div class="empty err">${PypViews.esc(e.message)}</div>`;
+    }
+  })();
+</script>
+{% endblock %}

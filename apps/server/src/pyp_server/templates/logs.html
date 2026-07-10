@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}日志查看{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div class="titles">
+    <h2>日志查看</h2>
+    <p>运行时日志与审计日志的定位说明。</p>
+  </div>
+</div>
+<div class="card card-pad">
+  <p>payipa 分两类日志：</p>
+  <ul style="line-height:1.9">
+    <li><b>运行时日志</b>（structlog）：主控与各 agent 进程的结构化日志，输出到进程 <code>stdout</code>
+      （容器部署经 <code>docker logs</code> 或日志采集器汇聚），带 <code>task_id / batch_id / attempt_id</code>
+      关联标识贯穿。当前不落库、不在此页聚合展示。</li>
+    <li><b>操作审计日志</b>：RBAC 敏感操作、访问复核、推送等已落 <code>audit_log</code> 表，
+      可在 <a href="/audit">操作日志</a> 页查看。</li>
+  </ul>
+  <p class="muted">运行时日志的页面化聚合（采集器 + 检索）属部署基础设施能力，随生产日志栈接入，不在应用内实现。</p>
+</div>
+{% endblock %}

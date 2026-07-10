@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}节点管理{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div class="titles">
+    <h2>节点管理</h2>
+    <p>采集节点（agent）在线态、并发槽占用与历史成败率。运行态已占槽取自实时 AgentHub。</p>
+  </div>
+  <div class="actions"><button class="btn ghost" id="refresh">刷新</button></div>
+</div>
+<div class="card" id="box"><div class="empty">加载中…</div></div>
+<script src="/static/views.js"></script>
+<script>
+  const pct = (x) => (x == null ? "—" : (x * 100).toFixed(1) + "%");
+  async function load() {
+    const box = document.getElementById("box");
+    try {
+      const nodes = await PypViews.fetchJSON("/api/monitor/nodes");
+      PypViews.renderTable(box, [
+        { key: "agent_id", label: "节点 id", type: "mono" },
+        { key: "online", label: "在线", type: "badge" },
+        { key: "slots", label: "槽位(占用/容量)", type: "mono" },
+        { key: "ok", label: "成功", type: "mono" },
+        { key: "fail", label: "失败", type: "mono" },
+        { key: "rate", label: "成功率" },
+      ], (nodes || []).map((n) => ({
+        agent_id: n.agent_id,
+        online: n.online ? "online" : "offline",
+        slots: `${n.slot_used}/${n.slot_n}`,
+        ok: n.ok, fail: n.fail, rate: pct(n.success_rate),
+      })));
+    } catch (e) {
+      box.innerHTML = `<div class="empty err">${PypViews.esc(e.message)}</div>`;
+    }
+  }
+  document.getElementById("refresh").addEventListener("click", load);
+  load();
+</script>
+{% endblock %}

@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}用户管理{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div class="titles">
+    <h2>用户管理</h2>
+    <p>平台账号及其角色（停用不删除）。账号创建当前经 <code>pyp-admin create-user</code> CLI。</p>
+  </div>
+</div>
+<div class="card" id="box"><div class="empty">加载中…</div></div>
+<script src="/static/views.js"></script>
+<script>
+  PypViews.loadTable(document.getElementById("box"), "/api/views/users", [
+    { key: "id", label: "#", type: "mono" },
+    { key: "username", label: "用户名" },
+    { key: "display_name", label: "显示名" },
+    { key: "status", label: "状态", type: "badge" },
+    { key: "roles", label: "角色", type: "list" },
+    { key: "created_at", label: "创建时间", type: "time" },
+  ]);
+</script>
+{% endblock %}

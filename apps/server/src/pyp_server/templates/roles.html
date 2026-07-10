@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}角色权限{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div class="titles">
+    <h2>角色权限</h2>
+    <p>RBAC 角色（管理员 / 技术 / 运营 / 运维）及其权限码数量。用户经角色获得权限，另可直授。</p>
+  </div>
+</div>
+<div class="card" id="box"><div class="empty">加载中…</div></div>
+<script src="/static/views.js"></script>
+<script>
+  PypViews.loadTable(document.getElementById("box"), "/api/views/roles", [
+    { key: "id", label: "#", type: "mono" },
+    { key: "name", label: "角色" },
+    { key: "description", label: "说明" },
+    { key: "permission_count", label: "权限码数", type: "mono" },
+  ]);
+</script>
+{% endblock %}

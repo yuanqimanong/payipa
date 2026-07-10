@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}系统监控{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div class="titles">
+    <h2>系统监控</h2>
+    <p>主控侧实时聚合：节点在线、队列深度、请求成败与数据质量、各源健康度。</p>
+  </div>
+  <div class="actions"><button class="btn ghost" id="refresh">刷新</button></div>
+</div>
+<div class="grid cols-4" id="stats" style="margin-bottom:16px"></div>
+<div class="card"><div class="card-head">各数据源健康度</div><div id="sources"><div class="empty">加载中…</div></div></div>
+<script src="/static/views.js"></script>
+<script>
+  const pct = (x) => (x == null ? "—" : (x * 100).toFixed(1) + "%");
+  async function load() {
+    const sbox = document.getElementById("sources");
+    try {
+      const [ov, srcs] = await Promise.all([
+        PypViews.fetchJSON("/api/monitor/overview"),
+        PypViews.fetchJSON("/api/monitor/sources"),
+      ]);
+      const q = ov.quality || {};
+      PypViews.renderStats(document.getElementById("stats"), [
+        { k: "在线节点", v: `${ov.nodes_online}/${ov.nodes_total}` },
+        { k: "队列深度", v: ov.queue_depth },
+        { k: "整体成功率", v: pct(ov.success_rate), d: `${ov.ok}✓ / ${ov.fail}✗`, dir: ov.fail ? "down" : "up" },
+        { k: "解析质量", v: pct(q.parse_ok_rate), d: "空白 " + pct(q.blank_rate), dir: "flat" },
+      ]);
+      PypViews.renderTable(sbox, [
+        { key: "source", label: "数据源", type: "mono" },
+        { key: "total", label: "请求数", type: "mono" },
+        { key: "ok", label: "成功", type: "mono" },
+        { key: "fail", label: "失败", type: "mono" },
+        { key: "rate", label: "成功率" },
+        { key: "quality_txt", label: "解析质量" },
+      ], (srcs || []).map((s) => ({
+        ...s, rate: pct(s.success_rate),
+        quality_txt: s.quality ? "OK " + pct(s.quality.parse_ok_rate) + " · 空白 " + pct(s.quality.blank_rate) : "—",
+      })));
+    } catch (e) {
+      sbox.innerHTML = `<div class="empty err">${PypViews.esc(e.message)}</div>`;
+    }
+  }
+  document.getElementById("refresh").addEventListener("click", load);
+  load();
+</script>
+{% endblock %}

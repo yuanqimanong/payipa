@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}爬虫规则{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div class="titles">
+    <h2>爬虫规则</h2>
+    <p>各数据源的声明式规则版本（内容寻址）；状态机 draft/testing/active。</p>
+  </div>
+</div>
+<div class="card" id="box"><div class="empty">加载中…</div></div>
+<script src="/static/views.js"></script>
+<script>
+  PypViews.loadTable(document.getElementById("box"), "/api/views/rules", [
+    { key: "source_name", label: "数据源" },
+    { key: "source_uuid", label: "短码", type: "mono" },
+    { key: "version", label: "版本", type: "mono" },
+    { key: "status", label: "状态", type: "badge" },
+    { key: "hash", label: "内容 hash", type: "mono" },
+    { key: "created_at", label: "创建时间", type: "time" },
+  ]);
+</script>
+{% endblock %}

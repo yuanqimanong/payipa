@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}任务管理{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div class="titles">
+    <h2>任务管理</h2>
+    <p>采集任务及其触发方式、定时计划与最近一次批次状态。</p>
+  </div>
+  <div class="actions"><a class="btn" href="/sources/new">＋ 新建数据源</a></div>
+</div>
+<div class="card" id="box"><div class="empty">加载中…</div></div>
+<script src="/static/views.js"></script>
+<script>
+  PypViews.loadTable(document.getElementById("box"), "/api/views/tasks", [
+    { key: "id", label: "任务", type: "mono" },
+    { key: "source_name", label: "数据源" },
+    { key: "source_uuid", label: "短码", type: "mono" },
+    { key: "trigger", label: "触发", type: "badge" },
+    { key: "priority", label: "优先级", type: "badge" },
+    { key: "cron", label: "定时(cron)", type: "mono" },
+    { key: "next_run", label: "下次运行", type: "time" },
+    { key: "last_status", label: "最近批次", type: "badge" },
+    { key: "created_at", label: "创建时间", type: "time" },
+  ]);
+</script>
+{% endblock %}

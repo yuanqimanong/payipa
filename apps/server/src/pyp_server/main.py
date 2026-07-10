@@ -28,6 +28,7 @@ from pyp_server.routers import (
     internal,
     sources,
     ui,
+    views,
     ws,
 )
 from pyp_server.scheduler import dispatch_loop
@@ -70,6 +71,7 @@ def create_app() -> FastAPI:
     app.include_router(ui.router)
     app.include_router(sources.router)
     app.include_router(api.router)
+    app.include_router(views.router)
     app.include_router(explore.router)
     app.include_router(ai.router)
     app.include_router(internal.router)

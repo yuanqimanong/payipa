@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}公共配置{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div class="titles">
+    <h2>公共配置</h2>
+    <p>AI 模型、通知机器人与存储后端登记（凭证均 KEK 加密入库，此处不显示明文）。</p>
+  </div>
+</div>
+<div class="card"><div class="card-head">AI / LLM 模型</div><div id="models"><div class="empty">加载中…</div></div></div>
+<div class="card" style="margin-top:16px"><div class="card-head">通知机器人</div><div id="bots"></div></div>
+<div class="card" style="margin-top:16px"><div class="card-head">存储后端</div><div id="stores"></div></div>
+<script src="/static/views.js"></script>
+<script>
+  (async () => {
+    try {
+      const d = await PypViews.fetchJSON("/api/views/config");
+      PypViews.renderTable(document.getElementById("models"), [
+        { key: "id", label: "#", type: "mono" },
+        { key: "name", label: "名称" },
+        { key: "provider", label: "提供方", type: "badge" },
+        { key: "enabled", label: "启用", type: "bool" },
+      ], d.models || []);
+      PypViews.renderTable(document.getElementById("bots"), [
+        { key: "id", label: "#", type: "mono" },
+        { key: "name", label: "名称" },
+        { key: "type", label: "类型", type: "badge" },
+      ], d.notify_bots || []);
+      PypViews.renderTable(document.getElementById("stores"), [
+        { key: "id", label: "#", type: "mono" },
+        { key: "name", label: "名称" },
+        { key: "backend", label: "后端", type: "badge" },
+      ], d.storage || []);
+    } catch (e) {
+      document.getElementById("models").innerHTML = `<div class="empty err">${PypViews.esc(e.message)}</div>`;
+    }
+  })();
+</script>
+{% endblock %}
