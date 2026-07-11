@@ -45,7 +45,8 @@
   function actionCell(u) {
     const toggle = u.status === "active" ? "disabled" : "active";
     const label = u.status === "active" ? "停用" : "启用";
-    return `<button class="btn ghost sm user-toggle" data-id="${u.id}" data-to="${toggle}">${label}</button>`;
+    return `<button class="btn ghost sm user-pw" data-id="${u.id}" data-name="${esc(u.username)}">重置密码</button> ` +
+      `<button class="btn ghost sm user-toggle" data-id="${u.id}" data-to="${toggle}">${label}</button>`;
   }
 
   function rolesCell(u) {
@@ -74,6 +75,8 @@
       box.innerHTML = `<div class="table-wrap"><table class="tbl"><thead>${head}</thead><tbody>${rows}</tbody></table></div>`;
       box.querySelectorAll("button.user-toggle").forEach((btn) =>
         btn.addEventListener("click", () => setStatus(btn.dataset.id, btn.dataset.to, btn)));
+      box.querySelectorAll("button.user-pw").forEach((btn) =>
+        btn.addEventListener("click", () => resetPassword(btn.dataset.id, btn.dataset.name)));
       box.querySelectorAll("a.role-x").forEach((a) =>
         a.addEventListener("click", (e) => { e.preventDefault(); setRole(a.dataset.id, a.dataset.role, "revoke"); }));
       box.querySelectorAll("select.role-grant").forEach((sel) =>
@@ -92,6 +95,20 @@
       if (!resp.ok) throw new Error((await resp.json().catch(() => ({}))).detail || `HTTP ${resp.status}`);
       await load();
     } catch (e) { alert(`角色操作失败：${e.message}`); }
+  }
+
+  async function resetPassword(id, name) {
+    const pw = prompt(`为用户 ${name} 设置新密码（≥8 位）：`);
+    if (pw == null) return;  // 取消
+    if (pw.length < 8) { alert("密码至少 8 位"); return; }
+    try {
+      const resp = await fetch(`/api/users/${id}/password`, {
+        method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ password: pw }),
+      });
+      if (!resp.ok) throw new Error((await resp.json().catch(() => ({}))).detail || `HTTP ${resp.status}`);
+      alert(`已重置 ${name} 的密码`);
+    } catch (e) { alert(`重置失败：${e.message}`); }
   }
 
   async function setStatus(id, status, btn) {

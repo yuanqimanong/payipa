@@ -75,6 +75,26 @@ async def set_user_status(user_id: int, body: StatusRequest) -> dict:
     return {"id": user_id, "status": body.status}
 
 
+class PasswordRequest(BaseModel):
+    password: str = Field(..., min_length=8, max_length=256, description="新密码（≥8 位；argon2 重哈希）")
+
+
+@router.post(
+    "/{user_id}/password",
+    summary="重置用户密码（argon2 重哈希，不落明文）",
+    dependencies=[Depends(require_perm("users.manage"))],
+)
+async def reset_password(user_id: int, body: PasswordRequest) -> dict:
+    engine = get_engine("pyp")
+    async with engine.begin() as conn:
+        result = await conn.execute(
+            update(User.__table__).where(User.id == user_id).values(password_hash=hash_password(body.password))
+        )
+    if not result.rowcount:
+        raise HTTPException(status_code=404, detail=f"用户 id={user_id} 不存在")
+    return {"id": user_id, "reset": True}
+
+
 class RoleRequest(BaseModel):
     role: str = Field(..., min_length=1, max_length=64, description="角色名，如 管理员/技术/运营/运维")
     action: Literal["grant", "revoke"] = Field(..., description="grant=授予 / revoke=撤销")

@@ -63,8 +63,26 @@ def test_create_and_toggle_user(require_pg: None) -> None:
             # 非法状态 → 422；不存在用户 → 404
             assert client.post(f"/api/users/{uid}/status", json={"status": "banned"}).status_code == 422
             assert client.post("/api/users/99999999/status", json={"status": "active"}).status_code == 404
+
+            # 口令重置：新密码可登录、旧密码失效；hash 变化且不含明文
+            old_hash = asyncio.run(_hash_of(_USER))
+            rp = client.post(f"/api/users/{uid}/password", json={"password": "brand-new-pw-9"})
+            assert rp.status_code == 200 and rp.json()["reset"] is True
+            new_hash = asyncio.run(_hash_of(_USER))
+            assert new_hash != old_hash and new_hash.startswith("$argon2") and "brand-new-pw-9" not in new_hash
+            # 太短 → 422；不存在用户 → 404
+            assert client.post(f"/api/users/{uid}/password", json={"password": "short"}).status_code == 422
+            assert client.post("/api/users/99999999/password", json={"password": "long-enough-pw"}).status_code == 404
     finally:
         asyncio.run(_cleanup())
+
+
+async def _hash_of(username: str) -> str:
+    engine = create_async_engine(get_settings().async_url("pyp"))
+    async with engine.connect() as conn:
+        h = (await conn.execute(select(User.password_hash).where(User.username == username))).scalar()
+    await engine.dispose()
+    return h or ""
 
 
 def test_grant_and_revoke_role(require_pg: None) -> None:
