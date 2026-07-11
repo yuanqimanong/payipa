@@ -88,10 +88,10 @@
     el.innerHTML = `<div class="table-wrap"><table class="tbl"><thead>${head}</thead><tbody>${rows}</tbody></table></div>`;
     el.querySelectorAll("button.m-toggle").forEach((b) => b.addEventListener("click", async () => {
       try { await postJSON(`/api/config/llm-models/${b.dataset.id}/enabled`, { enabled: b.dataset.to === "true" }); load(); }
-      catch (e) { alert(e.message); }
+      catch (e) { PypViews.toast(e.message, "err"); }
     }));
     el.querySelectorAll("button.m-default").forEach((b) => b.addEventListener("click", async () => {
-      try { await postJSON(`/api/config/llm-models/${b.dataset.id}/default`, null); load(); } catch (e) { alert(e.message); }
+      try { await postJSON(`/api/config/llm-models/${b.dataset.id}/default`, null); load(); } catch (e) { PypViews.toast(e.message, "err"); }
     }));
   }
 
@@ -107,8 +107,8 @@
     el.innerHTML = `<div class="table-wrap"><table class="tbl"><thead>${head}</thead><tbody>${rows}</tbody></table></div>`;
     el.querySelectorAll("button.bot-test").forEach((btn) => btn.addEventListener("click", () => testBot(btn.dataset.id, btn)));
     el.querySelectorAll("button.bot-del").forEach((btn) => btn.addEventListener("click", async () => {
-      if (!confirm(`删除通知机器人 ${btn.dataset.name}？`)) return;
-      try { await postJSON(`/api/config/notify-bots/${btn.dataset.id}`, null, "DELETE"); load(); } catch (e) { alert(e.message); }
+      if (!(await PypViews.ask(`删除通知机器人 ${btn.dataset.name}？`))) return;
+      try { await postJSON(`/api/config/notify-bots/${btn.dataset.id}`, null, "DELETE"); load(); } catch (e) { PypViews.toast(e.message, "err"); }
     }));
   }
 
@@ -119,7 +119,7 @@
     try {
       await postJSON(`/api/notify/${id}/test`, { title: "payipa 测试通知", text: "这是一条来自 payipa 的测试通知。" });
       btn.textContent = "已发送 ✓";
-    } catch (e) { alert(`测试失败：${e.message}`); btn.textContent = label; }
+    } catch (e) { PypViews.toast(`测试失败：${e.message}`, "err"); btn.textContent = label; }
     finally { setTimeout(() => { btn.textContent = label; btn.disabled = false; }, 2500); }
   }
 
@@ -147,7 +147,7 @@
       document.getElementById("p-name").value = d.name;
       document.getElementById("p-content").value = d.content;
       pForm.hidden = false; pErr.hidden = true;
-    } catch (e) { alert(e.message); }
+    } catch (e) { PypViews.toast(e.message, "err"); }
   }
 
   async function load() {

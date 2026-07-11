@@ -5,11 +5,11 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
-from payipa.crawl.run import review_source_access
+from payipa.crawl.run import batch_progress, review_source_access
 from payipa.db.engine import get_engine
-from payipa.db.pyp import Source
+from payipa.db.pyp import Batch, Rule, Source, Task
 from payipa.security.audit import record_audit_best_effort
 from payipa.security.rbac import effective_permissions, has_permission
 from payipa_contracts import CleanOp, EngineHint, FieldRule, FieldType, Locator, LocatorType, RulePack
@@ -31,22 +31,22 @@ def _login_redirect() -> RedirectResponse:
 
 
 @router.get("/sources", response_class=HTMLResponse, summary="数据源列表")
-async def sources_list(request: Request):
+async def sources_list(request: Request, q: str | None = Query(None, max_length=64)):
     user = await get_current_user(request)
     if user is None:
         return _login_redirect()
+    stmt = select(
+        Source.uuid,
+        Source.name,
+        Source.created_at,
+        Source.access_confirmed_at,
+        Source.paused_at,
+    ).order_by(Source.id.desc())
+    if q:
+        like = f"%{q}%"
+        stmt = stmt.where(Source.name.ilike(like) | Source.uuid.ilike(like))
     async with get_engine("pyp").connect() as conn:
-        rows = (
-            await conn.execute(
-                select(
-                    Source.uuid,
-                    Source.name,
-                    Source.created_at,
-                    Source.access_confirmed_at,
-                    Source.paused_at,
-                ).order_by(Source.id.desc())
-            )
-        ).all()
+        rows = (await conn.execute(stmt)).all()
     sources = [
         {
             "uuid": r[0],
@@ -58,7 +58,7 @@ async def sources_list(request: Request):
         for r in rows
     ]
     return request.app.state.templates.TemplateResponse(
-        request, "sources_list.html", await page_ctx(user, sources=sources, active="sources")
+        request, "sources_list.html", await page_ctx(user, sources=sources, q=q, active="sources")
     )
 
 
@@ -276,3 +276,116 @@ async def sources_create(request: Request):
         source="web",
     )
     return RedirectResponse(f"/data/{uuid}", status_code=303)
+
+
+def _fmt(dt) -> str:
+    return dt.isoformat(timespec="seconds") if dt else ""
+
+
+# 注意：本路由须注册在 /sources/new 之后（FastAPI 按注册顺序匹配，否则 "new" 会被当成 uuid）。
+@router.get("/sources/{uuid}", response_class=HTMLResponse, summary="数据源详情")
+async def source_detail(uuid: str, request: Request):
+    """单源全景页（§10.3）：概览 + 操作 + 任务/最近批次 + 规则版本，一次服务端查好渲染。"""
+    user = await get_current_user(request)
+    if user is None:
+        return _login_redirect()
+    engine = get_engine("pyp")
+    async with engine.connect() as conn:
+        row = (
+            await conn.execute(
+                select(
+                    Source.id,
+                    Source.uuid,
+                    Source.name,
+                    Source.created_at,
+                    Source.access_basis,
+                    Source.access_reference,
+                    Source.access_confirmed_at,
+                    Source.paused_at,
+                    Source.pause_reason,
+                    Source.rate_limit,
+                    Source.retry,
+                    Source.timeout,
+                    Source.raw_archive,
+                ).where(Source.uuid == uuid)
+            )
+        ).first()
+        if row is None:
+            raise HTTPException(status_code=404, detail=f"数据源 {uuid!r} 不存在")
+        sid = row.id
+        task_rows = (
+            await conn.execute(
+                select(Task.id, Task.trigger_type, Task.priority, Task.params, Task.created_at)
+                .where(Task.source_id == sid)
+                .order_by(Task.id.desc())
+            )
+        ).all()
+        batch_rows = (
+            await conn.execute(
+                select(Batch.id, Batch.status, Batch.channel, Batch.started_at, Batch.finished_at)
+                .join(Task, Batch.task_id == Task.id)
+                .where(Task.source_id == sid)
+                .order_by(Batch.id.desc())
+                .limit(10)
+            )
+        ).all()
+        rule_rows = (
+            await conn.execute(
+                select(Rule.version, Rule.status, Rule.content_hash, Rule.created_at)
+                .where(Rule.source_id == sid)
+                .order_by(Rule.version.desc())
+            )
+        ).all()
+    source = {
+        "uuid": row.uuid,
+        "name": row.name,
+        "created_at": _fmt(row.created_at),
+        "access_status": "已暂停" if row.paused_at else ("已确认" if row.access_confirmed_at else "待复核"),
+        "access_class": "red" if row.paused_at else ("green" if row.access_confirmed_at else "amber"),
+        "pause_reason": row.pause_reason,
+        "access_basis": row.access_basis,
+        "access_reference": row.access_reference,
+        # 引擎存于 task.params（建源时写入）；取最新任务的，缺省 http
+        "engine": (task_rows[0].params or {}).get("engine_hint", "http") if task_rows else "http",
+        "rate_limit": row.rate_limit,
+        "retry": row.retry,
+        "timeout": row.timeout,
+        "raw_archive": row.raw_archive,
+    }
+    tasks = [
+        {
+            "id": t.id,
+            "trigger": t.trigger_type,
+            "priority": t.priority,
+            "engine": (t.params or {}).get("engine_hint", "http"),
+            "created_at": _fmt(t.created_at),
+        }
+        for t in task_rows
+    ]
+    batches = []
+    for b in batch_rows:  # 逐个聚合进度（≤10 次查询，复用 monitor 同款口径）
+        prog = await batch_progress(engine, b.id)
+        batches.append(
+            {
+                "id": b.id,
+                "status": b.status,
+                "channel": b.channel,
+                "started_at": _fmt(b.started_at),
+                "finished_at": _fmt(b.finished_at),
+                **prog,
+            }
+        )
+    rules = [
+        {
+            "version": r.version,
+            "status": r.status,
+            "hash": (r.content_hash or "")[:12],
+            "created_at": _fmt(r.created_at),
+        }
+        for r in rule_rows
+    ]
+    return request.app.state.templates.TemplateResponse(
+        request,
+        "source_detail.html",
+        await page_ctx(user, source=source, tasks=tasks, batches=batches, rules=rules, active="sources"),
+    )

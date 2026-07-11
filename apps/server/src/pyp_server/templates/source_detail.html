@@ -1,0 +1,143 @@
+{% extends "base.html" %}
+{% block title %}数据源详情{% endblock %}
+{% block content %}
+{% set batch_cls = {"done": "green", "running": "blue", "failed": "red", "canceling": "amber"} %}
+<div class="page-head">
+  <div class="titles">
+    <h2>{{ source.name }}</h2>
+    <p><code>{{ source.uuid }}</code> · 创建于 {{ source.created_at or "—" }}</p>
+  </div>
+  <div class="actions">
+    <button class="btn rerun" type="button" data-uuid="{{ source.uuid }}" title="按存档种子+当前规则重跑">立即运行</button>
+    <a class="btn ghost" href="/sources/{{ source.uuid }}/access-review">访问复核</a>
+    <a class="btn ghost" href="/data/{{ source.uuid }}">查看数据</a>
+    <a class="btn ghost" href="/api/data/{{ source.uuid }}/export?fmt=csv">导出 CSV</a>
+    <a class="btn ghost" href="/api/data/{{ source.uuid }}/export?fmt=jsonl">导出 JSONL</a>
+  </div>
+</div>
+
+<div class="card" style="margin-bottom:16px">
+  <div class="card-head">概览</div>
+  <div class="table-wrap">
+    <table class="tbl">
+      <tbody>
+        <tr>
+          <th style="width:140px">访问状态</th>
+          <td>
+            <span class="badge {{ source.access_class }}"><span class="dot"></span>{{ source.access_status }}</span>
+            {% if source.pause_reason %}<span class="muted">（{{ source.pause_reason }}）</span>{% endif %}
+          </td>
+        </tr>
+        <tr>
+          <th>访问依据</th>
+          <td>{{ source.access_basis or "—" }}{% if source.access_reference %} · {{ source.access_reference }}{% endif %}</td>
+        </tr>
+        <tr>
+          <th>运行参数</th>
+          <td>
+            引擎 <code>{{ source.engine }}</code> · 速率 {{ source.rate_limit }} req/s ·
+            重试 {{ source.retry }} 次 · 超时 {{ source.timeout }}s ·
+            raw 归档 {{ "开" if source.raw_archive else "关" }}
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="card" style="margin-bottom:16px">
+  <div class="card-head">任务</div>
+  <div class="table-wrap">
+    <table class="tbl">
+      <thead><tr><th>任务</th><th>触发</th><th>优先级</th><th>引擎</th><th>创建时间</th></tr></thead>
+      <tbody>
+        {% for t in tasks %}
+        <tr>
+          <td><code>{{ t.id }}</code></td>
+          <td><span class="badge"><span class="dot"></span>{{ t.trigger }}</span></td>
+          <td>{{ t.priority }}</td>
+          <td><code>{{ t.engine }}</code></td>
+          <td class="muted">{{ t.created_at or "—" }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="5"><div class="empty">该源还没有任务</div></td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="card" style="margin-bottom:16px">
+  <div class="card-head">最近批次（最多 10 个）</div>
+  <div class="table-wrap">
+    <table class="tbl">
+      <thead><tr><th>批次</th><th>状态</th><th>渠道</th><th>开始</th><th>结束</th><th>进度</th></tr></thead>
+      <tbody>
+        {% for b in batches %}
+        <tr>
+          <td><code>{{ b.id }}</code></td>
+          <td><span class="badge {{ batch_cls.get(b.status, '') }}"><span class="dot"></span>{{ b.status }}</span></td>
+          <td>{{ b.channel }}</td>
+          <td class="muted">{{ b.started_at or "—" }}</td>
+          <td class="muted">{{ b.finished_at or "—" }}</td>
+          <td>{{ b.pct }}%<span class="muted">（成 {{ b.ok }} / 败 {{ b.fail }} / 在途 {{ b.running }}）</span></td>
+        </tr>
+        {% else %}
+        <tr><td colspan="6"><div class="empty">该源还没有批次</div></td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-head">规则版本</div>
+  <div class="table-wrap">
+    <table class="tbl">
+      <thead><tr><th>版本</th><th>状态</th><th>内容 hash</th><th>创建时间</th></tr></thead>
+      <tbody>
+        {% for r in rules %}
+        <tr>
+          <td>v{{ r.version }}</td>
+          <td><span class="badge {{ 'green' if r.status == 'active' else 'amber' }}"><span class="dot"></span>{{ r.status }}</span></td>
+          <td><code>{{ r.hash }}</code></td>
+          <td class="muted">{{ r.created_at or "—" }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="4"><div class="empty">该源还没有规则</div></td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<script src="/static/views.js"></script>
+<script>
+  // 一键重跑：POST /api/sources/{uuid}/rerun（与列表页同款；会话 cookie SameSite=Lax，RBAC sources.run 门控）
+  document.querySelectorAll("button.rerun").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const uuid = btn.dataset.uuid;
+      btn.disabled = true;
+      const label = btn.textContent;
+      btn.textContent = "运行中…";
+      try {
+        const resp = await fetch(`/api/sources/${encodeURIComponent(uuid)}/rerun`, {
+          method: "POST", headers: { Accept: "application/json" },
+        });
+        if (resp.ok) {
+          const d = await resp.json();
+          btn.textContent = `已触发 #${d.batch_id}`;
+          setTimeout(() => { btn.textContent = label; btn.disabled = false; }, 2500);
+        } else {
+          const detail = (await resp.json().catch(() => ({}))).detail || `HTTP ${resp.status}`;
+          PypViews.toast(`重跑失败：${detail}`, "err");
+          btn.textContent = label; btn.disabled = false;
+        }
+      } catch (e) {
+        PypViews.toast(`重跑失败：${e.message}`, "err");
+        btn.textContent = label; btn.disabled = false;
+      }
+    });
+  });
+</script>
+{% endblock %}

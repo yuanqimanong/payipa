@@ -162,7 +162,7 @@
       $("finish").style.display = "none";
       $("finish-status").style.display = "";
       done(4);
-    } catch (e) { alert("保存失败：" + e.message); }
+    } catch (e) { PypViews.toast("保存失败：" + e.message, "err"); }
   });
 
   checkReady();

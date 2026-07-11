@@ -94,6 +94,11 @@
           <h1>{{ self.title() }}</h1>
           <div class="spacer"></div>
           {% block topbar_actions %}{% endblock %}
+          {# 运行中心（P1-30 轻量版）：离开原页面也能找回在跑/最近的采集批次 #}
+          <div class="ops-center">
+            <button class="btn ghost sm" id="ops-toggle" aria-expanded="false">运行中心 <span class="ops-dot" id="ops-dot" style="display:none"></span></button>
+            <div class="ops-panel" id="ops-panel" style="display:none"><div class="empty">加载中…</div></div>
+          </div>
           {# 移动端账号菜单：窄屏侧栏底部被折叠，这里保证账号信息与登出始终可达 #}
           <div class="topbar-account">
             <span class="who-sm" title="{{ (roles | join('、')) if roles else '未分配角色' }}">{{ user.username if user else "未登录" }}</span>
@@ -103,6 +108,54 @@
         <div class="content">{% block content %}{% endblock %}</div>
       </div>
     </div>
+    {# 统一反馈组件挂点（views.js 的 PypViews.toast / PypViews.ask 使用） #}
+    <div id="toast-box" aria-live="polite"></div>
+    <dialog id="confirm-dlg">
+      <div class="dlg-body" id="confirm-msg"></div>
+      <div class="dlg-actions">
+        <button class="btn ghost sm" id="confirm-no">取消</button>
+        <button class="btn sm" id="confirm-yes">确定</button>
+      </div>
+    </dialog>
+    <script>
+      /* 运行中心：点开时拉取并每 5s 轮询；有 running 批次时按钮亮点 */
+      (function () {
+        var btn = document.getElementById("ops-toggle"), panel = document.getElementById("ops-panel"),
+            dot = document.getElementById("ops-dot"), timer = null;
+        if (!btn) return;
+        function esc(s) { var d = document.createElement("div"); d.textContent = String(s ?? ""); return d.innerHTML; }
+        function statusLabel(s) { return { running: "进行中", done: "已完成", failed: "失败", canceling: "取消中", canceled: "已取消" }[s] || s; }
+        async function pull(open) {
+          try {
+            var r = await fetch("/api/ops/recent", { headers: { Accept: "application/json" } });
+            if (!r.ok) throw new Error("HTTP " + r.status);
+            var rows = await r.json();
+            dot.style.display = rows.some(function (b) { return b.status === "running"; }) ? "" : "none";
+            if (!open) return;
+            panel.innerHTML = rows.length ? rows.map(function (b) {
+              return '<a class="ops-item" href="/data/' + encodeURIComponent(b.source) + '">' +
+                '<span class="ops-status ' + esc(b.status) + '">' + esc(statusLabel(b.status)) + "</span>" +
+                '<span class="ops-name">' + esc(b.source_name || b.source) + '</span>' +
+                '<span class="ops-id">#' + esc(b.batch_id) + "</span></a>";
+            }).join("") : '<div class="empty">暂无运行记录</div>';
+          } catch (e) { if (open) panel.innerHTML = '<div class="empty err">' + esc(e.message) + "</div>"; }
+        }
+        btn.addEventListener("click", function () {
+          var open = panel.style.display === "none";
+          panel.style.display = open ? "" : "none";
+          btn.setAttribute("aria-expanded", String(open));
+          if (open) { pull(true); timer = setInterval(function () { pull(true); }, 5000); }
+          else if (timer) { clearInterval(timer); timer = null; }
+        });
+        document.addEventListener("click", function (ev) {
+          if (panel.style.display !== "none" && !ev.target.closest(".ops-center")) {
+            panel.style.display = "none"; btn.setAttribute("aria-expanded", "false");
+            if (timer) { clearInterval(timer); timer = null; }
+          }
+        });
+        pull(false);  // 首屏只更新亮点
+      })();
+    </script>
     <script>
       /* 皮肤切换：写 <html data-skin> + 记忆 localStorage（前端即时生效，无需后端） */
       (function () {

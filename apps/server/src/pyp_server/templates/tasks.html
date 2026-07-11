@@ -6,12 +6,16 @@
     <h2>任务管理</h2>
     <p>采集任务及其触发方式、定时计划与最近一次批次状态。</p>
   </div>
-  <div class="actions"><a class="btn" href="/sources/new">＋ 新建数据源</a></div>
+  <div class="actions">
+    <input id="q" type="text" placeholder="按数据源名搜索…" maxlength="64" style="width:200px" />
+    <button class="btn ghost" id="q-btn" type="button">搜索</button>
+    <a class="btn" href="/sources/new">＋ 新建数据源</a>
+  </div>
 </div>
 <div class="card" id="box"><div class="empty">加载中…</div></div>
 <script src="/static/views.js"></script>
 <script>
-  PypViews.loadTable(document.getElementById("box"), "/api/views/tasks", [
+  const COLS = [
     { key: "id", label: "任务", type: "mono" },
     { key: "source_name", label: "数据源" },
     { key: "source_uuid", label: "短码", type: "mono" },
@@ -21,6 +25,15 @@
     { key: "next_run", label: "下次运行", type: "time" },
     { key: "last_status", label: "最近批次", type: "badge" },
     { key: "created_at", label: "创建时间", type: "time" },
-  ]);
+  ];
+  // 服务端搜索：q 拼进 fetch URL（按源名 ILIKE），按钮或回车触发
+  function load() {
+    const q = document.getElementById("q").value.trim();
+    const url = "/api/views/tasks" + (q ? `?q=${encodeURIComponent(q)}` : "");
+    PypViews.loadTable(document.getElementById("box"), url, COLS);
+  }
+  document.getElementById("q-btn").addEventListener("click", load);
+  document.getElementById("q").addEventListener("keydown", (e) => { if (e.key === "Enter") load(); });
+  load();
 </script>
 {% endblock %}

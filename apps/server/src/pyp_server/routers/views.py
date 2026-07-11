@@ -31,8 +31,8 @@ async def view_join_info(request: Request) -> dict:
 
 
 @router.get("/tasks", summary="任务清单", dependencies=[Depends(require_perm("tasks.read"))])
-async def view_tasks(limit: int = Query(100, ge=1, le=500)) -> list[dict]:
-    return await views.list_tasks(get_engine("pyp"), limit=limit)
+async def view_tasks(limit: int = Query(100, ge=1, le=500), q: str | None = Query(None, max_length=64)) -> list[dict]:
+    return await views.list_tasks(get_engine("pyp"), limit=limit, q=q)
 
 
 @router.get("/audit", summary="审计日志", dependencies=[Depends(require_perm("audit.read"))])
@@ -64,8 +64,8 @@ async def view_rules(limit: int = Query(200, ge=1, le=500)) -> list[dict]:
 
 
 @router.get("/users", summary="用户清单", dependencies=[Depends(require_perm("users.manage"))])
-async def view_users(limit: int = Query(200, ge=1, le=500)) -> list[dict]:
-    return await views.list_users(get_engine("pyp"), limit=limit)
+async def view_users(limit: int = Query(200, ge=1, le=500), q: str | None = Query(None, max_length=64)) -> list[dict]:
+    return await views.list_users(get_engine("pyp"), limit=limit, q=q)
 
 
 @router.get("/roles", summary="角色清单", dependencies=[Depends(require_perm("roles.manage"))])

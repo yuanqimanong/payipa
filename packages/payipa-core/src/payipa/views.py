@@ -32,8 +32,8 @@ def _iso(dt) -> str | None:
     return dt.isoformat(timespec="seconds") if dt else None
 
 
-async def list_tasks(engine: AsyncEngine, *, limit: int = 100) -> list[dict]:
-    """任务清单：join 数据源 + 调度（cron/next_run）+ 最近批次状态。"""
+async def list_tasks(engine: AsyncEngine, *, limit: int = 100, q: str | None = None) -> list[dict]:
+    """任务清单：join 数据源 + 调度（cron/next_run）+ 最近批次状态。q 按源名模糊筛选。"""
     latest_batch = select(Batch.task_id, func.max(Batch.id).label("bid")).group_by(Batch.task_id).subquery()
     stmt = (
         select(
@@ -56,6 +56,8 @@ async def list_tasks(engine: AsyncEngine, *, limit: int = 100) -> list[dict]:
         .order_by(Task.id.desc())
         .limit(limit)
     )
+    if q:
+        stmt = stmt.where(Source.name.ilike(f"%{q}%"))
     async with engine.connect() as conn:
         rows = (await conn.execute(stmt)).all()
     return [
@@ -221,8 +223,8 @@ async def list_rules(engine: AsyncEngine, *, limit: int = 200) -> list[dict]:
     ]
 
 
-async def list_users(engine: AsyncEngine, *, limit: int = 200) -> list[dict]:
-    """用户清单：状态 + 显示名 + 所属角色名列表（不回密码 hash）。"""
+async def list_users(engine: AsyncEngine, *, limit: int = 200, q: str | None = None) -> list[dict]:
+    """用户清单：状态 + 显示名 + 所属角色名列表（不回密码 hash）。q 按用户名/显示名模糊筛选。"""
     role_agg = (
         select(UserRole.user_id, func.array_agg(Role.name).label("roles"))
         .join(Role, UserRole.role_id == Role.id)
@@ -242,6 +244,9 @@ async def list_users(engine: AsyncEngine, *, limit: int = 200) -> list[dict]:
         .order_by(User.id)
         .limit(limit)
     )
+    if q:
+        like = f"%{q}%"
+        stmt = stmt.where(User.username.ilike(like) | User.display_name.ilike(like))
     async with engine.connect() as conn:
         rows = (await conn.execute(stmt)).all()
     return [

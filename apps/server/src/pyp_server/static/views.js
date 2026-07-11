@@ -74,5 +74,46 @@
     }
   }
 
-  window.PypViews = { renderTable, renderStats, fetchJSON, loadTable, cell, esc };
+  /* 统一反馈（路线图 §10.6，挂点在 base.html）：toast 轻提示，替代 alert。
+     kind="ok"|"err"|省略；err 停 8s，其余 4s；容器不存在（独立页面如 login）退化为 console。 */
+  function toast(msg, kind) {
+    const box = document.getElementById("toast-box");
+    if (!box) { (kind === "err" ? console.error : console.log)(msg); return; }
+    const el = document.createElement("div");
+    el.className = "toast" + (kind ? ` ${kind}` : "");
+    el.textContent = msg;
+    box.appendChild(el);
+    setTimeout(() => {
+      el.style.transition = "opacity .3s";
+      el.style.opacity = "0";
+      setTimeout(() => el.remove(), 300);
+    }, kind === "err" ? 8000 : 4000);
+  }
+
+  /* 确认对话框，替代 confirm：返回 Promise<boolean>（确定 true / 取消或 Esc false）。
+     对话框挂点不存在时退化为原生 confirm。 */
+  function ask(msg) {
+    const dlg = document.getElementById("confirm-dlg");
+    if (!dlg || typeof dlg.showModal !== "function") return Promise.resolve(window.confirm(msg));
+    document.getElementById("confirm-msg").textContent = msg;
+    return new Promise((resolve) => {
+      let ok = false;
+      const yes = document.getElementById("confirm-yes");
+      const no = document.getElementById("confirm-no");
+      const onYes = () => { ok = true; dlg.close(); };
+      const onNo = () => dlg.close();
+      const onClose = () => {  // Esc 触发 cancel→close，同样走这里（ok 仍为 false）
+        yes.removeEventListener("click", onYes);
+        no.removeEventListener("click", onNo);
+        dlg.removeEventListener("close", onClose);
+        resolve(ok);
+      };
+      yes.addEventListener("click", onYes);
+      no.addEventListener("click", onNo);
+      dlg.addEventListener("close", onClose);
+      dlg.showModal();
+    });
+  }
+
+  window.PypViews = { renderTable, renderStats, fetchJSON, loadTable, cell, esc, toast, ask };
 })();

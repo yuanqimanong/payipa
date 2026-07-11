@@ -6,7 +6,11 @@
     <h2>用户管理</h2>
     <p>平台账号及其角色（停用不删除）。新建账号由管理员开通，无自助注册。</p>
   </div>
-  <div class="actions"><button class="btn" id="new-user" type="button">＋ 新建用户</button></div>
+  <div class="actions">
+    <input id="q" type="text" placeholder="按用户名/显示名搜索…" maxlength="64" style="width:200px" />
+    <button class="btn ghost" id="q-btn" type="button">搜索</button>
+    <button class="btn" id="new-user" type="button">＋ 新建用户</button>
+  </div>
 </div>
 
 <div class="card card-pad" id="create-panel" hidden style="margin-bottom:16px; max-width:520px">
@@ -65,7 +69,9 @@
     try {
       // 角色清单（roles.manage 才可读；无权限则不显示授予下拉，静默降级）
       allRoles = await PypViews.fetchJSON("/api/views/roles").then((rs) => rs.map((r) => r.name)).catch(() => []);
-      const users = await PypViews.fetchJSON("/api/views/users");
+      // 服务端搜索：q 拼进 fetch URL（用户名/显示名 ILIKE）
+      const q = document.getElementById("q").value.trim();
+      const users = await PypViews.fetchJSON("/api/views/users" + (q ? `?q=${encodeURIComponent(q)}` : ""));
       const head = "<tr>" + COLS.map((c) => `<th>${c.label}</th>`).join("") +
         "<th>角色</th><th style='text-align:right'>操作</th></tr>";
       const rows = users.length
@@ -94,21 +100,21 @@
       });
       if (!resp.ok) throw new Error((await resp.json().catch(() => ({}))).detail || `HTTP ${resp.status}`);
       await load();
-    } catch (e) { alert(`角色操作失败：${e.message}`); }
+    } catch (e) { PypViews.toast(`角色操作失败：${e.message}`, "err"); }
   }
 
   async function resetPassword(id, name) {
     const pw = prompt(`为用户 ${name} 设置新密码（≥8 位）：`);
     if (pw == null) return;  // 取消
-    if (pw.length < 8) { alert("密码至少 8 位"); return; }
+    if (pw.length < 8) { PypViews.toast("密码至少 8 位", "err"); return; }
     try {
       const resp = await fetch(`/api/users/${id}/password`, {
         method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json" },
         body: JSON.stringify({ password: pw }),
       });
       if (!resp.ok) throw new Error((await resp.json().catch(() => ({}))).detail || `HTTP ${resp.status}`);
-      alert(`已重置 ${name} 的密码`);
-    } catch (e) { alert(`重置失败：${e.message}`); }
+      PypViews.toast(`已重置 ${name} 的密码`, "ok");
+    } catch (e) { PypViews.toast(`重置失败：${e.message}`, "err"); }
   }
 
   async function setStatus(id, status, btn) {
@@ -120,7 +126,7 @@
       });
       if (!resp.ok) throw new Error((await resp.json().catch(() => ({}))).detail || `HTTP ${resp.status}`);
       await load();
-    } catch (e) { alert(`操作失败：${e.message}`); btn.disabled = false; }
+    } catch (e) { PypViews.toast(`操作失败：${e.message}`, "err"); btn.disabled = false; }
   }
 
   // 新建用户面板
@@ -150,6 +156,8 @@
     } catch (e) { err.textContent = e.message; err.hidden = false; }
   });
 
+  document.getElementById("q-btn").addEventListener("click", load);
+  document.getElementById("q").addEventListener("keydown", (e) => { if (e.key === "Enter") load(); });
   load();
 </script>
 {% endblock %}

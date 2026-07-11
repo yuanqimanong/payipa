@@ -5,8 +5,13 @@
 <div class="page-head">
   <div class="titles">
     <h2>数据源</h2>
-    <p>已配置的采集数据源；点「查看数据」浏览其产出。</p>
+    <p>已配置的采集数据源；点名称进详情，点「查看数据」浏览其产出。</p>
   </div>
+  {# 服务端搜索：GET 提交回本页（无 JS），名称/短码模糊匹配 #}
+  <form class="actions" method="get" action="/sources">
+    <input name="q" value="{{ q or '' }}" placeholder="搜索名称或短码…" maxlength="64" style="width:220px" />
+    <button class="btn ghost" type="submit">搜索</button>
+  </form>
 </div>
 <div class="card">
   <div class="table-wrap">
@@ -17,7 +22,7 @@
       <tbody>
         {% for s in sources %}
         <tr>
-          <td><b>{{ s.name }}</b></td>
+          <td><a href="/sources/{{ s.uuid }}" title="查看详情"><b>{{ s.name }}</b></a></td>
           <td><code>{{ s.uuid }}</code></td>
           <td><span class="badge {{ s.access_class }}"><span class="dot"></span>{{ s.access_status }}</span></td>
           <td class="muted">{{ s.created_at }}</td>
@@ -28,12 +33,13 @@
           </td>
         </tr>
         {% else %}
-        <tr><td colspan="5"><div class="empty">还没有数据源，点右上角「新建数据源」创建并采集。</div></td></tr>
+        <tr><td colspan="5"><div class="empty">{% if q %}没有匹配「{{ q }}」的数据源。{% else %}还没有数据源，点右上角「新建数据源」创建并采集。{% endif %}</div></td></tr>
         {% endfor %}
       </tbody>
     </table>
   </div>
 </div>
+<script src="/static/views.js"></script>
 <script>
   // 一键重跑：POST /api/sources/{uuid}/rerun（会话 cookie SameSite=Lax 防跨站；RBAC sources.run 门控）
   document.querySelectorAll("button.rerun").forEach((btn) => {
@@ -52,11 +58,11 @@
           setTimeout(() => { btn.textContent = label; btn.disabled = false; }, 2500);
         } else {
           const detail = (await resp.json().catch(() => ({}))).detail || `HTTP ${resp.status}`;
-          alert(`重跑失败：${detail}`);
+          PypViews.toast(`重跑失败：${detail}`, "err");
           btn.textContent = label; btn.disabled = false;
         }
       } catch (e) {
-        alert(`重跑失败：${e.message}`);
+        PypViews.toast(`重跑失败：${e.message}`, "err");
         btn.textContent = label; btn.disabled = false;
       }
     });

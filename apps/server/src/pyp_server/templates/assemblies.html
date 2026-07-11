@@ -46,7 +46,7 @@
       box.querySelectorAll("button.asm-status").forEach((b) =>
         b.addEventListener("click", () => post(`/api/assemblies/${b.dataset.id}/status`, { status: b.dataset.to }, b)));
       box.querySelectorAll("button.asm-publish").forEach((b) =>
-        b.addEventListener("click", () => { if (confirm("发布后将签名并置为 active，确认？")) post(`/api/assemblies/${b.dataset.id}/publish`, null, b); }));
+        b.addEventListener("click", async () => { if (!(await PypViews.ask("发布后将签名并置为 active，确认？"))) return; post(`/api/assemblies/${b.dataset.id}/publish`, null, b); }));
     } catch (e) {
       box.innerHTML = `<div class="empty err">${PypViews.esc(e.message)}</div>`;
     }
@@ -62,7 +62,7 @@
       });
       if (!resp.ok) throw new Error((await resp.json().catch(() => ({}))).detail || `HTTP ${resp.status}`);
       await load();
-    } catch (e) { alert(`操作失败：${e.message}`); btn.disabled = false; }
+    } catch (e) { PypViews.toast(`操作失败：${e.message}`, "err"); btn.disabled = false; }
   }
 
   load();
