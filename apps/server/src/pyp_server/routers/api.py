@@ -279,6 +279,63 @@ async def enqueue_push_api(component_id: int, body: PushEnqueueRequest) -> PushE
     return PushEnqueueResponse(enqueued=n)
 
 
+class ComponentCreateRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=128, description="组件名（唯一，按内容去重/版本）")
+    code: str = Field(..., min_length=1, description="组件源码（固定方法 push(ctx)；隔离子进程执行）")
+    allow_domains: list[str] = Field(default_factory=list, description="出网目标域白名单（越界即拒，不发出）")
+    target_creds: dict | None = Field(None, description="下游凭证（KEK 加密存储，明文不落库）")
+
+
+class ComponentStatusRequest(BaseModel):
+    status: Literal["draft", "testing"] = Field(..., description="draft/testing；发布(active)用 publish 端点")
+
+
+@router.post(
+    "/push/components",
+    summary="登记推送组件（内容寻址 + 版本；新内容 draft）",
+    dependencies=[Depends(require_perm("push.manage"))],
+)
+async def create_push_component(body: ComponentCreateRequest) -> dict:
+    from payipa.deliver.component import PushComponentStore
+    from payipa.security.secrets import encrypt_json
+
+    creds = encrypt_json(body.target_creds, kek=get_db_settings().cred_kek) if body.target_creds else None
+    cid, _hash, version = await PushComponentStore(get_engine("pyp")).put(
+        name=body.name, code=body.code, allow_domains=body.allow_domains, target_creds=creds
+    )
+    return {"id": cid, "version": version}
+
+
+@router.post(
+    "/push/components/{component_id}/publish",
+    summary="发布推送组件（status=active + HMAC 签名门，红线7）",
+    dependencies=[Depends(require_perm("push.manage"))],
+)
+async def publish_push_component(component_id: int) -> dict:
+    from payipa.deliver.component import PushComponentStore
+
+    store = PushComponentStore(get_engine("pyp"))
+    if await store.get(component_id) is None:
+        raise HTTPException(status_code=404, detail=f"推送组件 id={component_id} 不存在")
+    sig = await store.publish(component_id, get_db_settings().upload_secret)
+    return {"id": component_id, "status": "active", "signed": bool(sig)}
+
+
+@router.post(
+    "/push/components/{component_id}/status",
+    summary="推送组件状态流转（draft/testing；发布用 publish）",
+    dependencies=[Depends(require_perm("push.manage"))],
+)
+async def set_push_component_status(component_id: int, body: ComponentStatusRequest) -> dict:
+    from payipa.deliver.component import PushComponentStore
+
+    store = PushComponentStore(get_engine("pyp"))
+    if await store.get(component_id) is None:
+        raise HTTPException(status_code=404, detail=f"推送组件 id={component_id} 不存在")
+    await store.set_status(component_id, body.status)
+    return {"id": component_id, "status": body.status}
+
+
 @router.post(
     "/notify/{bot_id}/test",
     summary="给通知机器人发一条测试通知",
