@@ -10,7 +10,7 @@ PG 为权威、内存 hub 仅运行态视图：每 interval 秒 (1) 回收到期
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 import anyio
@@ -70,8 +70,8 @@ async def drain_once(hub: AgentHub, pyp: AsyncEngine, secret: str, ack_s: int, l
             if not limiter.take(spec.source, rates.get(spec.source, 0)):
                 continue  # 该源本 tick 令牌用尽 → 留排队，下一 tick 再派（每源限流）
             req_id = int(spec.req_id)
-            lease_until = datetime.now(UTC) + timedelta(seconds=ack_s)  # ACK 短租；确认后展成执行租约
-            if await mark_assigned(pyp, req_id, conn.agent_id, lease_until, attempt=spec.attempt) != 1:
+            # ACK 短租（DB 时钟）；agent 确认后展成执行租约
+            if await mark_assigned(pyp, req_id, conn.agent_id, attempt=spec.attempt, lease_s=ack_s) != 1:
                 continue  # 未抢到（状态已变/代次已推进）——试下一条
             token = issue_upload_token(secret, spec.source, int(spec.batch_id))
             try:

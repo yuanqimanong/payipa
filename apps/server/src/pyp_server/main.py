@@ -7,6 +7,7 @@ M0 空壳：健康检查 + 契约 stub API + agent WS 握手 + OpenAPI（/openap
 from __future__ import annotations
 
 import logging
+import signal
 import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -33,6 +34,8 @@ from pyp_server.routers import (
     health,
     internal,
     manage,
+    onboard,
+    setup,
     sources,
     studio,
     ui,
@@ -48,10 +51,11 @@ logger = logging.getLogger("pyp_server.main")
 
 
 async def _guarded_loops(app: FastAPI, tg: anyio.abc.TaskGroup) -> None:
-    """先拿单实例锁（P0-09）再启动后台环：同库第二个进程/worker 拒绝启动后台环。
+    """先拿单实例锁（P0-09）再启动后台环：同库第二个进程/worker 拒绝启动。
 
     PG 未起：退避重试（保持「无 DB 也能启动」，readyz 期间报后台环未就绪）；
-    锁被他人持有：短暂等待（容忍滚动重启交接）后抛错拒绝启动本进程。
+    锁被他人持有：短暂等待（容忍滚动重启交接）后**主动触发优雅关停**——
+    task group 里抛异常会被困到 lifespan 关停才浮出（进程照常服务），发 SIGINT 才是真拒绝。
     """
     settings = get_server_settings()
     engine = get_engine("pyp")
@@ -68,11 +72,11 @@ async def _guarded_loops(app: FastAPI, tg: anyio.abc.TaskGroup) -> None:
             if held_since is None:
                 held_since = time.monotonic()
             elif time.monotonic() - held_since > 15:
-                raise RuntimeError(
-                    "另一进程已持有 payipa 单实例锁——v1 只支持单主控实例、单 uvicorn worker（workers=1）"
+                logger.critical(
+                    "另一进程已持有 payipa 单实例锁——v1 只支持单主控实例、单 uvicorn worker（workers=1）；本进程退出"
                 )
-        except RuntimeError:
-            raise
+                signal.raise_signal(signal.SIGINT)  # 交给 uvicorn 优雅关停（P0-09 启动即拒绝）
+                return
         except Exception:  # noqa: BLE001 —— PG 未起/抖动：退避重试
             if conn is not None:
                 await conn.aclose()
@@ -131,6 +135,8 @@ def create_app() -> FastAPI:
     app.state.limiter = SourceRateLimiter()  # 每源令牌桶 + AIMD（派发环限流、结果回报调频）
     app.include_router(health.router)
     app.include_router(auth_routes.router)
+    app.include_router(setup.router)
+    app.include_router(onboard.router)
     app.include_router(ui.router)
     app.include_router(sources.router)
     app.include_router(api.router)

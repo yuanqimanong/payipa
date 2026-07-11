@@ -22,7 +22,7 @@ from payipa_contracts import (
     RulePointer,
     TaskSpec,
 )
-from sqlalchemy import Table, case, func, or_, select, tuple_, update
+from sqlalchemy import Table, case, func, or_, select, text, tuple_, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
@@ -375,28 +375,40 @@ async def handle_result(
 
 
 async def set_request_state(
-    engine_pyp: AsyncEngine, req_id: int, state: int, *, agent_id: str | None = None, attempt: int | None = None
+    engine_pyp: AsyncEngine,
+    req_id: int,
+    state: int,
+    *,
+    agent_id: str | None = None,
+    attempt: int | None = None,
+    reason_code: str | None = None,
+    message: str | None = None,
 ) -> int:
     """置请求状态（正=正常态、负=错误码）。失败/取消回报走此。终态一律释放租约。
 
-    传 agent_id/attempt 时按 fencing 守卫（P0-10）：归属或代次不符的迟到回报不改状态。返回受影响行数。
+    fencing（P0-10）：只有未终结（QUEUED/ASSIGNED/RUNNING）的请求可被置态——成功/取消/失败后的
+    迟到回报一律不覆盖；传 agent_id/attempt 时归属与代次也须吻合。返回受影响行数。
     """
-    conds = [Request.id == req_id]
+    conds = [
+        Request.id == req_id,
+        Request.state.in_((int(RequestState.QUEUED), int(RequestState.ASSIGNED), int(RequestState.RUNNING))),
+    ]
     if agent_id is not None:
         conds.append(Request.agent_id == agent_id)
     if attempt is not None:
         conds.append(Request.attempt == attempt)
+    values: dict = {
+        "state": state,
+        "error_code": state if state < 0 else None,
+        "lease_until": None,
+        "not_before": None,
+    }
+    if reason_code is not None:
+        values["reason_code"] = reason_code[:64]
+    if message is not None:
+        values["error_detail"] = message[:1000]
     async with engine_pyp.begin() as conn:
-        res = await conn.execute(
-            update(Request.__table__)
-            .where(*conds)
-            .values(
-                state=state,
-                error_code=state if state < 0 else None,
-                lease_until=None,
-                not_before=None,
-            )
-        )
+        res = await conn.execute(update(Request.__table__).where(*conds).values(**values))
     return res.rowcount
 
 
@@ -932,13 +944,25 @@ async def claim_queued_for_dispatch(
     return specs
 
 
+def _db_lease(lease_s: int):
+    """租约到期时间用**数据库时钟**算（now()+interval）：写入与回收同源，应用侧时钟漂移不影响租约。"""
+    return func.now() + text(f"interval '{int(lease_s)} seconds'")
+
+
 async def mark_assigned(
-    engine_pyp: AsyncEngine, req_id: int, agent_id: str, lease_until: datetime, *, attempt: int | None = None
+    engine_pyp: AsyncEngine,
+    req_id: int,
+    agent_id: str,
+    lease_until: datetime | None = None,
+    *,
+    attempt: int | None = None,
+    lease_s: int | None = None,
 ) -> int:
-    """乐观占用：仅当仍为 QUEUED 才置 ASSIGNED 并写 agent_id/lease_until。返回受影响行数（1=占用成功）。
+    """乐观占用：仅当仍为 QUEUED 才置 ASSIGNED 并写 agent_id/租约。返回受影响行数（1=占用成功）。
 
     调用方必须先检查返回 1 再下发 TaskAssign，否则可能重复派发同一请求。
     传 attempt 时代次也须吻合（P0-10：claim 到 CAS 之间被重试推进的请求会干净地抢占失败）。
+    租约优先用 lease_s（DB 时钟，推荐）；lease_until 为兼容旧调用方的应用侧时刻。
     """
     conds = [
         Request.id == req_id,
@@ -948,11 +972,12 @@ async def mark_assigned(
     ]
     if attempt is not None:
         conds.append(Request.attempt == attempt)
+    lease = _db_lease(lease_s) if lease_s is not None else lease_until
     async with engine_pyp.begin() as conn:
         res = await conn.execute(
             update(Request.__table__)
             .where(*conds)
-            .values(state=int(RequestState.ASSIGNED), agent_id=agent_id, lease_until=lease_until)
+            .values(state=int(RequestState.ASSIGNED), agent_id=agent_id, lease_until=lease)
         )
     return res.rowcount
 
@@ -971,10 +996,7 @@ async def mark_running(engine_pyp: AsyncEngine, req_id: int, agent_id: str, atte
                 Request.agent_id == agent_id,
                 Request.attempt == attempt,
             )
-            .values(
-                state=int(RequestState.RUNNING),
-                lease_until=datetime.now(UTC) + timedelta(seconds=lease_s),
-            )
+            .values(state=int(RequestState.RUNNING), lease_until=_db_lease(lease_s))
         )
     return res.rowcount
 
@@ -1113,6 +1135,7 @@ async def enqueue_discovered(engine_pyp: AsyncEngine, parent_req_id: int, urls: 
                     Request.rule_id,
                     Request.rule_hash,
                     Request.rule_version,
+                    Batch.status,
                     Source.access_confirmed_at,
                     Source.paused_at,
                 )
@@ -1125,7 +1148,9 @@ async def enqueue_discovered(engine_pyp: AsyncEngine, parent_req_id: int, urls: 
         ).first()
         if parent is None:
             return 0
-        batch_id, parent_depth, rule_id, rule_hash, rule_version, confirmed_at, paused_at = parent
+        batch_id, parent_depth, rule_id, rule_hash, rule_version, batch_status, confirmed_at, paused_at = parent
+        if batch_status != "running":
+            return 0  # 批次已取消/收尾：续爬子请求不得再入队（否则 canceling 批次永远收不了口）
         if confirmed_at is None or paused_at is not None:
             return 0
         child_depth = (parent_depth or 0) + 1

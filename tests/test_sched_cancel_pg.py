@@ -85,6 +85,8 @@ def test_priority_cancel_schedule(require_pg: None) -> None:
             assert status == "canceling"
             # sweep 此刻不收口（还有在途）
             assert await run.sweep_canceling_batches(pyp) == 0
+            # canceling 批次不再接受续爬子请求入队（否则批次永远收不了口）
+            assert await run.enqueue_discovered(pyp, inflight_seed, ["https://x.com/late-child"]) == 0
             # agent 回报 CANCELED（模拟）→ sweep 收口为 canceled
             await run.set_request_state(pyp, inflight_seed, int(c.RequestState.CANCELED))
             assert await run.sweep_canceling_batches(pyp) >= 1

@@ -68,29 +68,46 @@ def browser_available() -> bool:
     return True
 
 
+_MAX_REDIRECTS = 5
+
+
 async def _fetch_http(url: str, timeout: float, headers: dict[str, str] | None, max_bytes: int) -> FetchResult:
+    """手工跟随重定向：库内部跟随会为复用连接**整段读完**中间 3xx 的响应体，
+    敌意超大 3xx 可绕过字节上限拖爆内存——这里每一跳都不读体、直接断开换下一跳。"""
+    from urllib.parse import urljoin
+
     try:
         async with niquests.AsyncSession() as session:
-            resp = await session.get(url, timeout=timeout, headers=headers or {}, stream=True)
-            declared = resp.headers.get("content-length") or ""
-            if declared.isdigit() and int(declared) > max_bytes:  # 头先拒：一个字节都不读
-                await resp.close()
-                raise FetchTooLarge(f"response Content-Length exceeds {max_bytes} bytes cap")
-            chunks: list[bytes] = []
-            total = 0
-            async for chunk in await resp.iter_content(_HTTP_CHUNK):  # 流式累积，防 Content-Length 缺失/说谎
-                total += len(chunk)
-                if total > max_bytes:
-                    await resp.close()  # 超限立即断开，不再继续读
-                    raise FetchTooLarge(f"response body exceeds {max_bytes} bytes cap")
-                chunks.append(chunk)
-            return FetchResult(
-                status=resp.status_code or 0,
-                url=str(resp.url),
-                body=b"".join(chunks),
-                content_type=resp.headers.get("content-type"),
-                headers={str(k).lower(): str(v) for k, v in resp.headers.items()},
-            )
+            cur = url
+            for _hop in range(_MAX_REDIRECTS + 1):
+                resp = await session.get(
+                    cur, timeout=timeout, headers=headers or {}, stream=True, allow_redirects=False
+                )
+                location = resp.headers.get("location")
+                if 300 <= (resp.status_code or 0) < 400 and location:
+                    await resp.close()  # 重定向体一个字节都不读
+                    cur = urljoin(cur, location)
+                    continue
+                declared = resp.headers.get("content-length") or ""
+                if declared.isdigit() and int(declared) > max_bytes:  # 头先拒：一个字节都不读
+                    await resp.close()
+                    raise FetchTooLarge(f"response Content-Length exceeds {max_bytes} bytes cap")
+                chunks: list[bytes] = []
+                total = 0
+                async for chunk in await resp.iter_content(_HTTP_CHUNK):  # 流式累积，防 Content-Length 缺失/说谎
+                    total += len(chunk)
+                    if total > max_bytes:
+                        await resp.close()  # 超限立即断开，不再继续读
+                        raise FetchTooLarge(f"response body exceeds {max_bytes} bytes cap")
+                    chunks.append(chunk)
+                return FetchResult(
+                    status=resp.status_code or 0,
+                    url=cur,
+                    body=b"".join(chunks),
+                    content_type=resp.headers.get("content-type"),
+                    headers={str(k).lower(): str(v) for k, v in resp.headers.items()},
+                )
+            raise FetchNetworkError(f"too many redirects (> {_MAX_REDIRECTS})")
     except niquests.exceptions.Timeout as exc:
         raise FetchTimeout(f"HTTP request timed out after {timeout:g}s") from exc
     except niquests.exceptions.RequestException as exc:

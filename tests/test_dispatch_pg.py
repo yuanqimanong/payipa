@@ -227,8 +227,10 @@ def test_ack_and_attempt_fencing(require_pg: None) -> None:
             # 正主正确回报 → 生效
             assert await run.set_request_state(pyp, rid, int(c.RequestState.CANCELED), agent_id="agA", attempt=0) == 1
             assert (await _req(pyp, rid)).state == int(c.RequestState.CANCELED)
-            # 终态后一切回报都是 stale
+            # 终态后一切回报都是 stale——即使归属与代次全对也不得覆盖终态
             assert await run.fence_ok(pyp, rid, "agA", 0) is False
+            assert await run.set_request_state(pyp, rid, int(c.ErrorCode.SOFT_FAIL), agent_id="agA", attempt=0) == 0
+            assert (await _req(pyp, rid)).state == int(c.RequestState.CANCELED)
         finally:
             async with pyp.begin() as conn:
                 for sql in (

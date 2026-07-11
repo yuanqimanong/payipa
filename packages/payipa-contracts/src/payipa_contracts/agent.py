@@ -60,7 +60,7 @@ class StatusReport(BaseModel):
     req_id: str = active("请求任务 id")
     state: int = active("状态：正数=正常态、负数=错误码", since="M1")
     attempt: int | None = active(
-        "执行代次（fencing：回显 TaskSpec.attempt；空=旧版 agent，主控只按 agent 归属校验）",
+        "执行代次（fencing：回显 TaskSpec.attempt；空=帧未携带代次，主控退化为只按 agent 归属校验）",
         default=None,
         ge=0,
         since="M7",
@@ -84,7 +84,7 @@ class ErrorFrame(BaseModel):
     message: str = active("错误描述")
     req_id: str | None = active("关联请求任务 id（若有）", default=None)
     attempt: int | None = active(
-        "执行代次（fencing：回显 TaskSpec.attempt；空=旧版 agent）", default=None, ge=0, since="M7"
+        "执行代次（fencing：回显 TaskSpec.attempt；空=帧未携带代次）", default=None, ge=0, since="M7"
     )
 
 

@@ -49,7 +49,8 @@ class ServerSettings(BaseSettings):
     dispatch_enabled: bool = True  # 后台派发环开关（测试关闭，避免与用例抢 QUEUED 请求）
     dispatch_interval_s: float = 1.0  # 派发/回收扫描间隔（秒）
     task_lease_s: int = 1800  # 执行租约（秒）：agent ACK 后展成此值；在途无终结超此即视为失联回收
-    ack_timeout_s: int = 30  # ACK 短租（秒）：下发后 agent 未确认即被 reaper 快速回收重派（P0-10）
+    ack_timeout_s: int = 60  # ACK 短租（秒）：下发后 agent 未确认即被 reaper 快速回收重派（P0-10）。
+    # 取 60 而非 30：结果帧与 ack 在同一 WS 上串行处理，重负载下 ack 可能排队，过短会误回收健康节点的任务。
     max_attempt: int = 3  # 请求最大尝试次数（含首次）；超过定格 NODE_LOST(-6)
 
     # ── M4 推送 Consumer（outbox 排空环）──────────────────────────────────

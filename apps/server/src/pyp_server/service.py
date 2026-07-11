@@ -5,6 +5,7 @@ from __future__ import annotations
 from payipa.crawl.rules import RuleStore
 from payipa.crawl.run import create_batch_with_requests, ensure_data_table, setup_source
 from payipa.db.engine import get_engine
+from payipa.db.ident import check_code, check_field
 from payipa_contracts import Channel, EngineHint, RulePack
 
 
@@ -30,6 +31,11 @@ async def dispatch_source_run(
     返回 {batch_id, requests, dispatched}；``dispatched`` 恒为 0——派发不再在此同步发生，
     避免「空闲槽不够就丢请求」的一次性派发缺陷（M1 遗留）。
     """
+    # 全部标识符**先**校验再动库：短码/索引字段名非法时一行都不写，不留半成品源（P0-13/DB-007）
+    check_code(uuid)
+    fields_indexed = indexed_fields or [f.name for f in rule.fields if f.index]
+    for f in fields_indexed:
+        check_field(f)
     pyp = get_engine("pyp")
     dc = get_engine("data_center")
     source_id, task_id = await setup_source(
@@ -47,7 +53,6 @@ async def dispatch_source_run(
         raw_archive=raw_archive,
     )
     ptr = await RuleStore(pyp).put(source_id, rule)
-    fields_indexed = indexed_fields or [f.name for f in rule.fields if f.index]
     await ensure_data_table(dc, uuid, fields_indexed)
     batch_id, specs = await create_batch_with_requests(
         pyp, task_id=task_id, source_uuid=uuid, targets=seed_urls, rule_ptr=ptr, channel=channel

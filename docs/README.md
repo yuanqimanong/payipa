@@ -17,6 +17,7 @@
 | M3 组装沙箱 | ✅ 已实现 | Query Gateway（红线2 唯一取数）+ job_token + 签名游标/配额 + 版本签名门 + 增量水位 + SchemaEvolver + **真 SandboxExecutor（Docker/WSL2 锁定容器 + 路径白名单 egress，含降级）+ 常驻 worker 池（预热复用/并发，批量吞吐）** |
 | M4 推送对外 · M5 智能增强 | ✅ 已实现 | 见 SDD §12 与决策记录（outbox/Dataset API/隔离子进程投递/通知；RBAC/monitor/AI Gateway/受控出口/Playwright/点选插件） |
 | M6 采集韧性 | ✅ 已实现 | Retry-After、请求延迟、源级冷却、错误分类、挑战暂停、引擎能力派发、运行态监控与沙箱结果加固 |
+| M7 产品化加固 | 🚧 进行中 | [13 号路线图](13-产品化发布审计与优化路线图.md) P0 批次：规则归属、原子领取、队列公平、任务 ACK + attempt fencing（契约 v4）、Agent 稳定身份/凭证重连、/livez /readyz /version、单实例锁、标识符校验、资源边界、updated_at + CHECK、CI 真三库 |
 
 > 契约字段的「已生效/未生效 + since_milestone」标注即反映各字段的实现里程碑（见 `payipa-contracts`）。
 

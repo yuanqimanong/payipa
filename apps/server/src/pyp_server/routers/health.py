@@ -78,7 +78,9 @@ def _check_loop(app, name: str, enabled: bool) -> str:
     if health is None:
         return "error: 循环未启动"
     if not health.fresh():
-        return f"error: 心跳过期（连续失败 {health.consecutive_fails}：{health.last_error or '无成功 tick'}）"
+        if health.last_ok_at is None:
+            return "error: 后台环未运行（未获单实例锁或数据库未就绪）"
+        return f"error: 心跳过期（连续失败 {health.consecutive_fails}：{health.last_error or '无错误记录'}）"
     return "ok"
 
 

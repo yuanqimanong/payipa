@@ -8,6 +8,7 @@ from __future__ import annotations
 import hmac
 import logging
 
+import anyio
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from payipa.crawl.ingest import build_data_table
 from payipa.crawl.run import (
@@ -53,12 +54,19 @@ from pyp_server.triggers import on_batch_finalized
 logger = logging.getLogger("pyp_server.ws")
 router = APIRouter()
 _client_frame = TypeAdapter(ClientFrame)
+_reg_locks: dict[str, anyio.Lock] = {}  # 同 agent_id 注册串行化：并发重连不得互相覆盖凭证/顶掉更新的连接
+
+
+def _reg_lock(agent_id: str) -> anyio.Lock:
+    return _reg_locks.setdefault(agent_id, anyio.Lock())
+
 
 _CLOSE_OK = 1000
 _CLOSE_PROTOCOL = 1002
 _CLOSE_UNSUPPORTED = 1003
-_CLOSE_POLICY = 1008  # 策略违规（join token / 节点凭证不符）
+_CLOSE_POLICY = 1008  # 策略违规（join token / 节点凭证不符）——agent 收到会作废本地凭证
 _CLOSE_INTERNAL = 1011  # 服务端内部错误（生产注册落库失败 fail closed）
+_CLOSE_RETRY = 1013  # 暂时不可用（认证查库失败等）——agent 保留凭证退避重连
 _CLOSE_SUPERSEDED = 4001  # 同 id 新连接顶替（自定义应用码）
 
 
@@ -161,8 +169,12 @@ async def agent_ws(ws: WebSocket) -> None:
     if bearer:
         try:
             bound_agent = await auth_node(get_engine("pyp"), hash_token(bearer))
-        except Exception:  # noqa: BLE001 —— DB 抖动时退回 join token 路径
-            logger.warning("auth_node lookup failed (DB down?); falling back to join token", exc_info=True)
+        except Exception:  # noqa: BLE001
+            # DB 抖动时**不可**退到 join token 比对——持有效凭证的 agent 会被 1008 误拒并
+            # 就此销毁本地凭证。回 1013（稍后重试），agent 保留凭证按退避重连。
+            logger.warning("auth_node lookup failed (DB down?); ask agent to retry", exc_info=True)
+            await ws.close(code=_CLOSE_RETRY, reason="credential lookup unavailable, retry later")
+            return
     if bound_agent is None and not hmac.compare_digest(bearer, settings.agent_join_token):
         await ws.close(code=_CLOSE_POLICY, reason="invalid join token")
         return
@@ -193,36 +205,37 @@ async def agent_ws(ws: WebSocket) -> None:
 
     reg_id = register.agent_id
     issue_new = bound_agent is None  # 仅首次入网签发；凭证重连不轮换（否则旧凭证被无谓作废）
-    token, token_hash = new_node_token() if issue_new else ("", None)  # 明文只此一次下发，库存 hash（红线9）
-    try:
-        weight, group_name = await register_agent(
-            get_engine("pyp"),
-            reg_id,
-            hostname=register.hostname,
-            slot_n=register.slot_n,
-            capabilities=register.capabilities.model_dump(),
-            node_token_hash=token_hash,
+    async with _reg_lock(reg_id):  # 同 id 并发注册串行化：签发→落库→入 hub 是一个原子段
+        token, token_hash = new_node_token() if issue_new else ("", None)  # 明文只此一次下发，库存 hash（红线9）
+        try:
+            weight, group_name = await register_agent(
+                get_engine("pyp"),
+                reg_id,
+                hostname=register.hostname,
+                slot_n=register.slot_n,
+                capabilities=register.capabilities.model_dump(),
+                node_token_hash=token_hash,
+            )
+        except Exception:  # noqa: BLE001
+            if settings.environment == "production":
+                # 生产 fail closed（P0-07）：落库失败即拒接，避免 UI/权重/分组/凭证与派发状态漂移
+                logger.error("register_agent %s failed in production; closing", reg_id, exc_info=True)
+                await ws.close(code=_CLOSE_INTERNAL, reason="registration unavailable")
+                return
+            # dev 容忍 PG 未起：内存 hub + 默认权重/分组，不阻断握手
+            logger.warning(
+                "register_agent %s failed (DB down?); registering in-memory with defaults", reg_id, exc_info=True
+            )
+            weight, group_name = 1, None
+        agent_id = reg_id
+        generation, superseded = hub.register(
+            agent_id,
+            ws,
+            register.slot_n,
+            weight=weight,
+            group_name=group_name,
+            engines=register.capabilities.engines,
         )
-    except Exception:  # noqa: BLE001
-        if settings.environment == "production":
-            # 生产 fail closed（P0-07）：落库失败即拒接，避免 UI/权重/分组/凭证与派发状态漂移
-            logger.error("register_agent %s failed in production; closing", reg_id, exc_info=True)
-            await ws.close(code=_CLOSE_INTERNAL, reason="registration unavailable")
-            return
-        # dev 容忍 PG 未起：内存 hub + 默认权重/分组，不阻断握手
-        logger.warning(
-            "register_agent %s failed (DB down?); registering in-memory with defaults", reg_id, exc_info=True
-        )
-        weight, group_name = 1, None
-    agent_id = reg_id
-    generation, superseded = hub.register(
-        agent_id,
-        ws,
-        register.slot_n,
-        weight=weight,
-        group_name=group_name,
-        engines=register.capabilities.engines,
-    )
     if superseded is not None:  # 同 id 重复连接：关旧留新（P0-08 连接代次）
         try:
             await superseded.ws.close(code=_CLOSE_SUPERSEDED, reason="superseded by newer connection")
@@ -254,39 +267,61 @@ async def agent_ws(ws: WebSocket) -> None:
                 except Exception:  # noqa: BLE001 —— DB 抖动不断连；租约 reaper 兜底
                     logger.warning("mark_running req %s failed", frame.req_id, exc_info=True)
             elif isinstance(frame, ResultReport):
-                await _ingest_result(frame.result, ws.app.state.limiter, agent_id)
+                try:  # 单帧处理失败（如存量脏短码在入库时抛 ValueError）不得断连殃及全部在途
+                    await _ingest_result(frame.result, ws.app.state.limiter, agent_id)
+                except Exception:  # noqa: BLE001 —— 记日志放行下一帧；该请求由租约 reaper 兜底
+                    logger.exception("ingest result for req %s failed", frame.result.req_id)
                 hub.on_finished(agent_id, frame.result.req_id)
             elif isinstance(frame, StatusReport) and (frame.state < 0 or frame.state == int(RequestState.CANCELED)):
-                if frame.state == int(ErrorCode.ACCESS_PAUSED):
-                    await _pause_source(
-                        int(frame.req_id),
-                        frame.message,
-                        hub,
-                        response_status=frame.response_status,
-                        reason_code=frame.reason_code,
-                    )
-                    terminal = True
-                elif frame.state in _RETRYABLE:
-                    terminal = not await _defer_retry(frame, ws.app.state.limiter, agent_id)
-                else:
-                    await set_request_state(
-                        get_engine("pyp"), int(frame.req_id), frame.state, agent_id=agent_id, attempt=frame.attempt
-                    )
-                    terminal = True
+                try:
+                    if frame.state == int(ErrorCode.ACCESS_PAUSED):
+                        await _pause_source(
+                            int(frame.req_id),
+                            frame.message,
+                            hub,
+                            response_status=frame.response_status,
+                            reason_code=frame.reason_code,
+                        )
+                        terminal = True
+                    elif frame.state in _RETRYABLE:
+                        terminal = not await _defer_retry(frame, ws.app.state.limiter, agent_id)
+                    else:
+                        await set_request_state(
+                            get_engine("pyp"),
+                            int(frame.req_id),
+                            frame.state,
+                            agent_id=agent_id,
+                            attempt=frame.attempt,
+                            reason_code=frame.reason_code,
+                            message=frame.message,
+                        )
+                        terminal = True
+                except Exception:  # noqa: BLE001
+                    logger.exception("handle status for req %s failed", frame.req_id)
+                    terminal = False
                 hub.on_finished(agent_id, frame.req_id)
                 if terminal:
                     await _finalize_terminal_request(int(frame.req_id))
             elif isinstance(frame, ErrorFrame) and frame.req_id:
-                if frame.code == int(ErrorCode.ACCESS_PAUSED):
-                    await _pause_source(int(frame.req_id), frame.message, hub)
-                    terminal = True
-                elif frame.code in _RETRYABLE:
-                    terminal = not await _defer_retry(frame, ws.app.state.limiter, agent_id)
-                else:
-                    await set_request_state(
-                        get_engine("pyp"), int(frame.req_id), frame.code, agent_id=agent_id, attempt=frame.attempt
-                    )
-                    terminal = True
+                try:
+                    if frame.code == int(ErrorCode.ACCESS_PAUSED):
+                        await _pause_source(int(frame.req_id), frame.message, hub)
+                        terminal = True
+                    elif frame.code in _RETRYABLE:
+                        terminal = not await _defer_retry(frame, ws.app.state.limiter, agent_id)
+                    else:
+                        await set_request_state(
+                            get_engine("pyp"),
+                            int(frame.req_id),
+                            frame.code,
+                            agent_id=agent_id,
+                            attempt=frame.attempt,
+                            message=frame.message,
+                        )
+                        terminal = True
+                except Exception:  # noqa: BLE001
+                    logger.exception("handle error frame for req %s failed", frame.req_id)
+                    terminal = False
                 hub.on_finished(agent_id, frame.req_id)
                 if terminal:
                     await _finalize_terminal_request(int(frame.req_id))

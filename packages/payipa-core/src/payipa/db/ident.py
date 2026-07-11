@@ -45,4 +45,18 @@ def check_field(name: str) -> str:
     return _check(name, MAX_FIELD, "索引字段名")
 
 
-__all__ = ["MAX_CODE", "MAX_FIELD", "MAX_IDENT", "check_code", "check_field", "check_ident"]
+_LOOSE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def check_loose(name: str) -> str:
+    """宽松校验：只保证进裸 DDL 字符集安全（大小写均可）。
+
+    用于操作**库中存量对象**（如 DROP 严格规则出现前建的混合大小写列）——存量名只需
+    防注入即可操作，不能因新规则更严而永远删不掉。新建对象一律用严格版 check_*。
+    """
+    if not isinstance(name, str) or not name or len(name) > MAX_IDENT or not _LOOSE.match(name):
+        raise ValueError(f"标识符 {name!r} 非法：只能含字母、数字、下划线且不以数字开头")
+    return name
+
+
+__all__ = ["MAX_CODE", "MAX_FIELD", "MAX_IDENT", "check_code", "check_field", "check_ident", "check_loose"]

@@ -13,7 +13,7 @@ from __future__ import annotations
 from sqlalchemy import Table, text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
-from payipa.db.ident import check_field, check_ident
+from payipa.db.ident import check_field, check_ident, check_loose
 from payipa.studio.asm import create_asm_table
 
 
@@ -80,7 +80,7 @@ async def evolve_asm_table(engine_business: AsyncEngine, table: Table, *, allow_
             await conn.execute(text(f'CREATE INDEX IF NOT EXISTS "ix_{name}_{col}" ON "{name}" ("{col}")'))
         if allow_breaking:
             for col in to_remove:
-                check_ident(col)  # 库中存量列名只需字符集安全即可 DROP（长度可能超新字段上限）
+                check_loose(col)  # 存量列名只需字符集安全即可 DROP（老列可能混合大小写/超新上限）
                 await conn.execute(text(f'ALTER TABLE "{name}" DROP COLUMN IF EXISTS "{col}"'))
 
     return {"created": False, "added": to_add, "removed": to_remove if allow_breaking else []}
