@@ -86,6 +86,13 @@ def test_view_pages_and_endpoints(require_pg: None) -> None:
             # 用户视图不泄露密码 hash
             users = client.get("/api/views/users").json()
             assert all("password_hash" not in u for u in users)
+
+            # 审计分页 + 动作筛选（offset/limit/action 参数生效，不报错）
+            page = client.get("/api/views/audit?limit=5&offset=0")
+            assert page.status_code == 200 and len(page.json()) <= 5
+            filtered = client.get("/api/views/audit?action=source.create&limit=50")
+            assert filtered.status_code == 200
+            assert all("source.create" in r["action"] for r in filtered.json())
     finally:
         asyncio.run(_cleanup())
 

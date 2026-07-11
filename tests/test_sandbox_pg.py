@@ -52,13 +52,29 @@ def live_server():
     try:
         yield port
     finally:
-        # 确定性关停：等线程真正退出（不放弃为守护线程），避免残留 uvicorn 事件循环/asyncpg 连接
-        # 与后续测试共享的 get_engine 缓存跨事件循环干扰（曾致 test_sched_cancel_pg 偶发脏读/FK）。
+        # 确定性关停：等线程真正退出（不放弃为守护线程）。
         server.should_exit = True
         for _ in range(200):  # 最多等 20s
             t.join(timeout=0.1)
             if not t.is_alive():
                 break
+        # uvicorn 在自己的事件循环里经进程级 get_engine 缓存建过引擎；循环停后这些引擎的 asyncpg 连接
+        # 仍绑在已死循环上残留于缓存，会跨循环污染后续 dispatch 测试的全局 queue/claim 查询（实测：
+        # 移除本测试后 15/15 全绿）。故处置这些引擎连接池并清空缓存，让后续测试重建干净引擎。
+        import asyncio
+        import contextlib
+
+        from payipa.db.engine import get_engine, get_sessionmaker
+
+        async def _dispose() -> None:
+            for name in ("pyp", "data_center", "business"):
+                with contextlib.suppress(Exception):
+                    await get_engine(name).dispose()
+
+        with contextlib.suppress(Exception):
+            asyncio.run(_dispose())
+        get_engine.cache_clear()
+        get_sessionmaker.cache_clear()
         assert not t.is_alive(), "uvicorn 线程未能在 20s 内关停"
 
 

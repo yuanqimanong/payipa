@@ -1178,3 +1178,50 @@ async def create_batch_for_task(
     return await create_batch_with_requests(
         engine_pyp, task_id=task_id, source_uuid=source_uuid, targets=seed_urls, rule_ptr=ptr, channel=channel
     )
+
+
+async def rerun_source(engine_pyp: AsyncEngine, source_uuid: str, *, channel: Channel = Channel.PROD) -> int:
+    """按数据源存档配置（task.params 里的种子 + 当前 active 规则）重跑一次，返回新批次 id。
+
+    无需重新提交种子/规则（07 定时触发同源）。访问策略闸门在 create_batch_with_requests 内生效
+    （未确认/暂停源抛 PermissionError）。缺任务或缺种子抛 LookupError。
+    """
+    async with engine_pyp.connect() as conn:
+        row = (
+            await conn.execute(
+                select(Task.id, Task.params)
+                .join(Source.__table__, Task.source_id == Source.id)
+                .where(Source.uuid == source_uuid)
+                .order_by(Task.id)
+                .limit(1)
+            )
+        ).first()
+    if row is None:
+        raise LookupError(f"数据源 {source_uuid!r} 无关联任务，无法重跑")
+    seeds = list((row[1] or {}).get("seed_urls") or [])
+    if not seeds:
+        raise LookupError(f"数据源 {source_uuid!r} 未存档种子 URL（task.params.seed_urls 为空），无法重跑")
+    batch_id, _ = await create_batch_for_task(
+        engine_pyp, task_id=row[0], source_uuid=source_uuid, seed_urls=seeds, channel=channel
+    )
+    return batch_id
+
+
+async def source_field_names(engine_pyp: AsyncEngine, source_uuid: str) -> list[str]:
+    """数据源当前规则声明的字段名（供 CSV 导出的稳定列序）；无规则返回空列表。"""
+    async with engine_pyp.connect() as conn:
+        row = (
+            await conn.execute(
+                select(Rule.spec)
+                .join(Source.__table__, Rule.source_id == Source.id)
+                .where(Source.uuid == source_uuid)
+                .order_by(Rule.version.desc())
+                .limit(1)
+            )
+        ).first()
+    if row is None:
+        return []
+    try:
+        return [f["name"] for f in (row[0] or {}).get("fields", []) if f.get("name")]
+    except AttributeError, TypeError:
+        return []

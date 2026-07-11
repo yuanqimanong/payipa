@@ -25,7 +25,11 @@
     <h2>数据源 <code>{{ source }}</code> 产出</h2>
     <p>Tabulator remote：表头筛选 / 点列头排序 / 分页 —— 全部服务端译 SQL。</p>
   </div>
-  <div class="actions"><a class="btn ghost" href="/sources">← 返回列表</a></div>
+  <div class="actions">
+    <a class="btn ghost" href="/api/data/{{ source }}/export?fmt=csv" download>导出 CSV</a>
+    <a class="btn ghost" href="/api/data/{{ source }}/export?fmt=jsonl" download>导出 JSONL</a>
+    <a class="btn ghost" href="/sources">← 返回列表</a>
+  </div>
 </div>
 <div class="card card-pad">
   <div id="grid"></div>

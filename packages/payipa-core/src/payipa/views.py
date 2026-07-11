@@ -77,8 +77,13 @@ async def list_tasks(engine: AsyncEngine, *, limit: int = 100) -> list[dict]:
     ]
 
 
-async def list_audit(engine: AsyncEngine, *, limit: int = 100, offset: int = 0) -> list[dict]:
-    """审计日志（最新在前）：actor 关联用户名，敏感 before/after 只回是否有内容。"""
+async def list_audit(
+    engine: AsyncEngine, *, limit: int = 100, offset: int = 0, action: str | None = None
+) -> list[dict]:
+    """审计日志（最新在前）：actor 关联用户名，敏感 before/after 只回是否有内容。
+
+    action 为子串筛选（大小写不敏感）；分页用 (limit, offset)。
+    """
     stmt = (
         select(
             AuditLog.id,
@@ -94,6 +99,8 @@ async def list_audit(engine: AsyncEngine, *, limit: int = 100, offset: int = 0) 
         .limit(limit)
         .offset(offset)
     )
+    if action:
+        stmt = stmt.where(AuditLog.action.ilike(f"%{action}%"))
     async with engine.connect() as conn:
         rows = (await conn.execute(stmt)).all()
     return [

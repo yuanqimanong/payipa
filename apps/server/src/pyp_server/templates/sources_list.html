@@ -22,6 +22,7 @@
           <td><span class="badge {{ s.access_class }}"><span class="dot"></span>{{ s.access_status }}</span></td>
           <td class="muted">{{ s.created_at }}</td>
           <td style="text-align:right">
+            <button class="btn ghost sm rerun" type="button" data-uuid="{{ s.uuid }}" title="按存档种子+当前规则重跑">立即运行</button>
             <a class="btn ghost sm" href="/sources/{{ s.uuid }}/access-review">访问复核</a>
             <a class="btn ghost sm" href="/data/{{ s.uuid }}">查看数据</a>
           </td>
@@ -33,4 +34,32 @@
     </table>
   </div>
 </div>
+<script>
+  // 一键重跑：POST /api/sources/{uuid}/rerun（会话 cookie SameSite=Lax 防跨站；RBAC sources.run 门控）
+  document.querySelectorAll("button.rerun").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const uuid = btn.dataset.uuid;
+      btn.disabled = true;
+      const label = btn.textContent;
+      btn.textContent = "运行中…";
+      try {
+        const resp = await fetch(`/api/sources/${encodeURIComponent(uuid)}/rerun`, {
+          method: "POST", headers: { Accept: "application/json" },
+        });
+        if (resp.ok) {
+          const d = await resp.json();
+          btn.textContent = `已触发 #${d.batch_id}`;
+          setTimeout(() => { btn.textContent = label; btn.disabled = false; }, 2500);
+        } else {
+          const detail = (await resp.json().catch(() => ({}))).detail || `HTTP ${resp.status}`;
+          alert(`重跑失败：${detail}`);
+          btn.textContent = label; btn.disabled = false;
+        }
+      } catch (e) {
+        alert(`重跑失败：${e.message}`);
+        btn.textContent = label; btn.disabled = false;
+      }
+    });
+  });
+</script>
 {% endblock %}

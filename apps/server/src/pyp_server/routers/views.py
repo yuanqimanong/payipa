@@ -23,8 +23,12 @@ async def view_tasks(limit: int = Query(100, ge=1, le=500)) -> list[dict]:
 
 
 @router.get("/audit", summary="审计日志", dependencies=[Depends(require_perm("audit.read"))])
-async def view_audit(limit: int = Query(100, ge=1, le=500), offset: int = Query(0, ge=0)) -> list[dict]:
-    return await views.list_audit(get_engine("pyp"), limit=limit, offset=offset)
+async def view_audit(
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    action: str | None = Query(None, max_length=64),
+) -> list[dict]:
+    return await views.list_audit(get_engine("pyp"), limit=limit, offset=offset, action=action)
 
 
 @router.get("/assemblies", summary="组装产物清单", dependencies=[Depends(require_perm("assemblies.read"))])

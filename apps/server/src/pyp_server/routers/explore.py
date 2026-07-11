@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import re
 
-from fastapi import APIRouter, Depends, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from payipa.crawl.ingest import build_data_table
+from payipa.crawl.run import source_field_names
 from payipa.db.engine import get_engine
+from payipa.explore.export import stream_csv, stream_jsonl
 from payipa.explore.query import query_data
 from sqlalchemy.exc import ProgrammingError
 from starlette.datastructures import QueryParams
@@ -54,6 +56,35 @@ async def get_data(source: str, request: Request) -> dict:
         )
     except ProgrammingError:
         return {"last_page": 1, "data": [], "total": 0}
+
+
+def _safe_filename(source: str, ext: str) -> str:
+    """下载文件名：短码只保留安全字符，避免响应头注入。"""
+    stem = re.sub(r"[^A-Za-z0-9_.-]", "_", source)[:64] or "data"
+    return f"{stem}.{ext}"
+
+
+@router.get(
+    "/api/data/{source}/export",
+    summary="导出数据源产出（CSV / JSONL 流式下载）",
+    dependencies=[Depends(require_perm("data.read"))],
+)
+async def export_data(source: str, request: Request, fmt: str = "csv") -> StreamingResponse:
+    """流式导出全部产出行。fmt=csv（列=系统列+规则字段，带 BOM）| jsonl（每行一 JSON）。"""
+    if fmt not in ("csv", "jsonl"):
+        raise HTTPException(status_code=400, detail="fmt 仅支持 csv 或 jsonl")
+    filters = _collect(request.query_params, "filter")
+    dc = get_engine("data_center")
+    table = build_data_table(source)
+    if fmt == "jsonl":
+        gen = stream_jsonl(dc, table, filters=filters)
+        media, ext = "application/x-ndjson", "jsonl"
+    else:
+        field_names = await source_field_names(get_engine("pyp"), source)
+        gen = stream_csv(dc, table, field_names=field_names, filters=filters)
+        media, ext = "text/csv; charset=utf-8", "csv"
+    headers = {"Content-Disposition": f'attachment; filename="{_safe_filename(source, ext)}"'}
+    return StreamingResponse(gen, media_type=media, headers=headers)
 
 
 @router.get("/data/{source}", response_class=HTMLResponse, summary="数据查看页")

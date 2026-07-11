@@ -13,7 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from payipa.crawl.run import batch_progress as compute_batch_progress
 from payipa.crawl.run import cancel_batch as run_cancel_batch
 from payipa.crawl.run import queue_depth as compute_queue_depth
-from payipa.crawl.run import review_source_access
+from payipa.crawl.run import rerun_source, review_source_access
 from payipa.db.engine import get_engine
 from payipa.db.settings import get_settings as get_db_settings
 from payipa.deliver.notify import NotifyError, notify
@@ -167,6 +167,26 @@ async def run_source(uuid: str, body: RunRequest) -> RunResponse:
     except (PermissionError, ValueError) as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return RunResponse(**result)
+
+
+class RerunResponse(BaseModel):
+    batch_id: int = Field(..., description="新建批次 id")
+
+
+@router.post(
+    "/sources/{uuid}/rerun",
+    response_model=RerunResponse,
+    summary="按存档配置一键重跑（复用 task.params 种子 + 当前 active 规则，无需重提交）",
+    dependencies=[Depends(require_perm("sources.run"))],
+)
+async def rerun_source_api(uuid: str) -> RerunResponse:
+    try:
+        batch_id = await rerun_source(get_engine("pyp"), uuid)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except (PermissionError, ValueError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return RerunResponse(batch_id=batch_id)
 
 
 @router.post(
