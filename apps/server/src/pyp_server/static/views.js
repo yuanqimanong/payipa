@@ -73,5 +73,5 @@
     }
   }
 
-  window.PypViews = { renderTable, renderStats, fetchJSON, loadTable, esc };
+  window.PypViews = { renderTable, renderStats, fetchJSON, loadTable, cell, esc };
 })();
