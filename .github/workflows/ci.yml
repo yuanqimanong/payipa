@@ -11,6 +11,22 @@ on:
 jobs:
   quality:
     runs-on: ubuntu-latest
+    # P0-19：真三库 CI——PG service + 三库创建 + 迁移到 head，集成测试不再静默 skip。
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_PASSWORD: postgres123
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=10
+    env:
+      PG_USER: postgres
+      PG_PASSWORD: postgres123
     steps:
       - uses: actions/checkout@v4
       # 钉 uv 版本（不用浮动 action tag）
@@ -24,5 +40,14 @@ jobs:
         run: uv run ruff format --check
       - name: Import boundaries (import-linter)
         run: uv run lint-imports
+      - name: Create three databases
+        run: |
+          for db in pyp_sys data_center business; do
+            PGPASSWORD=postgres123 psql -h localhost -U postgres -c "CREATE DATABASE $db"
+          done
+      - name: Migrate three databases to head
+        run: uv run alembic -c deploy/alembic.ini upgrade heads
       - name: Pytest
-        run: uv run pytest
+        # test_sandbox_pg 需 PG+Docker+活 uvicorn 三合一（本地已验证）；CI 首轮先不引入其镜像构建
+        # 时间与抖动面，等发布安装冒烟（P0-02/03）一起编排。
+        run: uv run pytest --deselect tests/test_sandbox_pg.py
