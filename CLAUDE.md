@@ -38,11 +38,17 @@
 - **correlation id**：`task_id / batch_id / attempt_id` 贯穿 structlog 日志、artifacts、task_events。
 - **requests.state**（smallint）：正数正常态（0 排队/1 已分派/2 运行/3 成功/4 取消），负数错误码（见 `payipa_contracts.errors`）。
 
-## 里程碑（SDD §12）
+## 里程碑（SDD §12；截至 2026-07-11 · 权威状态见 docs/README.md 实现进度表）
 
-- **M0（当前）**：双仓 + workspace + contracts 全 schema + errors 枚举 + import-linter CI + Alembic 三库迁移 + server 空壳起。
-- M1 Walking Skeleton → M2 调度分布式 → M3 组装沙箱 → M4 推送对外 → M5 智能增强。
-- **护城河「M0 建接口/边界、M1–M5 逐阶段填能力」**——不在第一阶段全做。
+- **M0–M6 均已完成、CI 绿**（护城河策略「先建接口/边界，再逐阶段填能力」已执行到 M6，非早期阶段）：
+  - **M0** 双仓 + workspace + contracts 全 schema + errors 枚举 + import-linter CI + Alembic 三库迁移。
+  - **M1** 单源端到端（建源→agent WS 抓取→raw 存档→data_center→Tabulator 查看页）+ 声明式解释器。
+  - **M2** 持久化派发环 + 租约回收 + 断连重排 + 多波爬行 + 优先级 + cron + 取消 + 节点注册/加权分组亲和 + 每源限流/AIMD。
+  - **M3** Query Gateway（红线2 唯一取数）+ job_token + 签名游标/配额 + 版本签名门 + 增量水位 + SchemaEvolver + **真 SandboxExecutor（Docker/WSL2 锁定容器 + 路径白名单 egress）+ 常驻 worker 池 SandboxPool**。
+  - **M4** outbox + 对外 Dataset API + 隔离子进程投递（目标域白名单 + KEK 凭证）+ 通知机器人 + 自动/手动/cron 三触发。
+  - **M5** RBAC + monitor 聚合 + AI/LLM Gateway（自研 provider 抽象 + 官方 anthropic SDK + echo 离线）+ 标准 Playwright 浏览器引擎 + 点选插件；**管理台 12 页真数据 + 全量写操作 UI**。
+  - **M6** 采集韧性（响应分类/Retry-After/请求退避/源冷却/整源暂停）+ 生产安全加固（preflight/CSRF/join token/强制登录/僵尸节点判定）。
+- 剩余仅**需外部运行时的活验/独立服务**：真 provider key、真浏览器端到端冒烟、worker 池独立机器部署、Langfuse 自部署（均在代码/文档诚实标注）。
 
 ## 常用命令
 
