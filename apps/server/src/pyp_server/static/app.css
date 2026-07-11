@@ -115,6 +115,7 @@ code { background: var(--gray-bg); padding: 1px 6px; border: var(--bw-thin) soli
 .card-pad { padding: 18px 20px; }
 .card-head { padding: 13px 18px; border-bottom: var(--bw-thick) solid var(--ink); font-weight: var(--wt-head);
   font-size: 14px; letter-spacing: 0; }
+.card-head.model-head { display: flex; align-items: center; justify-content: space-between; }
 .grid { display: grid; gap: 18px; }
 .grid.cols-4 { grid-template-columns: repeat(4, 1fr); }
 .grid.cols-3 { grid-template-columns: repeat(3, 1fr); }

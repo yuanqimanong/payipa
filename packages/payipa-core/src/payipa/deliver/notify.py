@@ -56,6 +56,12 @@ class NotifyBotStore:
         cfg = decrypt_json(row.config, kek=kek) if row.config else {}
         return row.type, cfg
 
+    async def delete(self, bot_id: int) -> bool:
+        """删除通知机器人；返回是否确有一行被删。"""
+        async with self.engine.begin() as conn:
+            result = await conn.execute(NotifyBot.__table__.delete().where(NotifyBot.id == bot_id))
+        return bool(result.rowcount)
+
 
 async def _post_json(url: str, payload: dict, *, timeout: float = 15.0) -> httpx.Response:
     async with httpx.AsyncClient(timeout=timeout, follow_redirects=False) as client:

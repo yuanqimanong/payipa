@@ -23,6 +23,7 @@ from pyp_server.routers import (
     ai,
     api,
     auth_routes,
+    config_mgmt,
     datasets,
     explore,
     health,
@@ -78,6 +79,7 @@ def create_app() -> FastAPI:
     app.include_router(views.router)
     app.include_router(manage.router)
     app.include_router(studio.router)
+    app.include_router(config_mgmt.router)
     app.include_router(explore.router)
     app.include_router(ai.router)
     app.include_router(internal.router)

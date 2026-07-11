@@ -13,7 +13,6 @@ from payipa.db.pyp import (
     Assembly,
     AuditLog,
     Batch,
-    LlmModel,
     NotifyBot,
     PushComponent,
     PushOutbox,
@@ -272,13 +271,11 @@ async def list_roles(engine: AsyncEngine) -> list[dict]:
 
 
 async def config_overview(engine: AsyncEngine) -> dict:
-    """公共配置总览：LLM 模型（不回凭证）、通知机器人、存储后端。"""
+    """公共配置总览：LLM 模型（不回凭证，含默认标注）、通知机器人、存储后端。"""
+    from payipa.ai.registry import list_models
+
+    models = await list_models(engine)  # {id,name,provider,enabled,is_default}，凭证不回
     async with engine.connect() as conn:
-        models = (
-            await conn.execute(
-                select(LlmModel.id, LlmModel.name, LlmModel.provider, LlmModel.enabled).order_by(LlmModel.id)
-            )
-        ).all()
         bots = (await conn.execute(select(NotifyBot.id, NotifyBot.name, NotifyBot.type).order_by(NotifyBot.id))).all()
         stores = (
             await conn.execute(
@@ -286,7 +283,7 @@ async def config_overview(engine: AsyncEngine) -> dict:
             )
         ).all()
     return {
-        "models": [{"id": m.id, "name": m.name, "provider": m.provider, "enabled": m.enabled} for m in models],
+        "models": models,
         "notify_bots": [{"id": b.id, "name": b.name, "type": b.type} for b in bots],
         "storage": [{"id": s.id, "name": s.name, "backend": s.backend} for s in stores],
     }

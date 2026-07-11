@@ -70,6 +70,26 @@ async def register_model(
     return model_id
 
 
+async def set_model_enabled(engine_pyp: AsyncEngine, model_id: int, enabled: bool) -> bool:
+    """启用/禁用模型；返回是否命中该模型。"""
+    async with engine_pyp.begin() as conn:
+        result = await conn.execute(update(LlmModel.__table__).where(LlmModel.id == model_id).values(enabled=enabled))
+    return bool(result.rowcount)
+
+
+async def set_default_model(engine_pyp: AsyncEngine, model_id: int) -> bool:
+    """把某模型设为平台默认（写 global_params）；模型不存在返回 False。"""
+    async with engine_pyp.begin() as conn:
+        if not (await conn.execute(select(LlmModel.id).where(LlmModel.id == model_id))).first():
+            return False
+        await conn.execute(
+            pg_insert(GlobalParam.__table__)
+            .values(key=_DEFAULT_KEY, value={"model_id": model_id})
+            .on_conflict_do_update(index_elements=["key"], set_={"value": {"model_id": model_id}})
+        )
+    return True
+
+
 async def list_models(engine_pyp: AsyncEngine) -> list[dict[str, Any]]:
     """列出模型元信息（不含凭证明文，安全回显给界面）。"""
     async with engine_pyp.connect() as conn:
@@ -159,5 +179,7 @@ __all__ = [
     "list_models",
     "register_model",
     "resolve_model",
+    "set_default_model",
+    "set_model_enabled",
     "set_system_prompt",
 ]
