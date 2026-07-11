@@ -94,6 +94,10 @@ code { background: var(--gray-bg); padding: 1px 6px; border: var(--bw-thin) soli
 .sidebar-foot .who span { color: var(--text-faint); font-size: 11px; font-weight: var(--wt-body); }
 
 .main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+/* 移动端账号菜单：桌面隐藏（侧栏底部已有身份/登出），窄屏才显示 */
+.topbar-account { display: none; align-items: center; gap: 8px; }
+.topbar-account .who-sm { font-size: 13px; font-weight: var(--wt-strong); max-width: 40vw;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .topbar { height: var(--topbar-h); background: var(--surface); border-bottom: var(--bw-thick) solid var(--ink);
   display: flex; align-items: center; gap: 12px; padding: 0 28px; position: sticky; top: 0; z-index: 10; }
 .topbar h1 { font-size: 15px; font-weight: var(--wt-head); margin: 0; letter-spacing: 0; }
@@ -202,6 +206,7 @@ table.tbl tbody tr:hover { background: var(--accent-weak); }
   .nav-group-label, .skin-picker, .sidebar-foot { display: none; }
   .nav-item { flex: 0 0 auto; white-space: nowrap; margin: 0; padding: 6px 9px; }
   .topbar { height: 48px; padding: 0 16px; }
+  .topbar-account { display: flex; }  /* 窄屏：账号与登出移到顶栏，始终可达 */
   .content { padding: 18px 14px 28px; }
   .page-head { flex-direction: column; align-items: stretch; margin-bottom: 18px; }
   .page-head .actions { flex-wrap: wrap; }

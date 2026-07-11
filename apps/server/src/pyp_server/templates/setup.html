@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="zh">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>首次启动 · payipa</title>
+    <link rel="stylesheet" href="/static/app.css" />
+    <script>
+      (function () { try { var s = localStorage.getItem("pyp-skin"); if (s) document.documentElement.dataset.skin = s; } catch (e) {} })();
+    </script>
+    <style>
+      body { display: flex; min-height: 100vh; align-items: flex-start; justify-content: center; padding: 40px 16px; }
+      .setup { width: 460px; max-width: 100%; }
+      .setup .brand { border: 0; padding: 0 0 20px; font-size: 18px; }
+      .setup .card { padding: 24px 26px; box-shadow: var(--shadow); margin-bottom: 16px; }
+      .setup h1 { font-size: 18px; margin: 0 0 4px; }
+      .setup .sub { color: var(--text-muted); font-size: 13px; margin-bottom: 16px; }
+      .setup .btn { width: 100%; justify-content: center; margin-top: 20px; padding: 10px; }
+      .check { display: flex; gap: 8px; align-items: baseline; padding: 5px 0; font-size: 13px; }
+      .check .st { flex: 0 0 auto; font-weight: 700; }
+      .check .st.ok { color: var(--ok, #16a34a); }
+      .check .st.bad { color: var(--danger, #dc2626); }
+      .check .tip { color: var(--text-muted); font-size: 12px; }
+      .step-label { font-size: 12px; color: var(--text-muted); letter-spacing: 0.06em; margin-bottom: 6px; }
+    </style>
+  </head>
+  <body>
+    <div class="setup">
+      <div class="brand"><span class="logo">爬</span> <div>payipa <small>爬亿爬 · 首次启动</small></div></div>
+
+      <div class="card">
+        <div class="step-label">第 1 步 / 共 2 步</div>
+        <h1>系统状态检查</h1>
+        <div class="sub">以下各项全部通过后系统才能正常提供服务；出现 ✗ 时按提示修复后刷新本页。</div>
+        {% for key, val in checks.items() %}
+        <div class="check">
+          {% if val in ("ok", "disabled") %}
+          <span class="st ok">✓</span><span>{{ key }}</span>
+          {% if val == "disabled" %}<span class="tip">（未启用）</span>{% endif %}
+          {% else %}
+          <span class="st bad">✗</span><span>{{ key }}</span>
+          <span class="tip">{{ val }}{% if tip(key) %} —— {{ tip(key) }}{% endif %}</span>
+          {% endif %}
+        </div>
+        {% endfor %}
+      </div>
+
+      <form class="card" method="post" action="/setup">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+        <div class="step-label">第 2 步 / 共 2 步</div>
+        <h1>创建首个管理员</h1>
+        <div class="sub">这是系统第一次启动。请创建管理员账号——它拥有全部权限，之后可在「用户管理」里添加其他成员。</div>
+        <div class="field">
+          <label for="username">用户名</label>
+          <input id="username" name="username" value="{{ username }}" autocomplete="username" autofocus />
+        </div>
+        <div class="field">
+          <label for="password">密码（至少 8 个字符）</label>
+          <input id="password" name="password" type="password" autocomplete="new-password" />
+        </div>
+        <div class="field">
+          <label for="password2">确认密码</label>
+          <input id="password2" name="password2" type="password" autocomplete="new-password" />
+        </div>
+        {% if error %}<div class="form-error" style="margin: 8px 0 0">{{ error }}</div>{% endif %}
+        <button class="btn" type="submit">创建管理员并前往登录</button>
+      </form>
+    </div>
+  </body>
+</html>

@@ -5,6 +5,10 @@
   <div class="titles"><h2>仪表盘</h2><p id="dash-meta">正在同步运行态</p></div>
   <div class="actions"><a class="btn" href="/sources/new">＋ 新建数据源</a></div>
 </div>
+<div class="card" id="onboard-banner" style="display:none; margin-bottom:14px; padding:12px 16px">
+  <b>系统初始化尚未完成</b> —— 接入采集节点、跑通第一条示例采集只需几分钟。
+  <a href="/welcome" style="margin-left:8px">继续设置向导 →</a>
+</div>
 <div class="grid cols-4" id="stats"><div class="empty">加载中…</div></div>
 <div class="card" style="margin-top:16px">
   <div class="card-head">数据源健康度</div>
@@ -48,5 +52,9 @@
   }
   setInterval(() => { if (!document.hidden) loadDashboard(); }, 15000);
   loadDashboard();
+  // 首次使用向导未完成 → 顶部横幅引导（best-effort，读不到就不显示）
+  PypViews.fetchJSON("/api/onboard/state")
+    .then((s) => { if (!s.done) document.getElementById("onboard-banner").style.display = ""; })
+    .catch(() => {});
 </script>
 {% endblock %}

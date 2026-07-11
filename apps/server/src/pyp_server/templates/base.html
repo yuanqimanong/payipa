@@ -82,7 +82,10 @@
         </div>
         <div class="sidebar-foot">
           <div class="avatar">{{ (user.username[0] | upper) if user else "?" }}</div>
-          <div class="who"><b>{{ user.username if user else "未登录" }}</b><span>管理员</span></div>
+          <div class="who">
+            <b>{{ user.username if user else "未登录" }}</b>
+            <span>{{ (roles | join("、")) if roles else "未分配角色" }}</span>
+          </div>
           <form method="post" action="/logout" style="margin: 0"><button class="btn ghost sm" title="登出">登出</button></form>
         </div>
       </aside>
@@ -91,6 +94,11 @@
           <h1>{{ self.title() }}</h1>
           <div class="spacer"></div>
           {% block topbar_actions %}{% endblock %}
+          {# 移动端账号菜单：窄屏侧栏底部被折叠，这里保证账号信息与登出始终可达 #}
+          <div class="topbar-account">
+            <span class="who-sm" title="{{ (roles | join('、')) if roles else '未分配角色' }}">{{ user.username if user else "未登录" }}</span>
+            <form method="post" action="/logout" style="margin: 0"><button class="btn ghost sm" title="登出">登出</button></form>
+          </div>
         </div>
         <div class="content">{% block content %}{% endblock %}</div>
       </div>

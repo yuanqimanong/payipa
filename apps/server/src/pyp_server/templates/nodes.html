@@ -6,12 +6,75 @@
     <h2>节点管理</h2>
     <p>采集节点（agent）在线态、并发槽占用与历史成败率。运行态已占槽取自实时 AgentHub。</p>
   </div>
-  <div class="actions"><button class="btn ghost" id="refresh">刷新</button></div>
+  <div class="actions">
+    <button class="btn" id="add-node">＋ 添加节点</button>
+    <button class="btn ghost" id="refresh">刷新</button>
+  </div>
 </div>
+
+<div class="card card-pad" id="add-panel" style="display:none; margin-bottom:14px">
+  <div class="card-head" style="padding:0 0 8px">接入一个新采集节点</div>
+  <p class="muted" style="font-size:13px">在要跑采集的机器上任选一种方式启动。首次接入用 join token，之后节点自动换发长期凭证重连。</p>
+  <div style="display:flex; gap:8px; align-items:center; margin:8px 0">
+    <code class="line" id="cmd-cli" style="flex:1; display:block; padding:8px 10px; background:var(--surface-2,#f5f5f5); border-radius:6px; font-size:12px; overflow-x:auto; white-space:nowrap">加载中…</code>
+    <button class="btn ghost sm" data-copy="cmd-cli">复制</button>
+  </div>
+  <div style="display:flex; gap:8px; align-items:center; margin:8px 0">
+    <code class="line" id="cmd-docker" style="flex:1; display:block; padding:8px 10px; background:var(--surface-2,#f5f5f5); border-radius:6px; font-size:12px; overflow-x:auto; white-space:nowrap">docker compose -f deploy/docker-compose.agents.yml up -d</code>
+    <button class="btn ghost sm" data-copy="cmd-docker">复制</button>
+  </div>
+  <p class="muted" style="font-size:12px" id="join-note"></p>
+  <p class="muted" style="font-size:12px">节点身份保存在 <code>--state-dir</code> 目录：容器请挂持久卷（重建不换身份）；同一台机器跑多个节点须用不同的 <code>--state-dir</code>。</p>
+  <div id="wait-note" class="muted" style="font-size:13px; margin-top:6px">等待新节点接入…（每 3 秒自动检测）</div>
+</div>
+
 <div class="card" id="box"><div class="empty">加载中…</div></div>
 <script src="/static/views.js"></script>
 <script>
   const pct = (x) => (x == null ? "暂无样本" : (x * 100).toFixed(1) + "%"); // 本页只格式化成功率，null=无样本
+  const $ = (id) => document.getElementById(id);
+  let baseIds = null; // 打开面板时的在线节点快照，用于识别「新」接入
+
+  document.querySelectorAll("[data-copy]").forEach((b) => b.addEventListener("click", async () => {
+    try { await navigator.clipboard.writeText($(b.dataset.copy).textContent); b.textContent = "已复制"; }
+    catch (e) { b.textContent = "复制失败"; }
+    setTimeout(() => (b.textContent = "复制"), 1500);
+  }));
+
+  async function openPanel() {
+    $("add-panel").style.display = "";
+    try {
+      const info = await PypViews.fetchJSON("/api/views/join-info");
+      const tok = info.join_token || "<PYP_SERVER_AGENT_JOIN_TOKEN>";
+      $("cmd-cli").textContent = `uv run pyp-agent join --server ${info.server_url} --token ${tok} --state-dir ~/.pyp-agent`;
+      $("join-note").innerHTML = info.join_token
+        ? `开发环境 join token 为 <code>${PypViews.esc(info.join_token)}</code>；<code>--server</code> 请改为节点可达的地址。`
+        : `join token 从部署环境变量 <code>PYP_SERVER_AGENT_JOIN_TOKEN</code> 获取；<code>--server</code> 请改为节点可达的地址。`;
+    } catch (e) { $("cmd-cli").textContent = "读取接入信息失败：" + e.message; }
+    const nodes = await PypViews.fetchJSON("/api/monitor/nodes").catch(() => []);
+    baseIds = new Set((nodes || []).filter((n) => n.online).map((n) => n.agent_id));
+    watchNew();
+  }
+  async function watchNew() {
+    if ($("add-panel").style.display === "none") return;
+    try {
+      const nodes = await PypViews.fetchJSON("/api/monitor/nodes");
+      const fresh = (nodes || []).filter((n) => n.online && baseIds && !baseIds.has(n.agent_id));
+      if (fresh.length) {
+        $("wait-note").className = "";
+        $("wait-note").style.color = "var(--ok, #16a34a)";
+        $("wait-note").textContent = `✓ 新节点已接入：${fresh.map((n) => n.agent_id.slice(0, 8)).join(", ")}`;
+        load();
+        return;
+      }
+    } catch (e) { /* 瞬时失败下轮再试 */ }
+    setTimeout(watchNew, 3000);
+  }
+  $("add-node").addEventListener("click", () => {
+    if ($("add-panel").style.display === "none") openPanel();
+    else $("add-panel").style.display = "none";
+  });
+
   async function load() {
     const box = document.getElementById("box");
     try {

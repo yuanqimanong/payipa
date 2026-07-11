@@ -30,33 +30,34 @@
 <form class="card card-pad" method="post" action="/sources/create" style="max-width: 760px">
   <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
   {% if error %}<div class="form-error">{{ error }}</div>{% endif %}
+  {# form 非空 = 校验失败回填（保住用户输入，P0-25）；为空 = 首次进入，用示例默认引导 #}
   <div class="field">
     <label>名称</label>
-    <input name="name" placeholder="如：图书列表" />
+    <input name="name" placeholder="如：图书列表" value="{{ form.name if form else '' }}" />
   </div>
   <div class="field">
-    <label>数据源短码 <span class="hint">唯一，用作表名 <code>data_{短码}</code></span></label>
-    <input name="uuid" placeholder="如：books" required />
+    <label>数据源短码 <span class="hint">唯一，用作表名 <code>data_{短码}</code>；小写字母开头，只含小写字母/数字/下划线</span></label>
+    <input name="uuid" placeholder="如：books" value="{{ form.uuid if form else '' }}" required />
   </div>
   <div class="field">
     <label>种子 URL <span class="hint">每行一个</span></label>
-    <textarea name="seed_urls">https://books.toscrape.com/</textarea>
+    <textarea name="seed_urls">{{ form.seed_urls if form else 'https://books.toscrape.com/' }}</textarea>
   </div>
   <div class="field">
     <label>访问依据类型</label>
     <select name="access_basis" required>
-      <option value="owned">自有系统或数据</option>
-      <option value="contracted">合同、委托或书面授权</option>
-      <option value="public_policy">公开访问政策明确允许</option>
+      <option value="owned" {{ 'selected' if form and form.access_basis == 'owned' }}>自有系统或数据</option>
+      <option value="contracted" {{ 'selected' if form and form.access_basis == 'contracted' }}>合同、委托或书面授权</option>
+      <option value="public_policy" {{ 'selected' if form and form.access_basis == 'public_policy' }}>公开访问政策明确允许</option>
     </select>
   </div>
   <div class="field">
     <label>访问依据 <span class="hint">合同编号、授权记录、API 文档或公开政策链接</span></label>
-    <input name="access_reference" required />
+    <input name="access_reference" value="{{ form.access_reference if form else '' }}" required />
   </div>
   <div class="field">
     <label class="check-row">
-      <input type="checkbox" name="access_confirmed" required />
+      <input type="checkbox" name="access_confirmed" {{ 'checked' if form and form.access_confirmed }} required />
       <span>已核验该数据源允许本系统按当前规则访问</span>
     </label>
   </div>
@@ -64,57 +65,57 @@
     <div class="field">
       <label>采集引擎</label>
       <select name="engine_hint">
-        <option value="http">HTTP</option>
-        <option value="browser">Browser</option>
+        <option value="http" {{ 'selected' if form and form.engine_hint == 'http' }}>HTTP</option>
+        <option value="browser" {{ 'selected' if form and form.engine_hint == 'browser' }}>Browser</option>
       </select>
     </div>
     <div class="field">
       <label>额定速率</label>
-      <input name="rate_limit" type="number" min="1" max="1000" value="10" />
+      <input name="rate_limit" type="number" min="1" max="1000" value="{{ form.rate_limit if form else '10' }}" />
     </div>
     <div class="field">
       <label>最大尝试</label>
-      <input name="retry" type="number" min="1" max="10" value="3" />
+      <input name="retry" type="number" min="1" max="10" value="{{ form.retry if form else '3' }}" />
     </div>
     <div class="field">
       <label>超时（秒）</label>
-      <input name="timeout" type="number" min="5" max="1800" value="30" />
+      <input name="timeout" type="number" min="5" max="1800" value="{{ form.timeout if form else '30' }}" />
     </div>
   </div>
   <div class="field">
     <label class="check-row">
-      <input type="checkbox" name="raw_archive" />
+      <input type="checkbox" name="raw_archive" {{ 'checked' if form and form.raw_archive }} />
       <span>归档成功响应原文</span>
     </label>
   </div>
   <div class="field">
     <label>列表行选择器 item_locator <span class="hint">CSS；列表页每行一条记录，留空 = 整页一条</span></label>
-    <input name="item_locator" value="article.product_pod" />
+    <input name="item_locator" value="{{ form.item_locator if form else 'article.product_pod' }}" />
   </div>
   <div class="field">
-    <label>字段 <span class="hint">名称 / CSS 选择器（<code>sel@attr</code> 取属性）/ 类型</span></label>
+    <label>字段 <span class="hint">名称 / CSS 选择器（<code>sel@attr</code> 取属性）/ 类型；索引字段名限小写、≤18 字符</span></label>
     <div id="fields">
+      {% set rows = form.fields if (form and form.fields) else [{'name':'title','css':'h3 a@title','type':'store'},{'name':'price','css':'p.price_color','type':'store'}] %}
+      {% for r in rows %}
       <div class="fld-row">
-        <input name="field_name" value="title" placeholder="字段名" />
-        <input name="field_css" value="h3 a@title" placeholder="CSS 选择器" />
+        <input name="field_name" value="{{ r.name }}" placeholder="字段名" />
+        <input name="field_css" value="{{ r.css }}" placeholder="CSS 选择器" />
         <button type="button" class="btn ghost sm pick-btn" onclick="pickInto(this)" title="点选（需装浏览器插件）">◎</button>
-        <select name="field_type"><option value="store">store</option><option value="link">link</option><option value="store+link">store+link</option></select>
+        <select name="field_type">
+          <option value="store" {{ 'selected' if r.type == 'store' }}>store</option>
+          <option value="link" {{ 'selected' if r.type == 'link' }}>link</option>
+          <option value="store+link" {{ 'selected' if r.type == 'store+link' }}>store+link</option>
+        </select>
         <button type="button" class="btn ghost sm" onclick="this.closest('.fld-row').remove()">✕</button>
       </div>
-      <div class="fld-row">
-        <input name="field_name" value="price" placeholder="字段名" />
-        <input name="field_css" value="p.price_color" placeholder="CSS 选择器" />
-        <button type="button" class="btn ghost sm pick-btn" onclick="pickInto(this)" title="点选（需装浏览器插件）">◎</button>
-        <select name="field_type"><option value="store">store</option><option value="link">link</option><option value="store+link">store+link</option></select>
-        <button type="button" class="btn ghost sm" onclick="this.closest('.fld-row').remove()">✕</button>
-      </div>
+      {% endfor %}
     </div>
     <button type="button" class="btn ghost sm" onclick="addRow()" style="margin-top: 4px">＋ 添加字段</button>
     <div id="pick-hint">点选已启动：切到目标网站标签页，点击要采集的元素（Esc 取消）。未装插件则此按钮无效。</div>
   </div>
   <div class="field">
     <label>数据指纹字段 <span class="hint">逗号分隔；用于去重 + 建索引</span></label>
-    <input name="fingerprint" value="title" />
+    <input name="fingerprint" value="{{ form.fingerprint if form else 'title' }}" />
   </div>
   <div class="form-actions">
     <button class="btn" type="submit">创建并运行</button>

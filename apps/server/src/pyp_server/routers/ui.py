@@ -8,10 +8,22 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
+from payipa.db.engine import get_engine
+from payipa.security.rbac import role_names
 
 from pyp_server.auth import get_current_user
 
 router = APIRouter(tags=["ui"])
+
+
+async def page_ctx(user: dict, **extra) -> dict:
+    """SSR 页面公共上下文：注入真实角色名（base.html 身份栏显示），best-effort。"""
+    try:
+        roles = await role_names(get_engine("pyp"), int(user["id"]))
+    except Exception:  # noqa: BLE001 —— DB 抖动不该让页面崩，退化为空角色
+        roles = []
+    return {"user": user, "roles": roles, **extra}
+
 
 # (路径, active/模板名, 标题)——数据驱动的真实功能页，模板 = "<key>.html"
 _PAGES = [
@@ -36,7 +48,7 @@ async def dashboard(request: Request):
     if user is None:
         return RedirectResponse("/login", status_code=303)
     return request.app.state.templates.TemplateResponse(
-        request, "dashboard.html", {"user": user, "active": "dashboard"}
+        request, "dashboard.html", await page_ctx(user, active="dashboard")
     )
 
 
@@ -46,7 +58,7 @@ def _make_page_handler(key: str, title: str):
         if user is None:
             return RedirectResponse("/login", status_code=303)
         return request.app.state.templates.TemplateResponse(
-            request, f"{key}.html", {"user": user, "active": key, "title": title}
+            request, f"{key}.html", await page_ctx(user, active=key, title=title)
         )
 
     return handler

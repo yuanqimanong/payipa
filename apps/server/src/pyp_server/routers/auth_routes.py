@@ -16,7 +16,11 @@ router = APIRouter(tags=["auth"])
 
 
 @router.get("/login", response_class=HTMLResponse, summary="登录页")
-async def login_page(request: Request) -> HTMLResponse:
+async def login_page(request: Request):
+    from pyp_server.routers.setup import no_users  # 局部导入避免环形依赖
+
+    if await no_users(get_engine("pyp")):  # 系统未初始化 → 先走首次启动引导
+        return RedirectResponse("/setup", status_code=303)
     return render_with_csrf(request, "login.html", {"error": None})
 
 

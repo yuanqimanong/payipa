@@ -181,6 +181,19 @@ async def assign_role(engine_pyp: AsyncEngine, user_id: int, role_name: str) -> 
         )
 
 
+async def role_names(engine_pyp: AsyncEngine, user_id: int) -> list[str]:
+    """用户已授予的角色名（供界面显示真实身份，不再写死「管理员」）。"""
+    async with engine_pyp.connect() as conn:
+        rows = await conn.execute(
+            select(Role.name)
+            .select_from(UserRole.__table__)
+            .join(Role.__table__, Role.id == UserRole.role_id)
+            .where(UserRole.user_id == user_id)
+            .order_by(Role.name)
+        )
+        return list(rows.scalars().all())
+
+
 async def revoke_role(engine_pyp: AsyncEngine, user_id: int, role_name: str) -> bool:
     """撤销用户的某角色（幂等）；返回是否确有一行被删。角色不存在抛 NoResultFound。"""
     async with engine_pyp.begin() as conn:

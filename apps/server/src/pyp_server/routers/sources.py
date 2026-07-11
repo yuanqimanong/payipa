@@ -17,6 +17,7 @@ from sqlalchemy import select
 
 from pyp_server.auth import get_current_user
 from pyp_server.csrf import render_with_csrf, verify_csrf
+from pyp_server.routers.ui import page_ctx
 from pyp_server.service import dispatch_source_run
 from pyp_server.settings import get_server_settings
 
@@ -57,8 +58,34 @@ async def sources_list(request: Request):
         for r in rows
     ]
     return request.app.state.templates.TemplateResponse(
-        request, "sources_list.html", {"user": user, "sources": sources, "active": "sources"}
+        request, "sources_list.html", await page_ctx(user, sources=sources, active="sources")
     )
+
+
+def _form_snapshot(form) -> dict:
+    """把提交的建源表单原样收集成回显用字典（校验失败重渲染时回填，P0-25：不丢输入）。"""
+    rows = [
+        {"name": n, "css": c, "type": t}
+        for n, c, t in zip(
+            form.getlist("field_name"), form.getlist("field_css"), form.getlist("field_type"), strict=False
+        )
+    ]
+    return {
+        "name": str(form.get("name") or ""),
+        "uuid": str(form.get("uuid") or ""),
+        "seed_urls": str(form.get("seed_urls") or ""),
+        "access_basis": str(form.get("access_basis") or ""),
+        "access_reference": str(form.get("access_reference") or ""),
+        "access_confirmed": form.get("access_confirmed") == "on",
+        "engine_hint": str(form.get("engine_hint") or "http"),
+        "rate_limit": str(form.get("rate_limit") or "10"),
+        "retry": str(form.get("retry") or "3"),
+        "timeout": str(form.get("timeout") or "30"),
+        "raw_archive": form.get("raw_archive") == "on",
+        "item_locator": str(form.get("item_locator") or ""),
+        "fingerprint": str(form.get("fingerprint") or ""),
+        "fields": rows or None,
+    }
 
 
 @router.get("/sources/new", response_class=HTMLResponse, summary="建源表单")
@@ -66,7 +93,7 @@ async def sources_new(request: Request):
     user = await get_current_user(request)
     if user is None:
         return _login_redirect()
-    return render_with_csrf(request, "source_new.html", {"user": user, "error": None, "active": "sources"})
+    return render_with_csrf(request, "source_new.html", await page_ctx(user, error=None, form=None, active="sources"))
 
 
 @router.get("/sources/{uuid}/access-review", response_class=HTMLResponse, summary="数据源访问复核")
@@ -106,7 +133,7 @@ async def source_access_review_page(uuid: str, request: Request):
     return render_with_csrf(
         request,
         "source_access_review.html",
-        {"user": user, "source": source, "error": None, "active": "sources"},
+        await page_ctx(user, source=source, error=None, active="sources"),
     )
 
 
@@ -162,15 +189,20 @@ async def sources_create(request: Request):
         return _login_redirect()
     form = await request.form()
     verify_csrf(request, form.get("csrf_token"))
+    snap = _form_snapshot(form)  # 一次性快照；任何错误分支都回填它（不丢用户输入）
+
+    async def _back(error: str, status: int = 400):
+        return render_with_csrf(
+            request,
+            "source_new.html",
+            await page_ctx(user, error=error, form=snap, active="sources"),
+            status_code=status,
+        )
+
     if get_server_settings().rbac_enabled:
         perms = await effective_permissions(get_engine("pyp"), int(user["id"]))
         if not has_permission(perms, "sources.write"):
-            return render_with_csrf(
-                request,
-                "source_new.html",
-                {"user": user, "error": "缺少权限：sources.write（创建/编辑数据源）", "active": "sources"},
-                status_code=403,
-            )
+            return await _back("缺少权限：sources.write（创建/编辑数据源）", 403)
     name = (str(form.get("name") or "")).strip()
     uuid = (str(form.get("uuid") or "")).strip()
     seed_urls = [u.strip() for u in str(form.get("seed_urls") or "").splitlines() if u.strip()]
@@ -183,12 +215,7 @@ async def sources_create(request: Request):
         retry = int(str(form.get("retry") or "3"))
         timeout = int(str(form.get("timeout") or "30"))
     except ValueError:
-        return render_with_csrf(
-            request,
-            "source_new.html",
-            {"user": user, "error": "运行参数格式不正确", "active": "sources"},
-            status_code=400,
-        )
+        return await _back("运行参数格式不正确")
     raw_archive = form.get("raw_archive") == "on"
     item_expr = (str(form.get("item_locator") or "")).strip()
     fingerprint = [x.strip() for x in str(form.get("fingerprint") or "").split(",") if x.strip()]
@@ -214,16 +241,7 @@ async def sources_create(request: Request):
         )
 
     if not uuid or not seed_urls or not fields or not access_reference or not access_confirmed:
-        return render_with_csrf(
-            request,
-            "source_new.html",
-            {
-                "user": user,
-                "error": "数据源短码、种子 URL、字段、访问依据及确认项均为必填",
-                "active": "sources",
-            },
-            status_code=400,
-        )
+        return await _back("数据源短码、种子 URL、字段、访问依据及确认项均为必填")
 
     rule = RulePack(
         fields=fields,
@@ -247,12 +265,7 @@ async def sources_create(request: Request):
             raw_archive=raw_archive,
         )
     except (LookupError, PermissionError, ValueError) as exc:
-        return render_with_csrf(
-            request,
-            "source_new.html",
-            {"user": user, "error": str(exc), "active": "sources"},
-            status_code=400,
-        )
+        return await _back(str(exc))
     await record_audit_best_effort(
         get_engine("pyp"),
         action="source.create",

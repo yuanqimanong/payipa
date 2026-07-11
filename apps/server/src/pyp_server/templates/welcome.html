@@ -1,0 +1,172 @@
+{% extends "base.html" %}
+{% block title %}设置向导{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div class="titles">
+    <h2>欢迎使用 payipa</h2>
+    <p>按下面四步完成初始化：检查系统 → 接入采集节点 → 跑一条示例采集 → 开始使用。随时可以离开，进度会保留。</p>
+  </div>
+</div>
+
+<style>
+  .wiz-card { margin-bottom: 14px; padding: 18px 20px; }
+  .wiz-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+  .wiz-num { flex: 0 0 26px; width: 26px; height: 26px; border-radius: 50%; background: var(--surface-2, #eee);
+             display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 13px; }
+  .wiz-num.done { background: var(--ok, #16a34a); color: #fff; }
+  .wiz-head h3 { margin: 0; font-size: 15px; }
+  .wiz-body { color: var(--text-muted); font-size: 13px; }
+  .wiz-body .cmd { display: flex; gap: 8px; align-items: center; margin: 8px 0; }
+  .wiz-body code.line { flex: 1; display: block; padding: 8px 10px; background: var(--surface-2, #f5f5f5);
+                        border-radius: 6px; font-size: 12px; overflow-x: auto; white-space: nowrap; }
+  .wiz-status { margin-top: 8px; font-size: 13px; }
+  .wiz-status.ok { color: var(--ok, #16a34a); font-weight: 600; }
+  .checklist div { padding: 3px 0; }
+  .bar { height: 8px; background: var(--surface-2, #eee); border-radius: 4px; overflow: hidden; margin: 8px 0; }
+  .bar i { display: block; height: 100%; width: 0; background: var(--brand, #4f46e5); transition: width .4s; }
+</style>
+
+<div class="card wiz-card" id="step1">
+  <div class="wiz-head"><span class="wiz-num" id="n1">1</span><h3>系统就绪检查</h3></div>
+  <div class="wiz-body">
+    <div id="readyz-list">检查中…</div>
+  </div>
+</div>
+
+<div class="card wiz-card" id="step2">
+  <div class="wiz-head"><span class="wiz-num" id="n2">2</span><h3>接入第一个采集节点</h3></div>
+  <div class="wiz-body">
+    <p>采集由独立的节点（agent）执行。在<b>要跑采集的机器</b>上任选一种方式启动（首次接入用 join token，之后节点自动换发长期凭证）：</p>
+    <div class="cmd"><code class="line" id="cmd-cli">uv run pyp-agent join --server {{ server_url }} --token {{ join_token or "<PYP_SERVER_AGENT_JOIN_TOKEN>" }} --state-dir ~/.pyp-agent</code><button class="btn ghost sm" data-copy="cmd-cli">复制</button></div>
+    <div class="cmd"><code class="line" id="cmd-docker">docker compose -f deploy/docker-compose.agents.yml up -d</code><button class="btn ghost sm" data-copy="cmd-docker">复制</button></div>
+    <p>
+      说明：<code>--server</code> 请改为节点<b>可达</b>的主控地址（当前页面地址是 {{ server_url }}）；
+      {% if join_token %}开发环境 join token 为 <code>{{ join_token }}</code>；{% else %}join token 从部署环境变量 <code>PYP_SERVER_AGENT_JOIN_TOKEN</code> 获取；{% endif %}
+      节点身份保存在 <code>--state-dir</code> 目录（容器请挂持久卷，重建不换身份）。
+    </p>
+    <div class="wiz-status" id="agent-status">等待节点接入…（每 3 秒自动检测）</div>
+  </div>
+</div>
+
+<div class="card wiz-card" id="step3">
+  <div class="wiz-head"><span class="wiz-num" id="n3">3</span><h3>跑一条示例采集</h3></div>
+  <div class="wiz-body">
+    <p>用公开练习站 books.toscrape.com 建一个示例数据源并采集一页书目（约 20 条），验证「下发 → 采集 → 入库 → 查看」整条链路。</p>
+    <button class="btn" id="run-demo" disabled>创建示例数据源并开始采集</button>
+    <div class="bar" id="demo-bar" style="display:none"><i id="demo-fill"></i></div>
+    <div class="wiz-status" id="demo-status">请先完成第 2 步（需要至少一个在线节点）。</div>
+  </div>
+</div>
+
+<div class="card wiz-card" id="step4">
+  <div class="wiz-head"><span class="wiz-num" id="n4">4</span><h3>完成</h3></div>
+  <div class="wiz-body">
+    <div class="checklist" id="checklist"></div>
+    <p style="margin-top:8px">接下来可以：到 <a href="/sources/new">数据源</a> 接入自己的目标站（需登记访问授权依据）；在 <a href="/tasks">任务管理</a> 配定时采集；到 <a href="/config">公共配置</a> 添加通知机器人。</p>
+    <button class="btn" id="finish">标记向导完成</button>
+    <span class="wiz-status ok" id="finish-status" style="display:none">✓ 已完成。之后可随时从 /welcome 重新打开本向导。</span>
+  </div>
+</div>
+
+<script src="/static/views.js"></script>
+<script>
+  const $ = (id) => document.getElementById(id);
+  const done = (n) => { $("n" + n).classList.add("done"); $("n" + n).textContent = "✓"; };
+  let agentOk = false, demoOk = false;
+
+  document.querySelectorAll("[data-copy]").forEach((b) => b.addEventListener("click", async () => {
+    try { await navigator.clipboard.writeText($(b.dataset.copy).textContent); b.textContent = "已复制"; }
+    catch (e) { b.textContent = "复制失败"; }
+    setTimeout(() => (b.textContent = "复制"), 1500);
+  }));
+
+  async function checkReady() {
+    try {
+      const r = await fetch("/readyz");
+      const body = await r.json();
+      const rows = Object.entries(body.checks).map(([k, v]) => {
+        const ok = v === "ok" || v === "disabled";
+        return `<div>${ok ? "✓" : "✗"} ${PypViews.esc(k)}${ok ? "" : " —— " + PypViews.esc(v)}</div>`;
+      });
+      $("readyz-list").innerHTML = rows.join("");
+      if (r.status === 200) done(1);
+    } catch (e) { $("readyz-list").textContent = "无法读取系统状态：" + e.message; }
+  }
+
+  async function checkAgents() {
+    try {
+      const nodes = await PypViews.fetchJSON("/api/agents");
+      const online = (nodes || []).filter((n) => n.online);
+      if (online.length) {
+        agentOk = true;
+        done(2);
+        $("agent-status").className = "wiz-status ok";
+        $("agent-status").textContent = `✓ 已接入 ${online.length} 个节点（${online.map((n) => n.agent_id.slice(0, 8)).join(", ")}）`;
+        $("run-demo").disabled = false;
+        if (!demoOk) $("demo-status").textContent = "节点就绪，可以开始示例采集。";
+        return;
+      }
+    } catch (e) { /* 未登录/瞬时失败：下轮再试 */ }
+    setTimeout(checkAgents, 3000);
+  }
+
+  async function pollBatch(id) {
+    try {
+      const p = await PypViews.fetchJSON(`/api/monitor/batches/${id}`);
+      $("demo-bar").style.display = "";
+      $("demo-fill").style.width = (p.pct || 0) + "%";
+      $("demo-status").textContent = `采集中… ${p.ok}/${p.total} 条完成`;
+      if (p.running === 0 && p.total > 0) {
+        demoOk = true;
+        done(3);
+        $("demo-status").className = "wiz-status ok";
+        $("demo-status").innerHTML = `✓ 采集完成：成功 ${p.ok} 条` + (p.fail ? `、失败 ${p.fail} 条` : "") +
+          `。<a href="/data/{{ demo_code }}">查看采到的数据 →</a>`;
+        renderChecklist();
+        return;
+      }
+    } catch (e) { $("demo-status").textContent = "进度读取失败：" + e.message; }
+    setTimeout(() => pollBatch(id), 2000);
+  }
+
+  async function postJSON(url) {
+    const resp = await fetch(url, { method: "POST", headers: { Accept: "application/json" } });
+    if (!resp.ok) throw new Error((await resp.json().catch(() => ({}))).detail || `HTTP ${resp.status}`);
+    return resp.json();
+  }
+
+  $("run-demo").addEventListener("click", async () => {
+    $("run-demo").disabled = true;
+    $("demo-status").textContent = "正在创建示例数据源…";
+    try {
+      const r = await postJSON("/api/onboard/demo");
+      $("demo-status").textContent = `已创建（${r.requests} 条请求排队），等待节点领取…`;
+      pollBatch(r.batch_id);
+    } catch (e) {
+      $("demo-status").textContent = "创建失败：" + e.message;
+      $("run-demo").disabled = false;
+    }
+  });
+
+  function renderChecklist() {
+    $("checklist").innerHTML = [
+      `<div>✓ 管理员账号已创建</div>`,
+      `<div>${agentOk ? "✓" : "○"} 采集节点已接入</div>`,
+      `<div>${demoOk ? "✓" : "○"} 示例采集已完成</div>`,
+    ].join("");
+  }
+
+  $("finish").addEventListener("click", async () => {
+    try {
+      await postJSON("/api/onboard/done");
+      $("finish").style.display = "none";
+      $("finish-status").style.display = "";
+      done(4);
+    } catch (e) { alert("保存失败：" + e.message); }
+  });
+
+  checkReady();
+  checkAgents();
+  renderChecklist();
+</script>
+{% endblock %}
