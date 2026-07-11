@@ -5,11 +5,13 @@
 
 from __future__ import annotations
 
+import hmac
 import logging
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from payipa.crawl.ingest import build_data_table
 from payipa.crawl.run import (
+    defer_request_for_retry,
     enqueue_discovered,
     finalize_batch_if_done,
     finalize_request_batch,
@@ -51,6 +53,12 @@ _client_frame = TypeAdapter(ClientFrame)
 _CLOSE_OK = 1000
 _CLOSE_PROTOCOL = 1002
 _CLOSE_UNSUPPORTED = 1003
+_CLOSE_POLICY = 1008  # 策略违规（join token 不符）
+
+
+def _extract_bearer(header: str) -> str:
+    """从 Authorization 头取 Bearer token（大小写不敏感前缀）；无前缀则原样返回。"""
+    return header[7:] if header[:7].lower() == "bearer " else header
 
 
 async def _ingest_result(result: ResultBatch, limiter: SourceRateLimiter) -> None:
@@ -67,10 +75,23 @@ async def _ingest_result(result: ResultBatch, limiter: SourceRateLimiter) -> Non
     limiter.on_ok(uuid)  # 成功 → AIMD 加性增
 
 
-async def _pause_source(req_id: int, message: str | None, hub) -> None:
+async def _pause_source(
+    req_id: int,
+    message: str | None,
+    hub,
+    *,
+    response_status: int | None = None,
+    reason_code: str | None = None,
+) -> None:
     """暂停整源并取消同源其他在途任务。"""
     pyp = get_engine("pyp")
-    _, inflight, batch_ids = await pause_source_for_request(pyp, req_id, message)
+    _, inflight, batch_ids = await pause_source_for_request(
+        pyp,
+        req_id,
+        message,
+        response_status=response_status,
+        reason_code=reason_code,
+    )
     for other_req_id in inflight:
         conn = hub.find_by_req(other_req_id)
         if conn is not None:
@@ -89,9 +110,41 @@ async def _finalize_terminal_request(req_id: int) -> None:
         await on_batch_finalized(batch_id)
 
 
+_RETRYABLE = frozenset(
+    {int(ErrorCode.NETWORK), int(ErrorCode.TIMEOUT), int(ErrorCode.THROTTLED), int(ErrorCode.UPSTREAM)}
+)
+
+
+async def _defer_retry(frame: StatusReport | ErrorFrame, limiter: SourceRateLimiter) -> bool:
+    """持久化退避并同步进程内 AIMD；返回是否已重新排队。"""
+    req_id = int(frame.req_id or 0)
+    source, requeued = await defer_request_for_retry(
+        get_engine("pyp"),
+        req_id,
+        frame.state if isinstance(frame, StatusReport) else frame.code,
+        retry_after_s=frame.retry_after_s if isinstance(frame, StatusReport) else None,
+        response_status=frame.response_status if isinstance(frame, StatusReport) else None,
+        reason_code=frame.reason_code if isinstance(frame, StatusReport) else None,
+        message=frame.message,
+        max_attempt=get_server_settings().max_attempt,
+    )
+    if source is not None:
+        limiter.on_backoff_signal(
+            source,
+            retry_after_s=frame.retry_after_s if isinstance(frame, StatusReport) else None,
+        )
+    return requeued
+
+
 @router.websocket("/ws/agent")
 async def agent_ws(ws: WebSocket) -> None:
     await ws.accept()
+    # join token 校验：agent 握手须带 Authorization: Bearer <token>，与配置不符即拒接。
+    # 默认 "dev"（开发放行）；生产经 PYP_SERVER_AGENT_JOIN_TOKEN 注入真值（preflight 拒绝默认值）。
+    expected = get_server_settings().agent_join_token
+    if not hmac.compare_digest(_extract_bearer(ws.headers.get("authorization", "")), expected):
+        await ws.close(code=_CLOSE_POLICY, reason="invalid join token")
+        return
     hub = ws.app.state.hub
     agent_id: str | None = None
     try:
@@ -128,7 +181,14 @@ async def agent_ws(ws: WebSocket) -> None:
             "register_agent %s failed (DB down?); registering in-memory with defaults", agent_id, exc_info=True
         )
         weight, group_name = 1, None
-    hub.register(agent_id, ws, register.slot_n, weight=weight, group_name=group_name)
+    hub.register(
+        agent_id,
+        ws,
+        register.slot_n,
+        weight=weight,
+        group_name=group_name,
+        engines=register.capabilities.engines,
+    )
     await ws.send_text(RegisterAck(node_token=token).model_dump_json())
 
     try:
@@ -145,18 +205,34 @@ async def agent_ws(ws: WebSocket) -> None:
                 hub.on_finished(agent_id, frame.result.req_id)
             elif isinstance(frame, StatusReport) and (frame.state < 0 or frame.state == int(RequestState.CANCELED)):
                 if frame.state == int(ErrorCode.ACCESS_PAUSED):
-                    await _pause_source(int(frame.req_id), frame.message, hub)
+                    await _pause_source(
+                        int(frame.req_id),
+                        frame.message,
+                        hub,
+                        response_status=frame.response_status,
+                        reason_code=frame.reason_code,
+                    )
+                    terminal = True
+                elif frame.state in _RETRYABLE:
+                    terminal = not await _defer_retry(frame, ws.app.state.limiter)
                 else:
                     await set_request_state(get_engine("pyp"), int(frame.req_id), frame.state)
+                    terminal = True
                 hub.on_finished(agent_id, frame.req_id)
-                await _finalize_terminal_request(int(frame.req_id))
+                if terminal:
+                    await _finalize_terminal_request(int(frame.req_id))
             elif isinstance(frame, ErrorFrame) and frame.req_id:
                 if frame.code == int(ErrorCode.ACCESS_PAUSED):
                     await _pause_source(int(frame.req_id), frame.message, hub)
+                    terminal = True
+                elif frame.code in _RETRYABLE:
+                    terminal = not await _defer_retry(frame, ws.app.state.limiter)
                 else:
                     await set_request_state(get_engine("pyp"), int(frame.req_id), frame.code)
+                    terminal = True
                 hub.on_finished(agent_id, frame.req_id)
-                await _finalize_terminal_request(int(frame.req_id))
+                if terminal:
+                    await _finalize_terminal_request(int(frame.req_id))
     except WebSocketDisconnect:
         pass
     finally:

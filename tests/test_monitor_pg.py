@@ -197,3 +197,31 @@ def test_monitor_endpoints_gated(require_pg: None) -> None:
     finally:
         settings.rbac_enabled = False
         asyncio.run(cleanup())
+
+
+def test_zombie_node_judged_offline(require_pg: None) -> None:
+    """状态列 online 但心跳过期 → 判定离线（防僵尸节点：硬崩溃时断连处理器不会跑）。"""
+    _ZOMBIE = "mon-zombie-1"
+
+    async def main() -> None:
+        pyp = create_async_engine(get_settings().async_url("pyp"))
+        try:
+            await run.register_agent(pyp, _ZOMBIE, hostname="h", slot_n=4, capabilities={}, node_token_hash="t")
+            fresh = {n.agent_id: n.online for n in await node_metrics(pyp)}
+            assert fresh[_ZOMBIE] is True  # 刚注册（心跳新鲜）→ 在线
+
+            async with pyp.begin() as conn:  # 心跳做旧但状态列仍 online（模拟硬崩溃）
+                await conn.execute(
+                    text("UPDATE agents SET last_heartbeat = now() - interval '10 minutes' WHERE agent_id = :a"),
+                    {"a": _ZOMBIE},
+                )
+            stale = {n.agent_id: n.online for n in await node_metrics(pyp)}
+            assert stale[_ZOMBIE] is False  # 心跳过期 → 离线
+            ov = await system_overview(pyp)
+            assert ov.nodes_online <= ov.nodes_total  # overview 同口径不计僵尸
+        finally:
+            async with pyp.begin() as conn:
+                await conn.execute(text("DELETE FROM agents WHERE agent_id = :a"), {"a": _ZOMBIE})
+            await pyp.dispose()
+
+    asyncio.run(main())

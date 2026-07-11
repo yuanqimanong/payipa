@@ -21,6 +21,8 @@ class ErrorCode(IntEnum):
     SOFT_FAIL = -4  # 软失败（HTTP 200 但内容为错误页，命中 fail_when）
     PARSE_FAIL = -5  # 解析失败（规则未命中/结构变更）
     NODE_LOST = -6  # 节点失联（心跳超时回收，不计业务重试）
+    THROTTLED = -7  # 目标端容量限制（429/Retry-After），进入受控退避
+    UPSTREAM = -8  # 上游暂不可用（5xx），按策略延迟重试
 
 
 # 人类可读标签（喂 UI / 日志 / 监控）。
@@ -31,6 +33,8 @@ ERROR_LABELS: dict[ErrorCode, str] = {
     ErrorCode.SOFT_FAIL: "软失败",
     ErrorCode.PARSE_FAIL: "解析失败",
     ErrorCode.NODE_LOST: "节点失联",
+    ErrorCode.THROTTLED: "限流退避",
+    ErrorCode.UPSTREAM: "上游暂不可用",
 }
 
 

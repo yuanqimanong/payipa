@@ -5,7 +5,7 @@ from __future__ import annotations
 from payipa.crawl.rules import RuleStore
 from payipa.crawl.run import create_batch_with_requests, ensure_data_table, setup_source
 from payipa.db.engine import get_engine
-from payipa_contracts import Channel, RulePack
+from payipa_contracts import Channel, EngineHint, RulePack
 
 
 async def dispatch_source_run(
@@ -19,6 +19,11 @@ async def dispatch_source_run(
     access_basis: str | None = None,
     access_reference: str | None = None,
     access_confirmed: bool = False,
+    engine_hint: EngineHint | None = None,
+    rate_limit: int | None = None,
+    retry: int | None = None,
+    timeout: int | None = None,
+    raw_archive: bool | None = None,
 ) -> dict:
     """建源+存规则+建表+建批次；请求以 QUEUED 落库，实际下发由后台派发环负责。
 
@@ -35,6 +40,11 @@ async def dispatch_source_run(
         access_basis=access_basis,
         access_reference=access_reference,
         access_confirmed=access_confirmed,
+        engine_hint=engine_hint,
+        rate_limit=rate_limit,
+        retry=retry,
+        timeout=timeout,
+        raw_archive=raw_archive,
     )
     ptr = await RuleStore(pyp).put(source_id, rule)
     fields_indexed = indexed_fields or [f.name for f in rule.fields if f.index]

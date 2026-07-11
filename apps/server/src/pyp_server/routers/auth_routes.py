@@ -9,6 +9,7 @@ from payipa.db.pyp import User
 from sqlalchemy import select
 
 from pyp_server.auth import COOKIE_NAME, create_session, verify_password
+from pyp_server.csrf import render_with_csrf, verify_csrf
 from pyp_server.settings import get_server_settings
 
 router = APIRouter(tags=["auth"])
@@ -16,11 +17,14 @@ router = APIRouter(tags=["auth"])
 
 @router.get("/login", response_class=HTMLResponse, summary="登录页")
 async def login_page(request: Request) -> HTMLResponse:
-    return request.app.state.templates.TemplateResponse(request, "login.html", {"error": None})
+    return render_with_csrf(request, "login.html", {"error": None})
 
 
 @router.post("/login", summary="登录提交")
-async def login_submit(request: Request, username: str = Form(...), password: str = Form(...)):
+async def login_submit(
+    request: Request, username: str = Form(...), password: str = Form(...), csrf_token: str = Form(None)
+):
+    verify_csrf(request, csrf_token)
     async with get_engine("pyp").connect() as conn:
         row = (
             await conn.execute(
@@ -28,9 +32,7 @@ async def login_submit(request: Request, username: str = Form(...), password: st
             )
         ).first()
     if row is None or row[3] != "active" or not verify_password(row[2], password):
-        return request.app.state.templates.TemplateResponse(
-            request, "login.html", {"error": "用户名或密码错误"}, status_code=401
-        )
+        return render_with_csrf(request, "login.html", {"error": "用户名或密码错误"}, status_code=401)
     resp = RedirectResponse("/sources", status_code=303)
     resp.set_cookie(
         COOKIE_NAME,

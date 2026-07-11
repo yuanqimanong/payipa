@@ -4,7 +4,8 @@
   const BADGE = {
     active: "green", online: "green", success: "green", done: "green", sent: "green", approved: "green",
     running: "blue", queued: "blue", assigned: "blue", inflight: "blue", testing: "amber", draft: "amber",
-    paused: "amber", pending: "amber", disabled: "red", offline: "red", failed: "red", dead: "red", error: "red",
+    cooling: "amber", review: "amber", paused: "red", pending: "amber", disabled: "red", offline: "red",
+    failed: "red", dead: "red", error: "red",
   };
 
   function esc(s) {
@@ -17,7 +18,15 @@
     if (col.type === "badge") {
       if (v == null || v === "") return "<td class='muted'>—</td>";
       const cls = BADGE[String(v).toLowerCase()] || "";
-      return `<td><span class="badge ${cls}"><span class="dot"></span>${esc(v)}</span></td>`;
+      const display = col.labels && col.labels[v] ? col.labels[v] : v;
+      return `<td><span class="badge ${cls}"><span class="dot"></span>${esc(display)}</span></td>`;
+    }
+    if (col.type === "meter") {
+      const ratio = Math.max(0, Math.min(1, Number(v) || 0));
+      const percent = (ratio * 100).toFixed(1);
+      const tone = ratio >= 0.95 ? "good" : (ratio >= 0.8 ? "warn" : "bad");
+      return `<td><div class="health-meter ${tone}" title="${percent}%"><span style="width:${percent}%"></span></div>` +
+        `<small class="meter-label">${percent}%</small></td>`;
     }
     if (col.type === "bool") return `<td>${v ? "✓" : "<span class='muted'>—</span>"}</td>`;
     if (col.type === "mono") return v ? `<td><code>${esc(v)}</code></td>` : "<td class='muted'>—</td>";

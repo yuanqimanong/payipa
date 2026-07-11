@@ -48,9 +48,22 @@ def test_task_preview_roundtrip() -> None:
 
 
 def test_agent_ws_register_handshake() -> None:
-    with client.websocket_connect("/ws/agent") as conn:
+    # 默认 join token = "dev"；握手须带 Authorization: Bearer dev
+    with client.websocket_connect("/ws/agent", headers={"authorization": "Bearer dev"}) as conn:
         conn.send_json({"type": "register", "agent_id": "a1", "hostname": "h1", "slot_n": 4})
         ack = conn.receive_json()
     assert ack["type"] == "register_ack"
     assert ack["node_token"]
     assert ack["contract_version"] == c.CONTRACT_VERSION
+
+
+def test_agent_ws_rejects_bad_join_token() -> None:
+    """错误/缺失 join token → 握手被拒（close 1008），不进入注册。"""
+    import pytest
+    from starlette.websockets import WebSocketDisconnect
+
+    with (
+        pytest.raises(WebSocketDisconnect),
+        client.websocket_connect("/ws/agent", headers={"authorization": "Bearer wrong"}) as conn,
+    ):
+        conn.receive_json()

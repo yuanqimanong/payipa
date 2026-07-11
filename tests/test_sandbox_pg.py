@@ -52,8 +52,14 @@ def live_server():
     try:
         yield port
     finally:
+        # 确定性关停：等线程真正退出（不放弃为守护线程），避免残留 uvicorn 事件循环/asyncpg 连接
+        # 与后续测试共享的 get_engine 缓存跨事件循环干扰（曾致 test_sched_cancel_pg 偶发脏读/FK）。
         server.should_exit = True
-        t.join(timeout=10)
+        for _ in range(200):  # 最多等 20s
+            t.join(timeout=0.1)
+            if not t.is_alive():
+                break
+        assert not t.is_alive(), "uvicorn 线程未能在 20s 内关停"
 
 
 def test_sandboxed_assembly_end_to_end(require_pg: None, require_sandbox: None, live_server: int) -> None:

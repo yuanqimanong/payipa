@@ -22,6 +22,7 @@ import json
 import os
 import re
 import shutil
+import stat
 import subprocess
 import tempfile
 import uuid
@@ -40,6 +41,8 @@ GATEWAY_PORT_LABEL = "payipa.gateway-port"
 DEFAULT_IMAGE = "python:3.14-slim"
 PROXY_IMAGE = "nginx:alpine"
 _MAX_LOG_BYTES = 64 * 1024
+_DEFAULT_MAX_OUTPUT_ROWS = 100_000
+_DEFAULT_MAX_ROW_BYTES = 1024 * 1024
 
 
 class SandboxUnavailable(RuntimeError):
@@ -156,6 +159,59 @@ async def ensure_sandbox_infra(gateway_port: int, *, docker: str = "docker") -> 
     await _docker("network", "connect", "bridge", GATEWAY_PROXY_NAME, docker=docker)
 
 
+def _read_result_file(
+    result_path: Path,
+    *,
+    max_bytes: int,
+    max_rows: int,
+    max_row_bytes: int,
+) -> dict:
+    """无符号链接跟随地读取并校验不可信容器产物。"""
+    try:
+        meta = result_path.lstat()
+    except FileNotFoundError as exc:
+        raise ValueError("容器未产出 result.json") from exc
+    if stat.S_ISLNK(meta.st_mode) or not stat.S_ISREG(meta.st_mode):
+        raise ValueError("result.json 必须是普通文件，禁止符号链接或设备文件")
+    if meta.st_size > max_bytes:
+        raise ValueError(f"result.json 超出大小上限（{meta.st_size}>{max_bytes} bytes）")
+
+    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        fd = os.open(result_path, flags)
+    except OSError as exc:
+        raise ValueError("无法安全打开 result.json") from exc
+    with os.fdopen(fd, "rb") as fh:
+        raw = fh.read(max_bytes + 1)
+    if len(raw) > max_bytes:
+        raise ValueError(f"result.json 超出大小上限（>{max_bytes} bytes）")
+    try:
+        result = json.loads(raw)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError("result.json 不是有效 UTF-8 JSON") from exc
+    if not isinstance(result, dict) or not isinstance(result.get("ok"), bool):
+        raise ValueError("result.json 缺少布尔字段 ok")
+    if result["ok"]:
+        rows = result.get("rows")
+        watermarks = result.get("new_watermarks", {})
+        if not isinstance(rows, list):
+            raise ValueError("成功结果的 rows 必须是 list[dict]")
+        if len(rows) > max_rows:
+            raise ValueError(f"结果行数超出上限（{len(rows)}>{max_rows}）")
+        for index, row in enumerate(rows):
+            if not isinstance(row, dict):
+                raise ValueError(f"rows[{index}] 不是对象")
+            if len(json.dumps(row, ensure_ascii=False, default=str).encode()) > max_row_bytes:
+                raise ValueError(f"rows[{index}] 超出单行大小上限")
+        if not isinstance(watermarks, dict) or any(
+            not isinstance(key, str) or not isinstance(value, int) for key, value in watermarks.items()
+        ):
+            raise ValueError("new_watermarks 必须是 str->int 对象")
+    elif not isinstance(result.get("error"), str):
+        raise ValueError("失败结果必须包含字符串 error")
+    return result
+
+
 class SandboxExecutor:
     """在锁定 Linux 容器里执行组装脚本源码，经 egress 代理走 Query Gateway 取数。
 
@@ -175,6 +231,8 @@ class SandboxExecutor:
         timeout_s: float = 120.0,
         page_limit: int = 500,
         max_output_bytes: int = 256 * 1024 * 1024,
+        max_output_rows: int = _DEFAULT_MAX_OUTPUT_ROWS,
+        max_row_bytes: int = _DEFAULT_MAX_ROW_BYTES,
         runtime: str | None = None,
         docker: str = "docker",
     ) -> None:
@@ -187,6 +245,8 @@ class SandboxExecutor:
         self._timeout_s = timeout_s
         self._page_limit = page_limit
         self._max_output_bytes = max_output_bytes
+        self._max_output_rows = max_output_rows
+        self._max_row_bytes = max_row_bytes
         # 可选更强隔离运行时（如 gVisor 的 "runsc"）：OCI 兼容，装好后一个标志即叠加，
         # 不改架构。Linux/WSL2 可用；None 走 docker 默认 runc。见 04A / 决策记录。
         self._runtime = runtime
@@ -257,8 +317,10 @@ class SandboxExecutor:
             cmd = [
                 self._docker, "run", "--rm", "-i",
                 "--name", name,
+                "--init",
                 *(("--runtime", self._runtime) if self._runtime else ()),
                 "--network", SANDBOX_NETWORK,
+                "--ipc", "none",
                 "--read-only",
                 "--cap-drop", "ALL",
                 "--security-opt", "no-new-privileges",
@@ -267,8 +329,12 @@ class SandboxExecutor:
                 "--memory-swap", self._memory,  # 禁 swap 逃逸内存限额
                 "--cpus", self._cpus,
                 "--ulimit", f"fsize={self._max_output_bytes}",  # 单文件写出上限（/out 撑爆宿主盘防护）
+                "--ulimit", "nofile=128:128",
+                "--ulimit", f"nproc={self._pids_limit}:{self._pids_limit}",
+                "--stop-timeout", "2",
                 "--user", user_arg,
-                "--tmpfs", "/tmp:rw,size=64m",
+                "--tmpfs", "/tmp:rw,noexec,nosuid,nodev,size=64m",
+                "--env", "PYTHONDONTWRITEBYTECODE=1",
                 "-v", f"{jobdir}:/job:ro",
                 "-v", f"{outdir}:/out",
                 self._image,
@@ -282,9 +348,15 @@ class SandboxExecutor:
                 raise SandboxTimeout(f"组装脚本超时（>{self._timeout_s}s），容器已终止") from None
             logs = (proc.stdout + proc.stderr).decode(errors="replace")[-_MAX_LOG_BYTES:]
             result_path = outdir / "result.json"
-            if not result_path.exists():
-                raise SandboxScriptError(f"容器未产出结果（exit={proc.returncode}）", logs)
-            result = json.loads(result_path.read_text(encoding="utf-8"))
+            try:
+                result = _read_result_file(
+                    result_path,
+                    max_bytes=self._max_output_bytes,
+                    max_rows=self._max_output_rows,
+                    max_row_bytes=self._max_row_bytes,
+                )
+            except ValueError as exc:
+                raise SandboxScriptError(f"容器结果校验失败（exit={proc.returncode}）：{exc}", logs) from exc
             if not result.get("ok"):
                 raise SandboxScriptError(str(result.get("error", "unknown error")), logs)
             return result["rows"], {k: int(v) for k, v in (result.get("new_watermarks") or {}).items()}

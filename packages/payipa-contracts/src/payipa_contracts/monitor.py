@@ -6,6 +6,8 @@ agent 只回报原始计数（见 result.ExecSummary），聚合在主控 core.m
 
 from __future__ import annotations
 
+from datetime import datetime
+
 from pydantic import BaseModel
 
 from payipa_contracts._annotate import active
@@ -62,6 +64,18 @@ class SourceHealth(BaseModel):
     """单数据源健康度（成败率 + 数据质量），主控侧聚合。"""
 
     source: str = active("数据源短码", since="M5")
+    name: str | None = active("数据源名称", default=None, since="M6")
+    access_state: str = active("运行状态：active/cooling/paused/review", default="review", since="M6")
+    pause_reason: str | None = active("人工暂停原因", default=None, since="M6")
+    cooldown_until: datetime | None = active("自动冷却结束时间", default=None, since="M6")
+    cooldown_reason: str | None = active("自动冷却原因码", default=None, since="M6")
+    rate_limit: float = active("配置的额定请求速率", default=0, ge=0, since="M6")
+    effective_rate: float | None = active("AIMD 当前有效速率", default=None, ge=0, since="M6")
+    retry_in_s: float = active("进程内 Retry-After 剩余秒数", default=0, ge=0, since="M6")
+    last_status_code: int | None = active("最近一次 HTTP 状态码", default=None, ge=100, le=599, since="M6")
+    consecutive_failures: int = active("连续失败次数", default=0, ge=0, since="M6")
+    last_success_at: datetime | None = active("最近成功时间", default=None, since="M6")
+    last_failure_at: datetime | None = active("最近失败时间", default=None, since="M6")
     total: int = active("请求总数（终态）", ge=0, default=0, since="M5")
     ok: int = active("成功数", ge=0, default=0, since="M5")
     fail: int = active("失败数", ge=0, default=0, since="M5")

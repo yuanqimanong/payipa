@@ -4,45 +4,83 @@
 <div class="page-head">
   <div class="titles">
     <h2>系统监控</h2>
-    <p>主控侧实时聚合：节点在线、队列深度、请求成败与数据质量、各源健康度。</p>
+    <p id="refresh-meta">正在同步运行态</p>
   </div>
-  <div class="actions"><button class="btn ghost" id="refresh">刷新</button></div>
+  <div class="actions">
+    <button class="btn ghost" id="refresh" type="button" title="立即刷新">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11a8.1 8.1 0 0 0-15.5-2M4 4v5h5"/><path d="M4 13a8.1 8.1 0 0 0 15.5 2M20 20v-5h-5"/></svg>
+      刷新
+    </button>
+  </div>
 </div>
-<div class="grid cols-4" id="stats" style="margin-bottom:16px"></div>
-<div class="card"><div class="card-head">各数据源健康度</div><div id="sources"><div class="empty">加载中…</div></div></div>
+<div class="grid cols-4" id="stats" style="margin-bottom:16px"><div class="empty">加载中…</div></div>
+<div class="card">
+  <div class="card-head monitor-meta"><span>数据源运行态</span><span class="muted" id="source-summary">—</span></div>
+  <div id="sources"><div class="empty">加载中…</div></div>
+</div>
 <script src="/static/views.js"></script>
 <script>
   const pct = (x) => (x == null ? "—" : (x * 100).toFixed(1) + "%");
+  const stateLabels = { active: "正常", cooling: "冷却中", paused: "已暂停", review: "待复核" };
+  let loading = false;
+
+  function recoveryText(source) {
+    if (source.access_state === "paused") return source.pause_reason || "等待人工复核";
+    if (source.access_state === "review") return "等待访问依据复核";
+    if (source.access_state !== "cooling") return "—";
+    const dbWait = source.cooldown_until ? Math.max(0, (new Date(source.cooldown_until) - Date.now()) / 1000) : 0;
+    const wait = Math.ceil(Math.max(dbWait, source.retry_in_s || 0));
+    return `${wait}s · ${source.cooldown_reason || "backoff"}`;
+  }
+
   async function load() {
+    if (loading) return;
+    loading = true;
+    const button = document.getElementById("refresh");
     const sbox = document.getElementById("sources");
+    button.disabled = true;
     try {
       const [ov, srcs] = await Promise.all([
         PypViews.fetchJSON("/api/monitor/overview"),
         PypViews.fetchJSON("/api/monitor/sources"),
       ]);
       const q = ov.quality || {};
+      const count = (state) => srcs.filter((s) => s.access_state === state).length;
       PypViews.renderStats(document.getElementById("stats"), [
         { k: "在线节点", v: `${ov.nodes_online}/${ov.nodes_total}` },
-        { k: "队列深度", v: ov.queue_depth },
-        { k: "整体成功率", v: pct(ov.success_rate), d: `${ov.ok}✓ / ${ov.fail}✗`, dir: ov.fail ? "down" : "up" },
-        { k: "解析质量", v: pct(q.parse_ok_rate), d: "空白 " + pct(q.blank_rate), dir: "flat" },
+        { k: "待执行请求", v: ov.queue_depth, d: ov.queue_depth ? "队列有积压" : "队列平稳", dir: ov.queue_depth ? "down" : "up" },
+        { k: "数据源状态", v: count("active"), d: `冷却 ${count("cooling")} · 暂停 ${count("paused")}`, dir: count("paused") ? "down" : "flat" },
+        { k: "整体成功率", v: pct(ov.success_rate), d: `解析 ${pct(q.parse_ok_rate)} · 空白 ${pct(q.blank_rate)}`, dir: ov.fail ? "down" : "up" },
       ]);
+      document.getElementById("source-summary").textContent = `正常 ${count("active")} · 冷却 ${count("cooling")} · 待复核 ${count("review")} · 暂停 ${count("paused")}`;
       PypViews.renderTable(sbox, [
         { key: "source", label: "数据源", type: "mono" },
-        { key: "total", label: "请求数", type: "mono" },
-        { key: "ok", label: "成功", type: "mono" },
-        { key: "fail", label: "失败", type: "mono" },
-        { key: "rate", label: "成功率" },
+        { key: "access_state", label: "状态", type: "badge", labels: stateLabels },
+        { key: "success_rate", label: "成功率", type: "meter" },
+        { key: "rate_txt", label: "速率 req/s", type: "mono" },
+        { key: "last_status_code", label: "最近 HTTP", type: "mono" },
+        { key: "consecutive_failures", label: "连续失败", type: "mono" },
         { key: "quality_txt", label: "解析质量" },
+        { key: "recovery_txt", label: "恢复状态" },
+        { key: "errors_txt", label: "失败分布" },
       ], (srcs || []).map((s) => ({
-        ...s, rate: pct(s.success_rate),
-        quality_txt: s.quality ? "OK " + pct(s.quality.parse_ok_rate) + " · 空白 " + pct(s.quality.blank_rate) : "—",
+        ...s,
+        rate_txt: `${s.effective_rate == null ? "—" : s.effective_rate} / ${s.rate_limit}`,
+        quality_txt: s.quality ? `解析 ${pct(s.quality.parse_ok_rate)} · 空白 ${pct(s.quality.blank_rate)}` : "—",
+        recovery_txt: recoveryText(s),
+        errors_txt: Object.entries(s.by_error || {}).map(([k, v]) => `${k} ${v}`).join(" · ") || "—",
       })));
+      document.getElementById("refresh-meta").textContent = `最近刷新 ${new Date().toLocaleTimeString("zh-CN", { hour12: false })} · 10 秒自动刷新`;
     } catch (e) {
       sbox.innerHTML = `<div class="empty err">${PypViews.esc(e.message)}</div>`;
+      document.getElementById("refresh-meta").textContent = "同步失败";
+    } finally {
+      loading = false;
+      button.disabled = false;
     }
   }
   document.getElementById("refresh").addEventListener("click", load);
+  setInterval(() => { if (!document.hidden) load(); }, 10000);
   load();
 </script>
 {% endblock %}

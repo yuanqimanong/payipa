@@ -53,6 +53,13 @@ class StatusReport(BaseModel):
     state: int = active("状态：正数=正常态、负数=错误码", since="M1")
     result_ref: ArtifactRef | None = active("结果工件指针（大对象）", default=None, since="M1")
     message: str | None = active("附加说明（失败原因等）", default=None)
+    response_status: int | None = active("目标端 HTTP 状态码（无响应时为空）", default=None, ge=100, le=599, since="M6")
+    reason_code: str | None = active(
+        "稳定、可聚合的机器原因码（不携带响应正文或凭证）", default=None, max_length=64, since="M6"
+    )
+    retry_after_s: float | None = active(
+        "建议等待秒数；主控仍会施加上下限和最大重试次数", default=None, ge=0, le=86400, since="M6"
+    )
 
 
 class ErrorFrame(BaseModel):

@@ -59,7 +59,7 @@ async def drain_once(hub: AgentHub, pyp: AsyncEngine, secret: str, lease_s: int,
             return dispatched
         progressed = False
         for spec in specs:
-            conn = hub.pick_free(spec.group)  # 同组空闲节点（group=None 可派任意）
+            conn = hub.pick_free(spec.group, spec.engine_hint.value)  # 同组且具备目标引擎的空闲节点
             if conn is None:
                 continue  # 该任务分组暂无空闲节点 → 跳过，换下一条（不阻塞别组）
             if not limiter.take(spec.source, rates.get(spec.source, 0)):

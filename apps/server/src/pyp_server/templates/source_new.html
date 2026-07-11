@@ -6,6 +6,17 @@
   .fld-row input, .fld-row select { margin: 0; }
   .pick-btn { padding: 4px 0; font-size: 13px; }
   #pick-hint { display: none; margin-top: 6px; color: var(--muted, #6b7280); font-size: 12px; }
+  .runtime-grid { display: grid; grid-template-columns: 1.4fr repeat(3, 1fr); gap: 12px; }
+  @media (max-width: 720px) {
+    .runtime-grid { grid-template-columns: 1fr 1fr; }
+    .fld-row { grid-template-columns: minmax(0, 1fr) 38px; align-items: stretch; }
+    .fld-row input[name="field_name"] { grid-column: 1; grid-row: 1; }
+    .fld-row .pick-btn { grid-column: 2; grid-row: 1; }
+    .fld-row input[name="field_css"] { grid-column: 1; grid-row: 2; }
+    .fld-row button:last-child { grid-column: 2; grid-row: 2; }
+    .fld-row select { grid-column: 1 / -1; grid-row: 3; }
+  }
+  @media (max-width: 460px) { .runtime-grid { grid-template-columns: 1fr; } }
 </style>
 {% endblock %}
 {% block content %}
@@ -17,6 +28,7 @@
   <div class="actions"><a class="btn ghost" href="/sources">← 返回列表</a></div>
 </div>
 <form class="card card-pad" method="post" action="/sources/create" style="max-width: 760px">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
   {% if error %}<div class="form-error">{{ error }}</div>{% endif %}
   <div class="field">
     <label>名称</label>
@@ -46,6 +58,33 @@
     <label class="check-row">
       <input type="checkbox" name="access_confirmed" required />
       <span>已核验该数据源允许本系统按当前规则访问</span>
+    </label>
+  </div>
+  <div class="runtime-grid">
+    <div class="field">
+      <label>采集引擎</label>
+      <select name="engine_hint">
+        <option value="http">HTTP</option>
+        <option value="browser">Browser</option>
+      </select>
+    </div>
+    <div class="field">
+      <label>额定速率</label>
+      <input name="rate_limit" type="number" min="1" max="1000" value="10" />
+    </div>
+    <div class="field">
+      <label>最大尝试</label>
+      <input name="retry" type="number" min="1" max="10" value="3" />
+    </div>
+    <div class="field">
+      <label>超时（秒）</label>
+      <input name="timeout" type="number" min="5" max="1800" value="30" />
+    </div>
+  </div>
+  <div class="field">
+    <label class="check-row">
+      <input type="checkbox" name="raw_archive" />
+      <span>归档成功响应原文</span>
     </label>
   </div>
   <div class="field">

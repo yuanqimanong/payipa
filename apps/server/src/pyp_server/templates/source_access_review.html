@@ -9,6 +9,7 @@
   <div class="actions"><a class="btn ghost" href="/sources">返回列表</a></div>
 </div>
 <form class="card card-pad" method="post" action="/sources/{{ source.uuid }}/access-review" style="max-width: 680px">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
   {% if error %}<div class="form-error">{{ error }}</div>{% endif %}
   <div class="field">
     <label>访问依据类型</label>

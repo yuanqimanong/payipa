@@ -39,6 +39,11 @@ class ExecSummary(BaseModel):
     count_fail: int = active("解析失败条数", default=0, ge=0)
     count_blank: int = active("空白（无内容）条数", default=0, ge=0)
     warnings: list[str] = active("执行级告警", default_factory=list)
+    response_status: int | None = active(
+        "最终 HTTP 状态码（无 HTTP 响应时为空）", default=None, ge=100, le=599, since="M6"
+    )
+    response_bytes: int = active("响应正文大小（字节）", default=0, ge=0, since="M6")
+    engine: str | None = active("实际使用的采集引擎", default=None, max_length=32, since="M6")
 
 
 class ResultBatch(BaseModel):

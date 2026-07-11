@@ -17,6 +17,7 @@ from fastapi.templating import Jinja2Templates
 
 from pyp_server.consumer import consumer_loop
 from pyp_server.hub import AgentHub
+from pyp_server.preflight import run_preflight
 from pyp_server.ratelimit import SourceRateLimiter
 from pyp_server.routers import (
     ai,
@@ -57,6 +58,7 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 def create_app() -> FastAPI:
     settings = get_server_settings()
+    run_preflight(settings)  # production 模式拒绝不安全配置；dev 模式仅在 API 开放时告警
     app = FastAPI(
         title=settings.title,
         version=settings.version,

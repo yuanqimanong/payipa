@@ -12,10 +12,11 @@ from payipa.db.engine import get_engine
 from payipa.db.pyp import Source
 from payipa.security.audit import record_audit_best_effort
 from payipa.security.rbac import effective_permissions, has_permission
-from payipa_contracts import CleanOp, FieldRule, FieldType, Locator, LocatorType, RulePack
+from payipa_contracts import CleanOp, EngineHint, FieldRule, FieldType, Locator, LocatorType, RulePack
 from sqlalchemy import select
 
 from pyp_server.auth import get_current_user
+from pyp_server.csrf import render_with_csrf, verify_csrf
 from pyp_server.service import dispatch_source_run
 from pyp_server.settings import get_server_settings
 
@@ -65,9 +66,7 @@ async def sources_new(request: Request):
     user = await get_current_user(request)
     if user is None:
         return _login_redirect()
-    return request.app.state.templates.TemplateResponse(
-        request, "source_new.html", {"user": user, "error": None, "active": "sources"}
-    )
+    return render_with_csrf(request, "source_new.html", {"user": user, "error": None, "active": "sources"})
 
 
 @router.get("/sources/{uuid}/access-review", response_class=HTMLResponse, summary="数据源访问复核")
@@ -104,7 +103,7 @@ async def source_access_review_page(uuid: str, request: Request):
         "paused": row[5] is not None,
         "pause_reason": row[6],
     }
-    return request.app.state.templates.TemplateResponse(
+    return render_with_csrf(
         request,
         "source_access_review.html",
         {"user": user, "source": source, "error": None, "active": "sources"},
@@ -116,11 +115,12 @@ async def source_access_review_submit(uuid: str, request: Request):
     user = await get_current_user(request)
     if user is None:
         return _login_redirect()
+    form = await request.form()
+    verify_csrf(request, form.get("csrf_token"))
     if get_server_settings().rbac_enabled:
         perms = await effective_permissions(get_engine("pyp"), int(user["id"]))
         if not has_permission(perms, "sources.write"):
             raise HTTPException(status_code=403, detail="缺少权限：sources.write")
-    form = await request.form()
     access_basis = (str(form.get("access_basis") or "")).strip()
     access_reference = (str(form.get("access_reference") or "")).strip()
     approved = form.get("decision") == "approve"
@@ -160,22 +160,36 @@ async def sources_create(request: Request):
     user = await get_current_user(request)
     if user is None:
         return _login_redirect()
+    form = await request.form()
+    verify_csrf(request, form.get("csrf_token"))
     if get_server_settings().rbac_enabled:
         perms = await effective_permissions(get_engine("pyp"), int(user["id"]))
         if not has_permission(perms, "sources.write"):
-            return request.app.state.templates.TemplateResponse(
+            return render_with_csrf(
                 request,
                 "source_new.html",
                 {"user": user, "error": "缺少权限：sources.write（创建/编辑数据源）", "active": "sources"},
                 status_code=403,
             )
-    form = await request.form()
     name = (str(form.get("name") or "")).strip()
     uuid = (str(form.get("uuid") or "")).strip()
     seed_urls = [u.strip() for u in str(form.get("seed_urls") or "").splitlines() if u.strip()]
     access_basis = (str(form.get("access_basis") or "")).strip()
     access_reference = (str(form.get("access_reference") or "")).strip()
     access_confirmed = form.get("access_confirmed") == "on"
+    try:
+        engine_hint = EngineHint(str(form.get("engine_hint") or "http"))
+        rate_limit = int(str(form.get("rate_limit") or "10"))
+        retry = int(str(form.get("retry") or "3"))
+        timeout = int(str(form.get("timeout") or "30"))
+    except ValueError:
+        return render_with_csrf(
+            request,
+            "source_new.html",
+            {"user": user, "error": "运行参数格式不正确", "active": "sources"},
+            status_code=400,
+        )
+    raw_archive = form.get("raw_archive") == "on"
     item_expr = (str(form.get("item_locator") or "")).strip()
     fingerprint = [x.strip() for x in str(form.get("fingerprint") or "").split(",") if x.strip()]
 
@@ -200,7 +214,7 @@ async def sources_create(request: Request):
         )
 
     if not uuid or not seed_urls or not fields or not access_reference or not access_confirmed:
-        return request.app.state.templates.TemplateResponse(
+        return render_with_csrf(
             request,
             "source_new.html",
             {
@@ -226,9 +240,14 @@ async def sources_create(request: Request):
             access_basis=access_basis,
             access_reference=access_reference,
             access_confirmed=access_confirmed,
+            engine_hint=engine_hint,
+            rate_limit=rate_limit,
+            retry=retry,
+            timeout=timeout,
+            raw_archive=raw_archive,
         )
     except (LookupError, PermissionError, ValueError) as exc:
-        return request.app.state.templates.TemplateResponse(
+        return render_with_csrf(
             request,
             "source_new.html",
             {"user": user, "error": str(exc), "active": "sources"},

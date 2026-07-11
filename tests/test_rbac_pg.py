@@ -93,7 +93,10 @@ def test_rbac_matrix_and_gate(require_pg: None) -> None:
             resp = client.get("/api/data/rbac_no_such_source")
             assert resp.status_code == 200 and resp.json()["data"] == []
             # ④c SSR 建源提交（实际触发采集，与 run API 同效）：运营无 sources.write → 403 渲染表单错误
-            assert client.post("/sources/create", data={"name": "x"}).status_code == 403
+            # 先 GET 建源页取 CSRF token（否则会被 CSRF 闸门先挡下，测不到权限闸门）
+            client.get("/sources/new")
+            _tok = client.cookies.get("pyp_csrf")
+            assert client.post("/sources/create", data={"name": "x", "csrf_token": _tok}).status_code == 403
             # ⑤ 超级用户 → 处处放行（nodes.read 亦通）
             client.cookies.set(COOKIE_NAME, create_session(ids["rbac-super"], "rbac-super"))
             assert client.get("/api/agents").status_code == 200

@@ -17,6 +17,7 @@ class _Bucket:
     eff: float  # AIMD 当前有效速率
     tokens: float
     updated: float  # 上次补充的单调时钟
+    blocked_until: float = 0.0  # Retry-After 的进程内快速闸门；权威值同时落 PG
 
 
 class SourceRateLimiter:
@@ -36,8 +37,12 @@ class SourceRateLimiter:
             b = self._b[source] = _Bucket(base=base_rate, eff=base_rate, tokens=base_rate, updated=now)
         b.base = base_rate  # 配置可能被改，跟随
         b.eff = min(b.eff, b.base)  # eff 不超过额定
-        b.tokens = min(b.base, b.tokens + max(0.0, now - b.updated) * b.eff)
+        # 冷却期间不累计突发令牌；冷却结束后只按结束后的时间补充。
+        refill_from = max(b.updated, min(b.blocked_until, now))
+        b.tokens = min(b.base, b.tokens + max(0.0, now - refill_from) * b.eff)
         b.updated = now
+        if now < b.blocked_until:
+            return False
         if b.tokens >= 1.0:
             b.tokens -= 1.0
             return True
@@ -49,13 +54,36 @@ class SourceRateLimiter:
         if b is not None:
             b.eff = min(b.base, b.eff + self.increase)
 
-    def on_backoff_signal(self, source: str) -> None:
-        """容量限制或访问暂停回报触发乘性减；完整暂停状态由后续切片接入。"""
+    def on_backoff_signal(
+        self,
+        source: str,
+        *,
+        retry_after_s: float | None = None,
+        now: float | None = None,
+    ) -> None:
+        """容量限制触发乘性减，并在 Retry-After 窗口内冻结取令牌。"""
         b = self._b.get(source)
         if b is not None:
             b.eff = max(self.min_rate, b.eff * self.decrease)
+            b.tokens = min(b.tokens, 1.0)  # 冷却结束最多先放一个探测请求
+            if retry_after_s is not None:
+                now = time.monotonic() if now is None else now
+                b.blocked_until = max(b.blocked_until, now + max(0.0, retry_after_s))
 
     def effective_rate(self, source: str) -> float | None:
         """当前有效速率（监控/调试用）；未见过的源返回 None。"""
         b = self._b.get(source)
         return b.eff if b is not None else None
+
+    def snapshot(self, source: str, *, now: float | None = None) -> dict[str, float] | None:
+        """返回监控所需运行态，不暴露内部 bucket 对象。"""
+        b = self._b.get(source)
+        if b is None:
+            return None
+        now = time.monotonic() if now is None else now
+        return {
+            "base_rate": b.base,
+            "effective_rate": b.eff,
+            "tokens": max(0.0, b.tokens),
+            "retry_in_s": max(0.0, b.blocked_until - now),
+        }

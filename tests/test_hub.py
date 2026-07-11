@@ -65,3 +65,12 @@ def test_pick_free_group_affinity() -> None:
     assert hub.pick_free("gpu") is None
     # 不分组任务：任意空闲节点可派
     assert hub.pick_free(None) is not None
+
+
+def test_pick_free_requires_engine_capability() -> None:
+    hub = AgentHub()
+    hub.register("http-only", _WS(), slot_n=2, engines=["http"])
+    hub.register("browser-node", _WS(), slot_n=1, engines=["http", "browser"])
+    assert hub.pick_free(engine="browser").agent_id == "browser-node"
+    assert hub.pick_free(engine="http").agent_id == "http-only"
+    assert hub.pick_free(engine="unknown") is None

@@ -20,6 +20,7 @@
   </head>
   <body>
     <form class="login" method="post" action="/login">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
       <div class="brand"><span class="logo">爬</span> <div>payipa <small>爬亿爬</small></div></div>
       <div class="card">
         <h1>登录</h1>

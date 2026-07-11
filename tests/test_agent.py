@@ -9,7 +9,7 @@ from pathlib import Path
 
 import payipa_contracts as c
 from pyp_agent import conn as conn_mod
-from pyp_agent.fetch import FetchResult
+from pyp_agent.fetch import FetchNetworkError, FetchResult, FetchTimeout
 
 FIXTURE = Path(__file__).parent / "fixtures" / "books_list.html"
 
@@ -84,6 +84,7 @@ def test_process_task_full_flow(monkeypatch) -> None:
         source="books",
         target="https://books.toscrape.com/",
         rule_ptr=c.RulePointer(rule_id="1", version=1, content_hash="h"),
+        archive_raw=True,
     )
     report = asyncio.run(
         conn_mod.process_task(task, upload_token="tok", server_base="http://x", rule_cache=FakeCache(), agent_id="a1")
@@ -92,6 +93,9 @@ def test_process_task_full_flow(monkeypatch) -> None:
     assert report.result.req_id == "rq1"
     assert len(report.result.items) == 3
     assert report.result.summary.count_ok == 3
+    assert report.result.summary.response_status == 200
+    assert report.result.summary.response_bytes == len(html)
+    assert report.result.summary.engine == "http"
     assert len(report.result.artifacts) == 1  # raw 上传回指针
     assert uploaded["source_uuid"] == "books"  # 上传带对了 source/batch
 
@@ -128,4 +132,79 @@ def test_process_task_pauses_before_parse_or_archive(monkeypatch) -> None:
 
     assert isinstance(report, c.StatusReport)
     assert report.state == int(c.ErrorCode.ACCESS_PAUSED)
+    assert report.response_status == 403
+    assert report.reason_code == "access_denied"
     assert called["upload"] is False
+
+
+def test_process_task_honors_retry_after_before_parse_or_archive(monkeypatch) -> None:
+    called = {"upload": False}
+
+    class FakeCache:
+        async def get(self, _ptr):
+            return _books_rule()
+
+    async def fake_fetch(url: str, **_kw) -> FetchResult:
+        return FetchResult(
+            status=429,
+            url=url,
+            body=b"slow down",
+            content_type="text/plain",
+            headers={"retry-after": "42"},
+        )
+
+    async def fake_upload(*_args, **_kwargs):
+        called["upload"] = True
+        raise AssertionError("throttled response must not be archived")
+
+    monkeypatch.setattr(conn_mod, "fetch", fake_fetch)
+    monkeypatch.setattr(conn_mod, "upload_raw_via_server", fake_upload)
+    task = c.TaskSpec(
+        task_id="t3",
+        req_id="rq3",
+        batch_id="b3",
+        source="books",
+        target="https://example.test/limited",
+        rule_ptr=c.RulePointer(rule_id="3", version=1, content_hash="h3"),
+    )
+    report = asyncio.run(
+        conn_mod.process_task(task, upload_token="tok", server_base="http://x", rule_cache=FakeCache(), agent_id="a1")
+    )
+    assert isinstance(report, c.StatusReport)
+    assert report.state == int(c.ErrorCode.THROTTLED)
+    assert report.retry_after_s == 42
+    assert report.reason_code == "rate_limited"
+    assert called["upload"] is False
+
+
+def test_process_task_maps_transport_failures(monkeypatch) -> None:
+    class FakeCache:
+        async def get(self, _ptr):
+            return _books_rule()
+
+    task = c.TaskSpec(
+        task_id="t4",
+        req_id="rq4",
+        batch_id="b4",
+        source="books",
+        target="https://example.test/unavailable",
+        rule_ptr=c.RulePointer(rule_id="4", version=1, content_hash="h4"),
+    )
+
+    async def timeout(*_args, **_kwargs):
+        raise FetchTimeout("timed out")
+
+    monkeypatch.setattr(conn_mod, "fetch", timeout)
+    timed = asyncio.run(
+        conn_mod.process_task(task, upload_token=None, server_base="http://x", rule_cache=FakeCache(), agent_id="a1")
+    )
+    assert isinstance(timed, c.StatusReport) and timed.state == int(c.ErrorCode.TIMEOUT)
+
+    async def network(*_args, **_kwargs):
+        raise FetchNetworkError("HTTP transport failed (ConnectionError)")
+
+    monkeypatch.setattr(conn_mod, "fetch", network)
+    failed = asyncio.run(
+        conn_mod.process_task(task, upload_token=None, server_base="http://x", rule_cache=FakeCache(), agent_id="a1")
+    )
+    assert isinstance(failed, c.StatusReport) and failed.state == int(c.ErrorCode.NETWORK)

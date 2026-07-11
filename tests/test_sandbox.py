@@ -144,10 +144,43 @@ def test_sandbox_runtime_and_ulimit_flags() -> None:
     """可选 gVisor 运行时与 fsize 上限落在构造参数上（不需容器即可核对）。"""
     from payipa.studio.sandbox import SandboxExecutor
 
-    sbx = SandboxExecutor("secret", runtime="runsc", max_output_bytes=1234)
+    sbx = SandboxExecutor("secret", runtime="runsc", max_output_bytes=1234, max_output_rows=12, max_row_bytes=99)
     assert sbx._runtime == "runsc"
     assert sbx._max_output_bytes == 1234
+    assert sbx._max_output_rows == 12
+    assert sbx._max_row_bytes == 99
     assert SandboxExecutor("secret")._runtime is None  # 默认走 runc
+
+
+def test_result_reader_validates_shape_and_limits(tmp_path: Path) -> None:
+    from payipa.studio.sandbox import _read_result_file
+
+    result = tmp_path / "result.json"
+    result.write_text(json.dumps({"ok": True, "rows": [{"x": 1}], "new_watermarks": {"s": 2}}))
+    parsed = _read_result_file(result, max_bytes=1024, max_rows=2, max_row_bytes=64)
+    assert parsed["rows"] == [{"x": 1}]
+
+    result.write_text(json.dumps({"ok": True, "rows": [1], "new_watermarks": {}}))
+    with pytest.raises(ValueError, match=r"rows\[0\]"):
+        _read_result_file(result, max_bytes=1024, max_rows=2, max_row_bytes=64)
+
+    result.write_text(json.dumps({"ok": True, "rows": [{"x": 1}, {"x": 2}], "new_watermarks": {}}))
+    with pytest.raises(ValueError, match="结果行数"):
+        _read_result_file(result, max_bytes=1024, max_rows=1, max_row_bytes=64)
+
+
+def test_result_reader_rejects_symlink_when_supported(tmp_path: Path) -> None:
+    from payipa.studio.sandbox import _read_result_file
+
+    target = tmp_path / "target.json"
+    target.write_text('{"ok":false,"error":"x"}')
+    link = tmp_path / "result.json"
+    try:
+        link.symlink_to(target)
+    except OSError:
+        pytest.skip("symlink creation is unavailable on this Windows host")
+    with pytest.raises(ValueError, match="符号链接"):
+        _read_result_file(link, max_bytes=1024, max_rows=1, max_row_bytes=64)
 
 
 # ── 真容器层（无 Linux 容器运行时自动跳过） ──────────────────────────────────

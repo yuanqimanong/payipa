@@ -134,6 +134,9 @@ def test_access_confirmation_pause_and_review(require_pg: None) -> None:
         finally:
             async with pyp.begin() as conn:
                 for statement in (
+                    "DELETE FROM task_events WHERE batch_id IN "
+                    "(SELECT b.id FROM batches b JOIN tasks t ON b.task_id=t.id "
+                    "JOIN sources s ON t.source_id=s.id WHERE s.uuid=:u)",
                     "DELETE FROM requests WHERE batch_id IN "
                     "(SELECT b.id FROM batches b JOIN tasks t ON b.task_id=t.id "
                     "JOIN sources s ON t.source_id=s.id WHERE s.uuid=:u)",

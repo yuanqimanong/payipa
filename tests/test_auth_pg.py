@@ -73,12 +73,25 @@ def test_login_and_create_source(require_pg: None) -> None:
             assert r.status_code == 303
             assert r.headers["location"] == "/login"
 
+            # GET 登录页下发 CSRF token（双提交 cookie）；后续 POST 复用
+            client.get("/login")
+            tok = client.cookies.get("pyp_csrf")
+            assert tok
+
+            # 缺 CSRF token → 403
+            no_csrf = client.post("/login", data={"username": _USER, "password": _PW}, follow_redirects=False)
+            assert no_csrf.status_code == 403
+
             # 错误密码 → 401
-            bad = client.post("/login", data={"username": _USER, "password": "wrong"}, follow_redirects=False)
+            bad = client.post(
+                "/login", data={"username": _USER, "password": "wrong", "csrf_token": tok}, follow_redirects=False
+            )
             assert bad.status_code == 401
 
             # 正确登录 → 303 + 会话 cookie
-            ok = client.post("/login", data={"username": _USER, "password": _PW}, follow_redirects=False)
+            ok = client.post(
+                "/login", data={"username": _USER, "password": _PW, "csrf_token": tok}, follow_redirects=False
+            )
             assert ok.status_code == 303
             assert client.cookies.get("pyp_session")
 
@@ -101,6 +114,7 @@ def test_login_and_create_source(require_pg: None) -> None:
                 "field_css": "h3 a@title",
                 "field_type": "store",
                 "fingerprint": "title",
+                "csrf_token": tok,
             }
             created = client.post("/sources/create", data=form, follow_redirects=False)
             assert created.status_code == 303
@@ -115,6 +129,7 @@ def test_login_and_create_source(require_pg: None) -> None:
                     "access_reference": "https://books.toscrape.com/",
                     "reason": "pending manual re-check",
                     "decision": "pause",
+                    "csrf_token": tok,
                 },
                 follow_redirects=False,
             )
@@ -129,6 +144,7 @@ def test_login_and_create_source(require_pg: None) -> None:
                     "access_reference": "https://books.toscrape.com/",
                     "reason": "reviewed in UI test",
                     "decision": "approve",
+                    "csrf_token": tok,
                 },
                 follow_redirects=False,
             )

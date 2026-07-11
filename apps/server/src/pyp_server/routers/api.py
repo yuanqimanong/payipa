@@ -130,8 +130,15 @@ async def monitor_nodes(request: Request) -> list[NodeMetric]:
     summary="各数据源健康度（成败率 + 数据质量 + 错误码分布）",
     dependencies=[Depends(require_perm("monitor.read"))],
 )
-async def monitor_sources() -> list[SourceHealth]:
-    return await compute_source_health(get_engine("pyp"))
+async def monitor_sources(request: Request) -> list[SourceHealth]:
+    rows = await compute_source_health(get_engine("pyp"))
+    limiter = request.app.state.limiter
+    for row in rows:
+        runtime = limiter.snapshot(row.source)
+        if runtime is not None:
+            row.effective_rate = round(runtime["effective_rate"], 3)
+            row.retry_in_s = round(runtime["retry_in_s"], 1)
+    return rows
 
 
 @router.post("/tasks/preview", response_model=TaskAssign, summary="校验并回显 TaskSpec（演示契约，M0）")

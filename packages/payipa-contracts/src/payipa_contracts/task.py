@@ -25,6 +25,7 @@ class TaskSpec(BaseModel):
     timeout_s: int = active("单任务硬超时（秒）", default=1800, gt=0)
     params: dict[str, Any] = active("运行参数（能力参数化：页数/范围等）", default_factory=dict)
     engine_hint: EngineHint = active("采集引擎提示；当前使用 http，browser 为可选能力", default=EngineHint.HTTP)
+    archive_raw: bool = active("成功响应是否归档 raw；拒绝/挑战响应始终不归档", default=False, since="M6")
     # 以下为后续里程碑接线的预留位
     group: str | None = reserved("分发分组（test/prod 集群、自动化能力集群）", default=None, since="M2")
     account: str | None = reserved("采集账号/凭证维度（按账号限流）", default=None, since="M5")

@@ -29,13 +29,13 @@ from payipa_contracts import (
 )
 from pydantic import TypeAdapter
 
-from pyp_agent.fetch import browser_available, fetch
+from pyp_agent.fetch import FetchNetworkError, FetchTimeout, browser_available, fetch
 from pyp_agent.interpret import interpret_page
+from pyp_agent.response_policy import assess_response
 from pyp_agent.rules import RuleCache
 from pyp_agent.upload import upload_raw_via_server
 
 _server_frame = TypeAdapter(ServerFrame)
-_ACCESS_PAUSE_STATUSES = frozenset({401, 403, 451})
 
 
 def _ws_url(server_base: str) -> str:
@@ -58,16 +58,38 @@ async def process_task(
     """执行一个请求；访问被明确拒绝时不解析、不归档并请求主控暂停整源。"""
     started = time.monotonic()
     rule = await rule_cache.get(task.rule_ptr)
-    fetched = await fetch(task.target, engine_hint=task.engine_hint, timeout=task.timeout_s)
-    if fetched.status in _ACCESS_PAUSE_STATUSES:
+    try:
+        fetched = await fetch(task.target, engine_hint=task.engine_hint, timeout=task.timeout_s)
+    except FetchTimeout:
         return StatusReport(
             req_id=task.req_id,
-            state=int(ErrorCode.ACCESS_PAUSED),
-            message=f"target returned HTTP {fetched.status}; manual access review required",
+            state=int(ErrorCode.TIMEOUT),
+            message=f"request timed out after {task.timeout_s}s",
+            reason_code="transport_timeout",
+            retry_after_s=5.0,
+        )
+    except FetchNetworkError as exc:
+        return StatusReport(
+            req_id=task.req_id,
+            state=int(ErrorCode.NETWORK),
+            message=str(exc),
+            reason_code="transport_error",
+            retry_after_s=5.0,
+        )
+
+    decision = assess_response(fetched.status, fetched.headers, fetched.body, fetched.content_type)
+    if decision.outcome != "accept":
+        return StatusReport(
+            req_id=task.req_id,
+            state=int(decision.error_code or ErrorCode.SOFT_FAIL),
+            message=decision.message,
+            response_status=fetched.status or None,
+            reason_code=decision.reason_code,
+            retry_after_s=decision.retry_after_s,
         )
 
     artifacts = []
-    if upload_token:  # local 兜底：raw 经主控回传（S3 直传走 M5）
+    if upload_token and task.archive_raw:  # local 兜底：raw 经主控回传（S3 直传走 M5）
         ref = await upload_raw_via_server(
             server_base,
             upload_token,
@@ -90,6 +112,9 @@ async def process_task(
         count_ok=len(parsed.items) - blank,
         count_fail=0,
         count_blank=blank,
+        response_status=fetched.status or None,
+        response_bytes=len(fetched.body),
+        engine=task.engine_hint.value,
     )
     return ResultReport(
         result=ResultBatch(

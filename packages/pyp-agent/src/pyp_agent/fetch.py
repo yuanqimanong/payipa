@@ -29,6 +29,18 @@ class FetchResult:
     headers: dict[str, str] = field(default_factory=dict)
 
 
+class FetchFailure(RuntimeError):
+    """采集传输层失败；异常文本不包含目标 URL、请求头或响应正文。"""
+
+
+class FetchTimeout(FetchFailure):
+    """目标连接或读取超过任务时限。"""
+
+
+class FetchNetworkError(FetchFailure):
+    """DNS、连接、TLS 或连接重置等无有效 HTTP 响应的故障。"""
+
+
 def browser_available() -> bool:
     """agent 是否具备浏览器自动化能力（装了 playwright extra）。用于注册时上报 automation 能力。"""
     try:
@@ -39,39 +51,56 @@ def browser_available() -> bool:
 
 
 async def _fetch_http(url: str, timeout: float, headers: dict[str, str] | None) -> FetchResult:
-    async with niquests.AsyncSession() as session:
-        resp = await session.get(url, timeout=timeout, headers=headers or {})
+    try:
+        async with niquests.AsyncSession() as session:
+            resp = await session.get(url, timeout=timeout, headers=headers or {})
+    except niquests.exceptions.Timeout as exc:
+        raise FetchTimeout(f"HTTP request timed out after {timeout:g}s") from exc
+    except niquests.exceptions.RequestException as exc:
+        raise FetchNetworkError(f"HTTP transport failed ({type(exc).__name__})") from exc
     return FetchResult(
         status=resp.status_code or 0,
         url=str(resp.url),
         body=resp.content or b"",
         content_type=resp.headers.get("content-type"),
-        headers=dict(resp.headers),
+        headers={str(k).lower(): str(v) for k, v in resp.headers.items()},
     )
 
 
 async def _fetch_browser(url: str, timeout: float, headers: dict[str, str] | None) -> FetchResult:
     """标准 Playwright 渲染取页（惰性导入）。渲染后回传 HTML（content-type 恒 text/html）。"""
-    from playwright.async_api import async_playwright  # 惰性导入：仅 browser 任务才需运行时
+    import playwright.async_api as playwright_api  # 惰性导入：仅 browser 任务才需运行时
+
+    async_playwright = playwright_api.async_playwright
+    # 兼容测试桩和裁剪运行时；官方 Playwright 均提供这两个类型。
+    PlaywrightTimeoutError = getattr(playwright_api, "TimeoutError", TimeoutError)
+    PlaywrightError = getattr(playwright_api, "Error", Exception)
 
     timeout_ms = int(timeout * 1000)
-    async with async_playwright() as pw:
-        browser = await pw.chromium.launch(headless=True)
-        try:
-            context = await browser.new_context(extra_http_headers=headers or {})
-            page = await context.new_page()
-            resp = await page.goto(url, wait_until=_BROWSER_WAIT_UNTIL, timeout=timeout_ms)
-            html = await page.content()
-            status = resp.status if resp is not None else 0
-            final_url = page.url
-        finally:
-            await browser.close()
+    try:
+        async with async_playwright() as pw:
+            browser = await pw.chromium.launch(headless=True)
+            try:
+                context = await browser.new_context(extra_http_headers=headers or {})
+                page = await context.new_page()
+                resp = await page.goto(url, wait_until=_BROWSER_WAIT_UNTIL, timeout=timeout_ms)
+                html = await page.content()
+                status = resp.status if resp is not None else 0
+                final_url = page.url
+                all_headers = getattr(resp, "all_headers", None) if resp is not None else None
+                response_headers = await all_headers() if all_headers is not None else {}
+            finally:
+                await browser.close()
+    except PlaywrightTimeoutError as exc:
+        raise FetchTimeout(f"browser navigation timed out after {timeout:g}s") from exc
+    except PlaywrightError as exc:
+        raise FetchNetworkError(f"browser transport failed ({type(exc).__name__})") from exc
     return FetchResult(
         status=status,
         url=final_url,
         body=html.encode("utf-8"),
         content_type="text/html; charset=utf-8",
-        headers={},
+        headers={str(k).lower(): str(v) for k, v in response_headers.items()},
     )
 
 

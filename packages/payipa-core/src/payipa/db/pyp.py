@@ -109,6 +109,12 @@ class Source(TimestampMixin, OwnedMixin, PypBase):
     access_confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     paused_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     pause_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    cooldown_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    cooldown_reason: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    last_status_code: Mapped[int | None] = mapped_column(SmallInteger, nullable=True)
+    consecutive_failures: Mapped[int] = mapped_column(Integer, default=0)
+    last_success_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_failure_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     agent_group: Mapped[str | None] = mapped_column(String(64), nullable=True)
     rate_limit: Mapped[int] = mapped_column(Integer, default=10)  # 请求/秒（子域天花板，UI 可改）
     retry: Mapped[int] = mapped_column(Integer, default=3)
@@ -176,10 +182,15 @@ class Request(TimestampMixin, PypBase):
     depth: Mapped[int] = mapped_column(Integer, default=0)
     state: Mapped[int] = mapped_column(SmallInteger, default=0)  # 正=正常态、负=错误码
     attempt: Mapped[int] = mapped_column(Integer, default=0)
+    not_before: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     agent_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     account: Mapped[str | None] = mapped_column(String(128), nullable=True)
     error_code: Mapped[int | None] = mapped_column(SmallInteger, nullable=True)
+    response_status: Mapped[int | None] = mapped_column(SmallInteger, nullable=True)
+    reason_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    error_detail: Mapped[str | None] = mapped_column(Text, nullable=True)
+    retry_after_s: Mapped[int | None] = mapped_column(Integer, nullable=True)
     url_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)  # URL 指纹：批内去重（唯一索引见迁移）
     # 见迁移 c1d2e3f4a5b6 的唯一索引 uq_requests_batch_url_hash (batch_id, url_hash)
     # 每请求解析计数（agent ExecSummary 回报，handle_result 回填）+ 耗时——喂 core.monitor 数据质量/时延（M5）

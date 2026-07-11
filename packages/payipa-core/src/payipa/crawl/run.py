@@ -6,17 +6,28 @@
 
 from __future__ import annotations
 
+import math
 from collections.abc import Sequence
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 
 from jianbing_utils import crypto
-from payipa_contracts import Channel, ErrorCode, Priority, RequestState, ResultBatch, RulePack, RulePointer, TaskSpec
+from payipa_contracts import (
+    Channel,
+    EngineHint,
+    ErrorCode,
+    Priority,
+    RequestState,
+    ResultBatch,
+    RulePack,
+    RulePointer,
+    TaskSpec,
+)
 from sqlalchemy import Table, case, func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
 from payipa.crawl.ingest import Ingestor, build_data_table, create_data_table
-from payipa.db.pyp import Agent, Batch, Request, Rule, Schedule, Source, Task
+from payipa.db.pyp import Agent, Batch, Request, Rule, Schedule, Source, Task, TaskEvent
 
 ACCESS_BASES = frozenset({"owned", "contracted", "public_policy"})
 
@@ -50,12 +61,23 @@ async def setup_source(
     access_basis: str | None = None,
     access_reference: str | None = None,
     access_confirmed: bool = False,
+    engine_hint: EngineHint | None = None,
+    rate_limit: int | None = None,
+    retry: int | None = None,
+    timeout: int | None = None,
+    raw_archive: bool | None = None,
 ) -> tuple[int, int]:
     """确保已确认访问依据的 source + 一个 task 存在；返回 (source_id, task_id)。
 
     seed_urls 存档进 task.params（最近一次为准），供 cron/重跑无需重新提交种子（07 定时触发）。
     新数据源必须显式确认访问依据；既有数据源一旦暂停，只能经人工复核接口恢复。
     """
+    if rate_limit is not None and not 1 <= rate_limit <= 1000:
+        raise ValueError("rate_limit 必须在 1–1000 req/s 之间")
+    if retry is not None and not 1 <= retry <= 10:
+        raise ValueError("retry 必须在 1–10 次之间")
+    if timeout is not None and not 5 <= timeout <= 1800:
+        raise ValueError("timeout 必须在 5–1800 秒之间")
     async with engine_pyp.begin() as conn:
         source = (
             await conn.execute(
@@ -76,6 +98,10 @@ async def setup_source(
                         access_basis=basis,
                         access_reference=reference,
                         access_confirmed_at=func.now(),
+                        rate_limit=rate_limit if rate_limit is not None else 10,
+                        retry=retry if retry is not None else 3,
+                        timeout=timeout if timeout is not None else 30,
+                        raw_archive=bool(raw_archive),
                     )
                     .returning(Source.id)
                 )
@@ -86,18 +112,36 @@ async def setup_source(
                 raise PermissionError("数据源尚未完成人工访问授权复核")
             if paused_at is not None:
                 raise PermissionError("数据源已暂停，须完成人工复核后才能恢复")
-            await conn.execute(update(Source.__table__).where(Source.id == source_id).values(name=name))
-        task_id = (await conn.execute(select(Task.id).where(Task.source_id == source_id).limit(1))).scalar()
-        params = {"seed_urls": list(seed_urls)} if seed_urls else None
-        if task_id is None:
+            source_values: dict = {"name": name}
+            for key, value in {
+                "rate_limit": rate_limit,
+                "retry": retry,
+                "timeout": timeout,
+                "raw_archive": raw_archive,
+            }.items():
+                if value is not None:
+                    source_values[key] = value
+            await conn.execute(update(Source.__table__).where(Source.id == source_id).values(**source_values))
+        task_row = (
+            await conn.execute(select(Task.id, Task.params).where(Task.source_id == source_id).limit(1))
+        ).first()
+        params = dict(task_row.params or {}) if task_row is not None else {}
+        if seed_urls:
+            params["seed_urls"] = list(seed_urls)
+        if engine_hint is not None:
+            params["engine_hint"] = engine_hint.value
+        elif task_row is None:
+            params["engine_hint"] = EngineHint.HTTP.value
+        if task_row is None:
             task_id = (
                 await conn.execute(
                     pg_insert(Task.__table__)
-                    .values(source_id=source_id, trigger_type="manual", params=params or {})
+                    .values(source_id=source_id, trigger_type="manual", params=params)
                     .returning(Task.id)
                 )
             ).scalar_one()
-        elif params:
+        else:
+            task_id = task_row.id
             await conn.execute(update(Task.__table__).where(Task.id == task_id).values(params=params))
     return source_id, task_id
 
@@ -119,6 +163,9 @@ async def review_source_access(
         "access_confirmed_at": func.now() if approved else None,
         "paused_at": None if approved else func.now(),
         "pause_reason": None if approved else (reason or "人工访问复核未通过")[:1000],
+        "cooldown_until": None,
+        "cooldown_reason": None,
+        "consecutive_failures": 0 if approved else Source.consecutive_failures,
     }
     async with engine_pyp.begin() as conn:
         result = await conn.execute(update(Source.__table__).where(Source.uuid == uuid).values(**values))
@@ -235,18 +282,45 @@ async def handle_result(
     )
     s = result.summary
     async with engine_pyp.begin() as conn:
+        source_id = (
+            await conn.execute(
+                select(Task.source_id)
+                .select_from(Request.__table__)
+                .join(Batch.__table__, Request.batch_id == Batch.id)
+                .join(Task.__table__, Batch.task_id == Task.id)
+                .where(Request.id == int(result.req_id))
+            )
+        ).scalar()
         await conn.execute(
             update(Request.__table__)
             .where(Request.id == int(result.req_id))
             .values(
                 state=int(RequestState.SUCCESS),
                 lease_until=None,  # 完成即释放租约，免遭 reaper 回收
+                not_before=None,
+                error_code=None,
+                reason_code=None,
+                error_detail=None,
+                retry_after_s=None,
+                response_status=s.response_status,
                 count_ok=int(s.count_ok),
                 count_fail=int(s.count_fail),
                 count_blank=int(s.count_blank),
                 duration_ms=int(s.elapsed_s * 1000),
             )
         )
+        if source_id is not None:
+            await conn.execute(
+                update(Source.__table__)
+                .where(Source.id == source_id)
+                .values(
+                    last_status_code=s.response_status,
+                    last_success_at=func.now(),
+                    consecutive_failures=0,
+                    cooldown_until=case((Source.cooldown_until <= func.now(), None), else_=Source.cooldown_until),
+                    cooldown_reason=case((Source.cooldown_until <= func.now(), None), else_=Source.cooldown_reason),
+                )
+            )
     return written
 
 
@@ -256,8 +330,120 @@ async def set_request_state(engine_pyp: AsyncEngine, req_id: int, state: int) ->
         await conn.execute(
             update(Request.__table__)
             .where(Request.id == req_id)
-            .values(state=state, error_code=state if state < 0 else None, lease_until=None)
+            .values(
+                state=state,
+                error_code=state if state < 0 else None,
+                lease_until=None,
+                not_before=None,
+            )
         )
+
+
+_RETRYABLE_ERRORS = frozenset(
+    {int(ErrorCode.NETWORK), int(ErrorCode.TIMEOUT), int(ErrorCode.THROTTLED), int(ErrorCode.UPSTREAM)}
+)
+
+
+def _retry_delay(error_code: int, attempt: int, requested_s: float | None) -> int:
+    """计算受控退避：尊重 Retry-After，但统一限制在 1 秒到 1 小时。"""
+    if requested_s is not None:
+        return min(3600, max(1, math.ceil(requested_s)))
+    base = 30 if error_code == int(ErrorCode.THROTTLED) else 5
+    return min(300, base * 2 ** min(max(attempt, 0), 6))
+
+
+async def defer_request_for_retry(
+    engine_pyp: AsyncEngine,
+    req_id: int,
+    error_code: int,
+    *,
+    retry_after_s: float | None = None,
+    response_status: int | None = None,
+    reason_code: str | None = None,
+    message: str | None = None,
+    max_attempt: int = 3,
+) -> tuple[str | None, bool]:
+    """把可恢复失败延迟重排；达到源/全局上限则定格失败。
+
+    返回 ``(source_uuid, requeued)``。429/5xx 同时设置源级冷却，确保同源其他请求也不会在
+    Retry-After 窗口内抢跑；网络类故障只延迟当前请求。
+    """
+    if error_code not in _RETRYABLE_ERRORS:
+        raise ValueError(f"error_code {error_code} 不是可重试错误")
+    now = datetime.now(UTC)
+    async with engine_pyp.begin() as conn:
+        row = (
+            await conn.execute(
+                select(
+                    Request.attempt,
+                    Request.state,
+                    Request.batch_id,
+                    Source.id.label("source_id"),
+                    Source.uuid,
+                    Source.retry,
+                )
+                .select_from(Request.__table__)
+                .join(Batch.__table__, Request.batch_id == Batch.id)
+                .join(Task.__table__, Batch.task_id == Task.id)
+                .join(Source.__table__, Task.source_id == Source.id)
+                .where(Request.id == req_id)
+                .with_for_update()
+            )
+        ).first()
+        if row is None:
+            return None, False
+        if row.state not in {int(RequestState.ASSIGNED), int(RequestState.RUNNING)}:
+            # 重复/迟到回报不得再次消耗重试预算。已经回队则维持“已重排”语义。
+            return str(row.uuid), row.state == int(RequestState.QUEUED)
+        next_attempt = int(row.attempt or 0) + 1
+        attempt_limit = max(1, min(max_attempt, int(row.retry or max_attempt)))
+        delay_s = _retry_delay(error_code, int(row.attempt or 0), retry_after_s)
+        not_before = now + timedelta(seconds=delay_s)
+        requeued = next_attempt < attempt_limit
+        detail = (message or "")[:1000] or None
+        await conn.execute(
+            update(Request.__table__)
+            .where(Request.id == req_id)
+            .values(
+                state=int(RequestState.QUEUED) if requeued else error_code,
+                attempt=next_attempt,
+                not_before=not_before if requeued else None,
+                lease_until=None,
+                agent_id=None,
+                error_code=error_code,
+                response_status=response_status,
+                reason_code=(reason_code or "retryable_failure")[:64],
+                error_detail=detail,
+                retry_after_s=delay_s,
+            )
+        )
+        source_values: dict = {
+            "last_status_code": response_status,
+            "last_failure_at": func.now(),
+            "consecutive_failures": Source.consecutive_failures + 1,
+        }
+        if error_code in {int(ErrorCode.THROTTLED), int(ErrorCode.UPSTREAM)}:
+            extend_cooldown = (Source.cooldown_until.is_(None)) | (Source.cooldown_until < not_before)
+            source_values.update(
+                cooldown_until=case((extend_cooldown, not_before), else_=Source.cooldown_until),
+                cooldown_reason=case((extend_cooldown, (reason_code or "backoff")[:64]), else_=Source.cooldown_reason),
+            )
+        await conn.execute(update(Source.__table__).where(Source.id == row.source_id).values(**source_values))
+        await conn.execute(
+            TaskEvent.__table__.insert().values(
+                batch_id=row.batch_id,
+                type="request.deferred" if requeued else "request.retry_exhausted",
+                payload={
+                    "req_id": req_id,
+                    "error_code": error_code,
+                    "reason_code": reason_code,
+                    "response_status": response_status,
+                    "retry_after_s": delay_s,
+                    "attempt": next_attempt,
+                },
+            )
+        )
+    return str(row.uuid), requeued
 
 
 async def finalize_batch_if_done(engine_pyp: AsyncEngine, batch_id: int) -> bool:
@@ -383,6 +569,7 @@ async def source_rate_limits(engine_pyp: AsyncEngine) -> dict[str, int]:
                     Batch.status == "running",
                     Source.access_confirmed_at.is_not(None),
                     Source.paused_at.is_(None),
+                    (Source.cooldown_until.is_(None)) | (Source.cooldown_until <= func.now()),
                 )
                 .distinct()
             )
@@ -406,7 +593,12 @@ async def source_of_request(engine_pyp: AsyncEngine, req_id: int) -> str | None:
 
 
 async def pause_source_for_request(
-    engine_pyp: AsyncEngine, req_id: int, reason: str | None = None
+    engine_pyp: AsyncEngine,
+    req_id: int,
+    reason: str | None = None,
+    *,
+    response_status: int | None = None,
+    reason_code: str | None = None,
 ) -> tuple[str | None, list[str], list[int]]:
     """因访问拒绝暂停整源，并终止该源所有尚未派发的请求。
 
@@ -416,7 +608,7 @@ async def pause_source_for_request(
     async with engine_pyp.begin() as conn:
         source = (
             await conn.execute(
-                select(Source.id, Source.uuid)
+                select(Source.id, Source.uuid, Request.batch_id)
                 .select_from(Request.__table__)
                 .join(Batch.__table__, Request.batch_id == Batch.id)
                 .join(Task.__table__, Batch.task_id == Task.id)
@@ -426,7 +618,7 @@ async def pause_source_for_request(
         ).first()
         if source is None:
             return None, [], []
-        source_id, source_uuid = source
+        source_id, source_uuid, trigger_batch_id = source
         batch_ids = list(
             (
                 await conn.execute(
@@ -452,7 +644,17 @@ async def pause_source_for_request(
             .all()
         )
         await conn.execute(
-            update(Source.__table__).where(Source.id == source_id).values(paused_at=func.now(), pause_reason=message)
+            update(Source.__table__)
+            .where(Source.id == source_id)
+            .values(
+                paused_at=func.now(),
+                pause_reason=message,
+                cooldown_until=None,
+                cooldown_reason=None,
+                last_status_code=response_status,
+                last_failure_at=func.now(),
+                consecutive_failures=Source.consecutive_failures + 1,
+            )
         )
         await conn.execute(
             update(Request.__table__)
@@ -464,6 +666,28 @@ async def pause_source_for_request(
                 state=int(ErrorCode.ACCESS_PAUSED),
                 error_code=int(ErrorCode.ACCESS_PAUSED),
                 lease_until=None,
+                not_before=None,
+            )
+        )
+        await conn.execute(
+            update(Request.__table__)
+            .where(Request.id == req_id)
+            .values(
+                response_status=response_status,
+                reason_code=(reason_code or "access_review_required")[:64],
+                error_detail=message,
+            )
+        )
+        await conn.execute(
+            TaskEvent.__table__.insert().values(
+                batch_id=trigger_batch_id,
+                type="source.access_paused",
+                payload={
+                    "source": str(source_uuid),
+                    "req_id": req_id,
+                    "response_status": response_status,
+                    "reason_code": reason_code,
+                },
             )
         )
     return str(source_uuid), [str(value) for value in other_inflight], [int(value) for value in batch_ids]
@@ -488,6 +712,19 @@ _INFLIGHT = (int(RequestState.ASSIGNED), int(RequestState.RUNNING))  # 「在途
 _PRIORITY_RANK = case((Task.priority == "high", 0), (Task.priority == "mid", 1), else_=2)  # 高优先插队
 
 
+def _authorized_running_batch_ids():
+    return (
+        select(Batch.id)
+        .join(Task.__table__, Batch.task_id == Task.id)
+        .join(Source.__table__, Task.source_id == Source.id)
+        .where(
+            Batch.status == "running",
+            Source.access_confirmed_at.is_not(None),
+            Source.paused_at.is_(None),
+        )
+    )
+
+
 def _active_running_batch_ids():
     return (
         select(Batch.id)
@@ -497,6 +734,7 @@ def _active_running_batch_ids():
             Batch.status == "running",
             Source.access_confirmed_at.is_not(None),
             Source.paused_at.is_(None),
+            (Source.cooldown_until.is_(None)) | (Source.cooldown_until <= func.now()),
         )
     )
 
@@ -520,7 +758,11 @@ async def claim_queued_for_dispatch(engine_pyp: AsyncEngine, *, limit: int = 16)
                     Task.id,
                     Task.priority,
                     Task.group_name,
+                    Task.params,
                     Source.uuid,
+                    Source.timeout,
+                    Source.agent_group,
+                    Source.raw_archive,
                     Rule.id,
                 )
                 .select_from(Request.__table__)
@@ -530,16 +772,42 @@ async def claim_queued_for_dispatch(engine_pyp: AsyncEngine, *, limit: int = 16)
                 .join(Rule.__table__, Rule.content_hash == Request.rule_hash)
                 .where(
                     Request.state == int(RequestState.QUEUED),
+                    (Request.not_before.is_(None)) | (Request.not_before <= func.now()),
                     Batch.status == "running",
                     Source.access_confirmed_at.is_not(None),
                     Source.paused_at.is_(None),
+                    (Source.cooldown_until.is_(None)) | (Source.cooldown_until <= func.now()),
                 )
                 .order_by(_PRIORITY_RANK, Request.depth, Request.created_at, Request.id)
                 .limit(limit)
             )
         ).all()
     specs: list[TaskSpec] = []
-    for req_id, target, rule_hash, rule_version, batch_id, channel, task_id, priority, group, source_uuid, rid in rows:
+    for (
+        req_id,
+        target,
+        rule_hash,
+        rule_version,
+        batch_id,
+        channel,
+        task_id,
+        priority,
+        task_group,
+        params,
+        source_uuid,
+        timeout_s,
+        source_group,
+        raw_archive,
+        rid,
+    ) in rows:
+        params = params or {}
+        try:
+            engine_hint = EngineHint(params.get("engine_hint", EngineHint.HTTP))
+        except TypeError, ValueError:
+            engine_hint = EngineHint.HTTP
+        account = params.get("account")
+        if not isinstance(account, str):
+            account = None
         specs.append(
             TaskSpec(
                 task_id=str(task_id),
@@ -550,7 +818,11 @@ async def claim_queued_for_dispatch(engine_pyp: AsyncEngine, *, limit: int = 16)
                 rule_ptr=RulePointer(rule_id=str(rid), version=int(rule_version or 0), content_hash=rule_hash),
                 channel=Channel(channel),
                 priority=Priority(priority or "mid"),
-                group=group,
+                timeout_s=max(1, int(timeout_s or 30)),
+                engine_hint=engine_hint,
+                group=task_group or source_group,
+                account=account,
+                archive_raw=bool(raw_archive),
             )
         )
     return specs
@@ -567,6 +839,7 @@ async def mark_assigned(engine_pyp: AsyncEngine, req_id: int, agent_id: str, lea
             .where(
                 Request.id == req_id,
                 Request.state == int(RequestState.QUEUED),
+                (Request.not_before.is_(None)) | (Request.not_before <= func.now()),
                 Request.batch_id.in_(_active_running_batch_ids()),
             )
             .values(state=int(RequestState.ASSIGNED), agent_id=agent_id, lease_until=lease_until)
@@ -578,15 +851,15 @@ async def requeue_request(engine_pyp: AsyncEngine, req_id: int) -> int:
     """把一条已 ASSIGNED 但下发失败（WS 发送异常）的请求退回 QUEUED；未真正执行，不计 attempt。"""
     async with engine_pyp.begin() as conn:
         running = select(Batch.id).where(Batch.status == "running")
-        active = _active_running_batch_ids()
+        authorized = _authorized_running_batch_ids()
         requeued = await conn.execute(
             update(Request.__table__)
             .where(
                 Request.id == req_id,
                 Request.state == int(RequestState.ASSIGNED),
-                Request.batch_id.in_(active),
+                Request.batch_id.in_(authorized),
             )
-            .values(state=int(RequestState.QUEUED), lease_until=None, agent_id=None)
+            .values(state=int(RequestState.QUEUED), not_before=None, lease_until=None, agent_id=None)
         )
         canceled = await conn.execute(
             update(Request.__table__)
@@ -603,7 +876,7 @@ async def requeue_request(engine_pyp: AsyncEngine, req_id: int) -> int:
                 Request.id == req_id,
                 Request.state == int(RequestState.ASSIGNED),
                 Request.batch_id.in_(running),
-                Request.batch_id.not_in(active),
+                Request.batch_id.not_in(authorized),
             )
             .values(
                 state=int(ErrorCode.ACCESS_PAUSED),
@@ -621,7 +894,7 @@ async def _requeue_or_giveup(conn: AsyncConnection, base_where: list, max_attemp
     仅对 running 批次重排；批次已取消/收尾的在途请求直接置 CANCELED（不再回队、也不计失联）。
     """
     running = select(Batch.id).where(Batch.status == "running")
-    active = _active_running_batch_ids()
+    authorized = _authorized_running_batch_ids()
     canceled = await conn.execute(
         update(Request.__table__)
         .where(*base_where, Request.state.in_(_INFLIGHT), Request.batch_id.not_in(running))
@@ -633,7 +906,7 @@ async def _requeue_or_giveup(conn: AsyncConnection, base_where: list, max_attemp
             *base_where,
             Request.state.in_(_INFLIGHT),
             Request.batch_id.in_(running),
-            Request.batch_id.not_in(active),
+            Request.batch_id.not_in(authorized),
         )
         .values(
             state=int(ErrorCode.ACCESS_PAUSED),
@@ -647,20 +920,31 @@ async def _requeue_or_giveup(conn: AsyncConnection, base_where: list, max_attemp
         .where(
             *base_where,
             Request.state.in_(_INFLIGHT),
-            Request.batch_id.in_(active),
+            Request.batch_id.in_(authorized),
             Request.attempt + 1 >= max_attempt,
         )
-        .values(state=int(ErrorCode.NODE_LOST), error_code=int(ErrorCode.NODE_LOST), lease_until=None)
+        .values(
+            state=int(ErrorCode.NODE_LOST),
+            error_code=int(ErrorCode.NODE_LOST),
+            not_before=None,
+            lease_until=None,
+        )
     )
     requeue = await conn.execute(
         update(Request.__table__)
         .where(
             *base_where,
             Request.state.in_(_INFLIGHT),
-            Request.batch_id.in_(active),
+            Request.batch_id.in_(authorized),
             Request.attempt + 1 < max_attempt,
         )
-        .values(state=int(RequestState.QUEUED), attempt=Request.attempt + 1, lease_until=None, agent_id=None)
+        .values(
+            state=int(RequestState.QUEUED),
+            attempt=Request.attempt + 1,
+            not_before=None,
+            lease_until=None,
+            agent_id=None,
+        )
     )
     return (canceled.rowcount or 0) + (access_paused.rowcount or 0) + (give_up.rowcount or 0) + (requeue.rowcount or 0)
 
@@ -851,6 +1135,7 @@ async def due_schedules(engine_pyp: AsyncEngine) -> list[tuple[int, int, str, st
                     Schedule.enabled.is_(True),
                     Source.access_confirmed_at.is_not(None),
                     Source.paused_at.is_(None),
+                    (Source.cooldown_until.is_(None)) | (Source.cooldown_until <= func.now()),
                     (Schedule.next_run_at.is_(None)) | (Schedule.next_run_at <= func.now()),
                 )
             )

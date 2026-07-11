@@ -2,43 +2,50 @@
 {% block title %}仪表盘{% endblock %}
 {% block content %}
 <div class="page-head">
-  <div class="titles">
-    <h2>仪表盘</h2>
-    <p>平台实时概览：节点、队列、请求成败与各数据源健康度。</p>
-  </div>
+  <div class="titles"><h2>仪表盘</h2><p id="dash-meta">正在同步运行态</p></div>
   <div class="actions"><a class="btn" href="/sources/new">＋ 新建数据源</a></div>
 </div>
 <div class="grid cols-4" id="stats"><div class="empty">加载中…</div></div>
-<div class="card" style="margin-top: 16px">
+<div class="card" style="margin-top:16px">
   <div class="card-head">数据源健康度</div>
-  <div id="sources"></div>
+  <div id="sources"><div class="empty">加载中…</div></div>
 </div>
 <script src="/static/views.js"></script>
 <script>
   const pct = (x) => (x == null ? "—" : (x * 100).toFixed(1) + "%");
-  (async () => {
+  const stateLabels = { active: "正常", cooling: "冷却中", paused: "已暂停", review: "待复核" };
+  async function loadDashboard() {
     const statsEl = document.getElementById("stats");
     try {
       const [ov, srcs] = await Promise.all([
         PypViews.fetchJSON("/api/monitor/overview"),
         PypViews.fetchJSON("/api/monitor/sources"),
       ]);
+      const count = (state) => srcs.filter((s) => s.access_state === state).length;
       const q = ov.quality || {};
       PypViews.renderStats(statsEl, [
         { k: "在线节点", v: `${ov.nodes_online}/${ov.nodes_total}` },
-        { k: "队列深度", v: ov.queue_depth },
-        { k: "整体成功率", v: pct(ov.success_rate), d: `${ov.ok}✓ / ${ov.fail}✗`, dir: ov.fail ? "down" : "up" },
-        { k: "解析质量", v: pct(q.parse_ok_rate), d: "空白 " + pct(q.blank_rate), dir: "flat" },
+        { k: "待执行请求", v: ov.queue_depth, d: ov.queue_depth ? "需要关注" : "运行平稳", dir: ov.queue_depth ? "down" : "up" },
+        { k: "正常数据源", v: count("active"), d: `冷却 ${count("cooling")} · 暂停 ${count("paused")}`, dir: count("paused") ? "down" : "flat" },
+        { k: "整体成功率", v: pct(ov.success_rate), d: `解析 ${pct(q.parse_ok_rate)}`, dir: ov.fail ? "down" : "up" },
       ]);
       PypViews.renderTable(document.getElementById("sources"), [
         { key: "source", label: "数据源", type: "mono" },
-        { key: "total", label: "请求数", type: "mono" },
-        { key: "rate", label: "成功率" },
-        { key: "fail", label: "失败", type: "mono" },
-      ], (srcs || []).map((s) => ({ source: s.source, total: s.total, rate: pct(s.success_rate), fail: s.fail })));
+        { key: "access_state", label: "状态", type: "badge", labels: stateLabels },
+        { key: "success_rate", label: "成功率", type: "meter" },
+        { key: "rate_txt", label: "有效/额定速率", type: "mono" },
+        { key: "consecutive_failures", label: "连续失败", type: "mono" },
+      ], (srcs || []).map((s) => ({
+        ...s,
+        rate_txt: `${s.effective_rate == null ? "—" : s.effective_rate} / ${s.rate_limit}`,
+      })));
+      document.getElementById("dash-meta").textContent = `最近刷新 ${new Date().toLocaleTimeString("zh-CN", { hour12: false })}`;
     } catch (e) {
       statsEl.innerHTML = `<div class="empty err">${PypViews.esc(e.message)}</div>`;
+      document.getElementById("dash-meta").textContent = "同步失败";
     }
-  })();
+  }
+  setInterval(() => { if (!document.hidden) loadDashboard(); }, 15000);
+  loadDashboard();
 </script>
 {% endblock %}

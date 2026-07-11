@@ -54,3 +54,16 @@ def test_backoff_signal_throttles_refill() -> None:
     assert rl.take("s", 4, now=t + 1.0) is True
     assert rl.take("s", 4, now=t + 1.0) is True
     assert rl.take("s", 4, now=t + 1.0) is False
+
+
+def test_retry_after_temporarily_freezes_bucket_and_is_observable() -> None:
+    rl = SourceRateLimiter()
+    t = 100.0
+    assert rl.take("s", 4, now=t)
+    rl.on_backoff_signal("s", retry_after_s=12, now=t)
+    assert rl.take("s", 4, now=t + 11.9) is False
+    assert rl.take("s", 4, now=t + 12.0) is True
+    snapshot = rl.snapshot("s", now=t + 5)
+    assert snapshot is not None
+    assert snapshot["effective_rate"] == 2
+    assert snapshot["retry_in_s"] == 7

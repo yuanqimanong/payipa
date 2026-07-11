@@ -54,7 +54,9 @@ def test_view_pages_and_endpoints(require_pg: None) -> None:
             assert client.get("/api/views/users").status_code == 401
             assert client.get("/api/views/audit").status_code == 401
 
-            client.post("/login", data={"username": _USER, "password": _PW})
+            client.get("/login")  # 下发 CSRF token
+            tok = client.cookies.get("pyp_csrf")
+            client.post("/login", data={"username": _USER, "password": _PW, "csrf_token": tok})
 
             # 每个功能页 SSR 200；数据驱动页引用 views.js
             for key in _PAGES:
@@ -98,7 +100,9 @@ def test_view_endpoints_rbac_enforced(require_pg: None, monkeypatch) -> None:
     get_server_settings.cache_clear()
     try:
         with TestClient(create_app()) as client:
-            client.post("/login", data={"username": _USER, "password": _PW})
+            client.get("/login")
+            tok = client.cookies.get("pyp_csrf")
+            client.post("/login", data={"username": _USER, "password": _PW, "csrf_token": tok})
             # 无角色用户：页面外壳可进，数据端点 403
             assert client.get("/audit").status_code == 200
             assert client.get("/api/views/audit").status_code == 403
