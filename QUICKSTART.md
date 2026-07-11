@@ -3,6 +3,18 @@
 > 现可用：**登录 → 建源界面 → 采集 → 查看页（Tabulator）** 全流程，agent 可**多容器**运行（见 §4）。
 > 尚未做（见文末）：任务调度/队列、组装/推送、RBAC 全量 API 鉴权、镜像发布到 registry。
 
+## 0. 容器化一键路径（不想装本地 PG/uvicorn 就走这条）
+
+主控 + PostgreSQL 三库 + 迁移 + 可选 agent 已有完整 Compose 编排与 `pypctl` 运维 CLI（P0-02/03）：
+
+```bash
+uv run pypctl init && uv run pypctl up --build && uv run pypctl smoke
+# 然后浏览器打开 http://127.0.0.1:8100/setup 创建首个管理员
+```
+
+详见 **[docs/install/docker-compose.md](docs/install/docker-compose.md)**（端口/卷/生产必改项）。
+以下章节是**本地开发路径**（宿主机 PG + uvicorn，便于断点调试）。
+
 ## 前置
 
 PostgreSQL 已起（Docker，连接在 `../.env`）；在 `payipa/` 下：

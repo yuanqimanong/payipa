@@ -19,6 +19,7 @@ dependencies = [
 
 [project.scripts]
 pyp-admin = "pyp_server.admin:main"
+pypctl = "pyp_server.ctl:main"
 
 [build-system]
 requires = ["uv_build>=0.11,<0.12"]

@@ -30,10 +30,11 @@ htmlcov/
 .DS_Store
 Thumbs.db
 
-# 本地环境与密钥（绝不入库）
+# 本地环境与密钥（绝不入库；deploy/.env.compose 由 pypctl init 生成）
 .env
 .env.*
 !.env.example
+!.env.compose.example
 
 # 说明：uv.lock 应提交入库。
 # ⚠️ [tool.uv.sources] 的本地 path 源（jianbing-utils）不得提交——提交前换回 git/PyPI 源（见 CLAUDE.md）。
