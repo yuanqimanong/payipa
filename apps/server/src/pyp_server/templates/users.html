@@ -33,13 +33,13 @@
 <script src="/static/views.js"></script>
 <script>
   const box = document.getElementById("box");
+  const esc = PypViews.esc;
+  let allRoles = [];  // 可授予的角色名（roles.manage 可读时填充）
   const COLS = [
     { key: "id", label: "#", type: "mono" },
     { key: "username", label: "用户名" },
     { key: "display_name", label: "显示名" },
     { key: "status", label: "状态", type: "badge" },
-    { key: "roles", label: "角色", type: "list" },
-    { key: "created_at", label: "创建时间", type: "time" },
   ];
 
   function actionCell(u) {
@@ -48,21 +48,50 @@
     return `<button class="btn ghost sm user-toggle" data-id="${u.id}" data-to="${toggle}">${label}</button>`;
   }
 
+  function rolesCell(u) {
+    const pills = (u.roles || []).map((r) =>
+      `<span class="pill">${esc(r)} <a href="#" class="role-x" data-id="${u.id}" data-role="${esc(r)}" title="撤销">✕</a></span>`
+    ).join(" ") || "<span class='muted'>—</span>";
+    const options = allRoles.filter((r) => !(u.roles || []).includes(r));
+    const grant = options.length
+      ? `<select class="role-grant" data-id="${u.id}" style="width:auto; margin-left:6px">` +
+        `<option value="">＋授予…</option>` + options.map((r) => `<option>${esc(r)}</option>`).join("") + "</select>"
+      : "";
+    return `<td>${pills}${grant}</td>`;
+  }
+
   async function load() {
     try {
+      // 角色清单（roles.manage 才可读；无权限则不显示授予下拉，静默降级）
+      allRoles = await PypViews.fetchJSON("/api/views/roles").then((rs) => rs.map((r) => r.name)).catch(() => []);
       const users = await PypViews.fetchJSON("/api/views/users");
-      const head = "<tr>" + COLS.map((c) => `<th>${c.label}</th>`).join("") + "<th style='text-align:right'>操作</th></tr>";
+      const head = "<tr>" + COLS.map((c) => `<th>${c.label}</th>`).join("") +
+        "<th>角色</th><th style='text-align:right'>操作</th></tr>";
       const rows = users.length
-        ? users.map((u) => "<tr>" + COLS.map((c) => PypViews.cell(u, c)).join("") +
+        ? users.map((u) => "<tr>" + COLS.map((c) => PypViews.cell(u, c)).join("") + rolesCell(u) +
             `<td style="text-align:right">${actionCell(u)}</td></tr>`).join("")
-        : `<tr><td colspan="${COLS.length + 1}"><div class="empty">还没有用户</div></td></tr>`;
+        : `<tr><td colspan="${COLS.length + 2}"><div class="empty">还没有用户</div></td></tr>`;
       box.innerHTML = `<div class="table-wrap"><table class="tbl"><thead>${head}</thead><tbody>${rows}</tbody></table></div>`;
-      box.querySelectorAll("button.user-toggle").forEach((btn) => {
-        btn.addEventListener("click", () => setStatus(btn.dataset.id, btn.dataset.to, btn));
-      });
+      box.querySelectorAll("button.user-toggle").forEach((btn) =>
+        btn.addEventListener("click", () => setStatus(btn.dataset.id, btn.dataset.to, btn)));
+      box.querySelectorAll("a.role-x").forEach((a) =>
+        a.addEventListener("click", (e) => { e.preventDefault(); setRole(a.dataset.id, a.dataset.role, "revoke"); }));
+      box.querySelectorAll("select.role-grant").forEach((sel) =>
+        sel.addEventListener("change", () => { if (sel.value) setRole(sel.dataset.id, sel.value, "grant"); }));
     } catch (e) {
-      box.innerHTML = `<div class="empty err">${PypViews.esc(e.message)}</div>`;
+      box.innerHTML = `<div class="empty err">${esc(e.message)}</div>`;
     }
+  }
+
+  async function setRole(id, role, action) {
+    try {
+      const resp = await fetch(`/api/users/${id}/roles`, {
+        method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ role, action }),
+      });
+      if (!resp.ok) throw new Error((await resp.json().catch(() => ({}))).detail || `HTTP ${resp.status}`);
+      await load();
+    } catch (e) { alert(`角色操作失败：${e.message}`); }
   }
 
   async function setStatus(id, status, btn) {

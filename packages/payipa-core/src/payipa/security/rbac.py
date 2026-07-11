@@ -9,7 +9,7 @@
 
 from __future__ import annotations
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncEngine
 
@@ -181,6 +181,16 @@ async def assign_role(engine_pyp: AsyncEngine, user_id: int, role_name: str) -> 
         )
 
 
+async def revoke_role(engine_pyp: AsyncEngine, user_id: int, role_name: str) -> bool:
+    """撤销用户的某角色（幂等）；返回是否确有一行被删。角色不存在抛 NoResultFound。"""
+    async with engine_pyp.begin() as conn:
+        role_id = (await conn.execute(select(Role.id).where(Role.name == role_name))).scalar_one()
+        result = await conn.execute(
+            delete(UserRole.__table__).where(UserRole.user_id == user_id, UserRole.role_id == role_id)
+        )
+    return bool(result.rowcount)
+
+
 async def seed_default_rbac(engine_pyp: AsyncEngine) -> None:
     """播种权限目录 + 默认四角色及其权限矩阵（幂等，可反复跑）。不动用户分配。"""
     await ensure_permissions(engine_pyp)
@@ -210,5 +220,6 @@ __all__ = [
     "grant_role_permissions",
     "has_permission",
     "make_superuser",
+    "revoke_role",
     "seed_default_rbac",
 ]

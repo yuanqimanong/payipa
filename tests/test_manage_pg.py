@@ -67,6 +67,56 @@ def test_create_and_toggle_user(require_pg: None) -> None:
         asyncio.run(_cleanup())
 
 
+def test_grant_and_revoke_role(require_pg: None) -> None:
+    """给用户授予/撤销角色（幂等），角色反映到 /api/views/users。"""
+    from payipa.security.rbac import seed_default_rbac
+
+    async def _seed_roles() -> None:
+        engine = create_async_engine(get_settings().async_url("pyp"))
+        try:
+            await seed_default_rbac(engine)  # 幂等：确保四角色存在
+        finally:
+            await engine.dispose()
+
+    async def _roles_of(username: str) -> list[str]:
+        from payipa.views import list_users
+
+        engine = create_async_engine(get_settings().async_url("pyp"))
+        try:
+            users = await list_users(engine)
+        finally:
+            await engine.dispose()
+        return next((u["roles"] for u in users if u["username"] == username), [])
+
+    asyncio.run(_cleanup())
+    asyncio.run(_seed_roles())
+    try:
+        with TestClient(create_app()) as client:
+            uid = client.post("/api/users", json={"username": _USER, "password": "role-pw-12345"}).json()["id"]
+
+            # 授予「技术」→ 出现在角色列表
+            g = client.post(f"/api/users/{uid}/roles", json={"role": "技术", "action": "grant"})
+            assert g.status_code == 200
+            assert "技术" in asyncio.run(_roles_of(_USER))
+
+            # 幂等：重复授予不报错
+            assert client.post(f"/api/users/{uid}/roles", json={"role": "技术", "action": "grant"}).status_code == 200
+
+            # 撤销 → 移除
+            r = client.post(f"/api/users/{uid}/roles", json={"role": "技术", "action": "revoke"})
+            assert r.status_code == 200
+            assert "技术" not in asyncio.run(_roles_of(_USER))
+
+            # 不存在的角色 → 404；不存在的用户 → 404
+            assert (
+                client.post(f"/api/users/{uid}/roles", json={"role": "不存在角色", "action": "grant"}).status_code
+                == 404
+            )
+            assert client.post("/api/users/99999999/roles", json={"role": "技术", "action": "grant"}).status_code == 404
+    finally:
+        asyncio.run(_cleanup())
+
+
 async def _password_is_hashed(username: str) -> bool:
     engine = create_async_engine(get_settings().async_url("pyp"))
     async with engine.connect() as conn:

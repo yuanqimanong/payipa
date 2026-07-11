@@ -10,9 +10,11 @@ from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException
 from payipa.db.engine import get_engine
 from payipa.db.pyp import User
+from payipa.security.rbac import assign_role, revoke_role
 from pydantic import BaseModel, Field
 from sqlalchemy import select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.exc import NoResultFound
 
 from pyp_server.auth import hash_password, require_perm
 
@@ -71,3 +73,28 @@ async def set_user_status(user_id: int, body: StatusRequest) -> dict:
     if not result.rowcount:
         raise HTTPException(status_code=404, detail=f"用户 id={user_id} 不存在")
     return {"id": user_id, "status": body.status}
+
+
+class RoleRequest(BaseModel):
+    role: str = Field(..., min_length=1, max_length=64, description="角色名，如 管理员/技术/运营/运维")
+    action: Literal["grant", "revoke"] = Field(..., description="grant=授予 / revoke=撤销")
+
+
+@router.post(
+    "/{user_id}/roles",
+    summary="给用户授予 / 撤销角色（幂等）",
+    dependencies=[Depends(require_perm("roles.manage"))],
+)
+async def set_user_role(user_id: int, body: RoleRequest) -> dict:
+    engine = get_engine("pyp")
+    async with engine.connect() as conn:
+        if not (await conn.execute(select(User.id).where(User.id == user_id))).first():
+            raise HTTPException(status_code=404, detail=f"用户 id={user_id} 不存在")
+    try:
+        if body.action == "grant":
+            await assign_role(engine, user_id, body.role)
+        else:
+            await revoke_role(engine, user_id, body.role)
+    except NoResultFound as exc:
+        raise HTTPException(status_code=404, detail=f"角色 {body.role!r} 不存在（先播种 RBAC）") from exc
+    return {"id": user_id, "role": body.role, "action": body.action}
