@@ -12,6 +12,36 @@
 <div class="card" style="margin-top:16px"><div class="card-head">存储后端</div><div id="stores"></div></div>
 <script src="/static/views.js"></script>
 <script>
+  const BOT_COLS = [
+    { key: "id", label: "#", type: "mono" },
+    { key: "name", label: "名称" },
+    { key: "type", label: "类型", type: "badge" },
+  ];
+  function renderBots(bots) {
+    const el = document.getElementById("bots");
+    const head = "<tr>" + BOT_COLS.map((c) => `<th>${c.label}</th>`).join("") + "<th style='text-align:right'>操作</th></tr>";
+    const rows = bots.length
+      ? bots.map((b) => "<tr>" + BOT_COLS.map((c) => PypViews.cell(b, c)).join("") +
+          `<td style="text-align:right"><button class="btn ghost sm bot-test" data-id="${b.id}">测试通知</button></td></tr>`).join("")
+      : `<tr><td colspan="${BOT_COLS.length + 1}"><div class="empty">还没有通知机器人</div></td></tr>`;
+    el.innerHTML = `<div class="table-wrap"><table class="tbl"><thead>${head}</thead><tbody>${rows}</tbody></table></div>`;
+    el.querySelectorAll("button.bot-test").forEach((btn) => btn.addEventListener("click", () => testBot(btn.dataset.id, btn)));
+  }
+  async function testBot(id, btn) {
+    btn.disabled = true;
+    const label = btn.textContent;
+    btn.textContent = "发送中…";
+    try {
+      const resp = await fetch(`/api/notify/${id}/test`, {
+        method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ title: "payipa 测试通知", text: "这是一条来自 payipa 的测试通知。" }),
+      });
+      if (!resp.ok) throw new Error((await resp.json().catch(() => ({}))).detail || `HTTP ${resp.status}`);
+      btn.textContent = "已发送 ✓";
+    } catch (e) { alert(`测试失败：${e.message}`); btn.textContent = label; }
+    finally { setTimeout(() => { btn.textContent = label; btn.disabled = false; }, 2500); }
+  }
+
   (async () => {
     try {
       const d = await PypViews.fetchJSON("/api/views/config");
@@ -21,11 +51,7 @@
         { key: "provider", label: "提供方", type: "badge" },
         { key: "enabled", label: "启用", type: "bool" },
       ], d.models || []);
-      PypViews.renderTable(document.getElementById("bots"), [
-        { key: "id", label: "#", type: "mono" },
-        { key: "name", label: "名称" },
-        { key: "type", label: "类型", type: "badge" },
-      ], d.notify_bots || []);
+      renderBots(d.notify_bots || []);
       PypViews.renderTable(document.getElementById("stores"), [
         { key: "id", label: "#", type: "mono" },
         { key: "name", label: "名称" },
