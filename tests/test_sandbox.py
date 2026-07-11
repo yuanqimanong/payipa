@@ -126,14 +126,13 @@ def test_lockdown_workdir_no_world_write(tmp_path) -> None:
     """POSIX 上 job/out 目录不得世界可写（防共享 /tmp 竞态注入 result.json）；返回合法 --user 实参。"""
     import os
 
-    from payipa.studio.sandbox import SandboxExecutor
+    from payipa.studio.sandbox import _lock_down_workdir
 
     workdir, jobdir, outdir = tmp_path / "w", tmp_path / "w" / "job", tmp_path / "w" / "out"
     jobdir.mkdir(parents=True)
     outdir.mkdir()
     (jobdir / "child.py").write_text("x=1\n")
-    sbx = SandboxExecutor("secret")
-    user_arg = sbx._lock_down_workdir(workdir, jobdir, outdir)
+    user_arg = _lock_down_workdir(workdir, jobdir, outdir)
     assert user_arg.count(":") == 1 and all(p.isdigit() for p in user_arg.split(":"))
     if hasattr(os, "getuid"):
         assert (outdir.stat().st_mode & 0o077) == 0, "outdir 不应对 group/other 开放"

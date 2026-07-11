@@ -18,6 +18,7 @@ Linux 容器宿主（linux/amd64 + cgroup v2 + runc），04A 要求的全部隔�
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import re
@@ -212,6 +213,79 @@ def _read_result_file(
     return result
 
 
+def _lock_down_workdir(workdir: Path, jobdir: Path, outdir: Path) -> str:
+    """锁定 job/out 目录属主与权限，返回容器 --user 实参。
+
+    原生 Linux：mkdtemp 落在共享 /tmp，若 /out 世界可写，其他本地用户可竞态写伪造 result.json
+    注入业务库。故容器以**宿主当前 uid** 运行、目录 0700（仅属主可访问）；主控以 root 跑时把目录
+    交给 nobody(65534) 并以之运行。Windows(Docker Desktop) 挂载权限是虚拟的、单用户宿主，无此竞态，
+    直接用 nobody 且不改权限。job 目录下所有脚本文件（child.py / worker.py）一并收权。
+    """
+    job_files = [p for p in jobdir.iterdir() if p.is_file()]
+    if not hasattr(os, "getuid"):  # Windows
+        return "65534:65534"
+    uid, gid = os.getuid(), os.getgid()  # type: ignore[attr-defined]
+    if uid == 0:  # 主控以 root 运行：不让容器也用 root，交给 nobody
+        run_uid, run_gid = 65534, 65534
+        for path in (jobdir, outdir, *job_files):
+            os.chown(path, run_uid, run_gid)  # type: ignore[attr-defined]
+    else:
+        run_uid, run_gid = uid, gid
+    workdir.chmod(0o700)
+    jobdir.chmod(0o700)
+    outdir.chmod(0o700)
+    for f in job_files:
+        f.chmod(0o600)
+    return f"{run_uid}:{run_gid}"
+
+
+def _lockdown_run_argv(
+    *,
+    docker: str,
+    name: str,
+    runtime: str | None,
+    pids_limit: int,
+    memory: str,
+    cpus: str,
+    max_output_bytes: int,
+    user_arg: str,
+    jobdir: Path,
+    outdir: Path,
+    image: str,
+    entry: list[str],
+) -> list[str]:
+    """锁定容器 `docker run` 参数（一次性 child 与常驻 worker 共用同一套隔离面，避免漂移）。
+
+    始终 `--rm -i`：一次性容器执行完即退；常驻 worker 由父进程持有 stdin 持续喂 spec 而不退出。
+    """
+    return [
+        docker, "run", "--rm", "-i",
+        "--name", name,
+        "--init",
+        *(("--runtime", runtime) if runtime else ()),
+        "--network", SANDBOX_NETWORK,
+        "--ipc", "none",
+        "--read-only",
+        "--cap-drop", "ALL",
+        "--security-opt", "no-new-privileges",
+        "--pids-limit", str(pids_limit),
+        "--memory", memory,
+        "--memory-swap", memory,  # 禁 swap 逃逸内存限额
+        "--cpus", cpus,
+        "--ulimit", f"fsize={max_output_bytes}",  # 单文件写出上限（/out 撑爆宿主盘防护）
+        "--ulimit", "nofile=128:128",
+        "--ulimit", f"nproc={pids_limit}:{pids_limit}",
+        "--stop-timeout", "2",
+        "--user", user_arg,
+        "--tmpfs", "/tmp:rw,noexec,nosuid,nodev,size=64m",
+        "--env", "PYTHONDONTWRITEBYTECODE=1",
+        "-v", f"{jobdir}:/job:ro",
+        "-v", f"{outdir}:/out",
+        image,
+        *entry,
+    ]  # fmt: skip
+
+
 class SandboxExecutor:
     """在锁定 Linux 容器里执行组装脚本源码，经 egress 代理走 Query Gateway 取数。
 
@@ -252,29 +326,6 @@ class SandboxExecutor:
         self._runtime = runtime
         self._docker = docker
 
-    def _lock_down_workdir(self, workdir: Path, jobdir: Path, outdir: Path) -> str:
-        """锁定 job/out 目录属主与权限，返回容器 --user 实参。
-
-        原生 Linux：mkdtemp 落在共享 /tmp，若 /out 世界可写，其他本地用户可竞态写伪造 result.json
-        注入业务库。故容器以**宿主当前 uid** 运行、目录 0700（仅属主可访问）；主控以 root 跑时把目录
-        交给 nobody(65534) 并以之运行。Windows(Docker Desktop) 挂载权限是虚拟的、单用户宿主，无此竞态，
-        直接用 nobody 且不改权限。
-        """
-        if not hasattr(os, "getuid"):  # Windows
-            return "65534:65534"
-        uid, gid = os.getuid(), os.getgid()  # type: ignore[attr-defined]
-        if uid == 0:  # 主控以 root 运行：不让容器也用 root，交给 nobody
-            run_uid, run_gid = 65534, 65534
-            for path in (jobdir, outdir, jobdir / "child.py"):
-                os.chown(path, run_uid, run_gid)  # type: ignore[attr-defined]
-        else:
-            run_uid, run_gid = uid, gid
-        workdir.chmod(0o700)
-        jobdir.chmod(0o700)
-        outdir.chmod(0o700)
-        (jobdir / "child.py").chmod(0o600)
-        return f"{run_uid}:{run_gid}"
-
     async def run_source(
         self,
         script_source: str,
@@ -313,33 +364,13 @@ class SandboxExecutor:
             (jobdir / "child.py").write_text(
                 Path(__file__).with_name("_sandbox_child.py").read_text(encoding="utf-8"), encoding="utf-8"
             )
-            user_arg = self._lock_down_workdir(workdir, jobdir, outdir)
-            cmd = [
-                self._docker, "run", "--rm", "-i",
-                "--name", name,
-                "--init",
-                *(("--runtime", self._runtime) if self._runtime else ()),
-                "--network", SANDBOX_NETWORK,
-                "--ipc", "none",
-                "--read-only",
-                "--cap-drop", "ALL",
-                "--security-opt", "no-new-privileges",
-                "--pids-limit", str(self._pids_limit),
-                "--memory", self._memory,
-                "--memory-swap", self._memory,  # 禁 swap 逃逸内存限额
-                "--cpus", self._cpus,
-                "--ulimit", f"fsize={self._max_output_bytes}",  # 单文件写出上限（/out 撑爆宿主盘防护）
-                "--ulimit", "nofile=128:128",
-                "--ulimit", f"nproc={self._pids_limit}:{self._pids_limit}",
-                "--stop-timeout", "2",
-                "--user", user_arg,
-                "--tmpfs", "/tmp:rw,noexec,nosuid,nodev,size=64m",
-                "--env", "PYTHONDONTWRITEBYTECODE=1",
-                "-v", f"{jobdir}:/job:ro",
-                "-v", f"{outdir}:/out",
-                self._image,
-                "python", "/job/child.py",
-            ]  # fmt: skip
+            user_arg = _lock_down_workdir(workdir, jobdir, outdir)
+            cmd = _lockdown_run_argv(
+                docker=self._docker, name=name, runtime=self._runtime, pids_limit=self._pids_limit,
+                memory=self._memory, cpus=self._cpus, max_output_bytes=self._max_output_bytes,
+                user_arg=user_arg, jobdir=jobdir, outdir=outdir, image=self._image,
+                entry=["python", "/job/child.py"],
+            )  # fmt: skip
             try:
                 with anyio.fail_after(self._timeout_s):
                     proc = await anyio.run_process(cmd, input=json.dumps(spec).encode(), check=False)
@@ -362,3 +393,184 @@ class SandboxExecutor:
             return result["rows"], {k: int(v) for k, v in (result.get("new_watermarks") or {}).items()}
         finally:
             shutil.rmtree(workdir, ignore_errors=True)
+
+
+class SandboxPool:
+    """常驻 worker 池（M3 slice-7）：预热 N 个锁定容器，作业按空闲 worker 派发，摊薄容器冷启动。
+
+    与一次性 :class:`SandboxExecutor` 的取舍：Executor 每作业一容器（进程级完全隔离，冷启动秒级），
+    适合零散/强隔离；Pool 复用温热 worker（每作业全新命名空间 exec，但同一进程跨作业，模块级副作用
+    会残留），适合**受信管理员脚本的批量吞吐**。隔离面（容器 fs/网络/cap/限额）两者一致。
+
+    结果经 /out 卷文件回传（父进程轮询原子出现的 ``<seq>.json``），故用户脚本 print 不污染框定协议。
+    每个 worker 单飞（一次一作业，经 stdin 串行）；N 个 worker = N 路并发。用作 async 上下文管理器。
+    """
+
+    def __init__(
+        self,
+        secret: str,
+        *,
+        size: int = 2,
+        gateway_port: int = 8000,
+        image: str = DEFAULT_IMAGE,
+        memory: str = "512m",
+        cpus: str = "1.0",
+        pids_limit: int = 256,
+        timeout_s: float = 120.0,
+        page_limit: int = 500,
+        max_output_bytes: int = 256 * 1024 * 1024,
+        max_output_rows: int = _DEFAULT_MAX_OUTPUT_ROWS,
+        max_row_bytes: int = _DEFAULT_MAX_ROW_BYTES,
+        runtime: str | None = None,
+        docker: str = "docker",
+    ) -> None:
+        self._secret = secret
+        self._size = max(1, size)
+        self._gateway_port = gateway_port
+        self._image = image
+        self._memory = memory
+        self._cpus = cpus
+        self._pids_limit = pids_limit
+        self._timeout_s = timeout_s
+        self._page_limit = page_limit
+        self._max_output_bytes = max_output_bytes
+        self._max_output_rows = max_output_rows
+        self._max_row_bytes = max_row_bytes
+        self._runtime = runtime
+        self._docker = docker
+        self._workers: list[dict] = []
+        self._free = None  # 空闲 worker 内存流（send 端），start() 建
+        self._free_recv = None  # 对应 recv 端
+        self._started = False
+
+    async def __aenter__(self) -> SandboxPool:
+        await self.start()
+        return self
+
+    async def __aexit__(self, *exc) -> None:
+        await self.aclose()
+
+    async def _spawn_worker(self, index: int) -> dict:
+        workdir = Path(tempfile.mkdtemp(prefix=f"pyp-sbxpool-{index}-"))
+        jobdir, outdir = workdir / "job", workdir / "out"
+        jobdir.mkdir()
+        outdir.mkdir()
+        here = Path(__file__).parent
+        (jobdir / "child.py").write_text((here / "_sandbox_child.py").read_text(encoding="utf-8"), encoding="utf-8")
+        (jobdir / "worker.py").write_text((here / "_sandbox_worker.py").read_text(encoding="utf-8"), encoding="utf-8")
+        user_arg = _lock_down_workdir(workdir, jobdir, outdir)
+        name = f"pyp-sbxpool-{index}-{uuid.uuid4().hex[:6]}"
+        argv = _lockdown_run_argv(
+            docker=self._docker, name=name, runtime=self._runtime, pids_limit=self._pids_limit,
+            memory=self._memory, cpus=self._cpus, max_output_bytes=self._max_output_bytes,
+            user_arg=user_arg, jobdir=jobdir, outdir=outdir, image=self._image,
+            entry=["python", "-u", "/job/worker.py"],
+        )  # fmt: skip
+        proc = await anyio.open_process(argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        return {"proc": proc, "name": name, "workdir": workdir, "jobdir": jobdir, "outdir": outdir, "index": index}
+
+    async def start(self) -> None:
+        if self._started:
+            return
+        await ensure_sandbox_infra(self._gateway_port, docker=self._docker)
+        await _ensure_image(self._image, docker=self._docker)
+        send, recv = anyio.create_memory_object_stream(self._size)
+        self._free, self._free_recv = send, recv
+        for i in range(self._size):
+            w = await self._spawn_worker(i)
+            self._workers.append(w)
+            await send.send(w)
+        self._started = True
+
+    async def _ensure_alive(self, w: dict) -> dict:
+        """worker 进程已死则原地重建（保持池规模）。"""
+        if w["proc"].returncode is None:
+            return w
+        with contextlib.suppress(Exception):
+            await _docker("rm", "-f", w["name"], docker=self._docker)
+        shutil.rmtree(w["workdir"], ignore_errors=True)
+        nw = await self._spawn_worker(w["index"])
+        self._workers[self._workers.index(w)] = nw
+        return nw
+
+    async def run_source(
+        self,
+        script_source: str,
+        *,
+        job_id: str,
+        sources: list[str],
+        row_quota: int | None = None,
+        watermarks: dict[str, int] | None = None,
+    ) -> tuple[list[dict], dict[str, int]]:
+        """与 SandboxExecutor.run_source 同签名（鸭子类型）：run_assembly_sandboxed 可直接传池。"""
+        return await self.submit(
+            script_source, job_id=job_id, sources=sources, row_quota=row_quota, watermarks=watermarks
+        )
+
+    async def submit(
+        self,
+        script_source: str,
+        *,
+        job_id: str,
+        sources: list[str],
+        row_quota: int | None = None,
+        watermarks: dict[str, int] | None = None,
+    ) -> tuple[list[dict], dict[str, int]]:
+        """派一个作业给空闲 worker，返回 (产物行, 各源新水位)。失败抛 SandboxScriptError/SandboxTimeout。"""
+        if not self._started:
+            raise SandboxUnavailable("SandboxPool 未 start()")
+        w = await self._free_recv.receive()
+        try:
+            w = await self._ensure_alive(w)
+            token, _jti = issue_job_token(
+                self._secret, job_id,
+                tables=[data_table_name(s) for s in sources],
+                row_quota=row_quota, lease_s=int(self._timeout_s) + 60,
+            )  # fmt: skip
+            seq = uuid.uuid4().hex
+            spec = {
+                "source": script_source,
+                "entry": "assemble",
+                "gateway_url": f"http://{GATEWAY_ALIAS}/internal/query",
+                "job_token": token,
+                "watermarks": dict(watermarks or {}),
+                "page_limit": self._page_limit,
+                "out_path": f"/out/{seq}.json",
+            }
+            result_path = w["outdir"] / f"{seq}.json"
+            await w["proc"].stdin.send((json.dumps(spec) + "\n").encode())
+            try:
+                with anyio.fail_after(self._timeout_s):
+                    while not result_path.exists():
+                        if w["proc"].returncode is not None:
+                            raise SandboxScriptError(f"worker {w['name']} 意外退出（exit={w['proc'].returncode}）")
+                        await anyio.sleep(0.05)
+            except TimeoutError:
+                await _docker("kill", w["name"], docker=self._docker)  # 作业卡死：杀该 worker，下次重建
+                raise SandboxTimeout(f"组装脚本超时（>{self._timeout_s}s），worker 已终止") from None
+            try:
+                result = _read_result_file(
+                    result_path, max_bytes=self._max_output_bytes,
+                    max_rows=self._max_output_rows, max_row_bytes=self._max_row_bytes,
+                )  # fmt: skip
+            finally:
+                with contextlib.suppress(OSError):
+                    result_path.unlink()
+            if not result.get("ok"):
+                raise SandboxScriptError(str(result.get("error", "unknown error")))
+            return result["rows"], {k: int(v) for k, v in (result.get("new_watermarks") or {}).items()}
+        finally:
+            await self._free.send(await self._ensure_alive(w))  # 归还（必要时已重建）
+
+    async def aclose(self) -> None:
+        """关停池：关 stdin（worker 循环结束自然退出）+ 强杀容器 + 清临时目录。"""
+        self._started = False
+        for w in self._workers:
+            with contextlib.suppress(Exception):
+                await w["proc"].stdin.aclose()
+            with contextlib.suppress(Exception):
+                await _docker("rm", "-f", w["name"], docker=self._docker)
+            with contextlib.suppress(Exception):
+                w["proc"].kill()
+            shutil.rmtree(w["workdir"], ignore_errors=True)
+        self._workers.clear()

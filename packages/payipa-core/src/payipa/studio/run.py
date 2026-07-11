@@ -16,7 +16,7 @@ from payipa.studio.asm import AsmLoader, build_asm_table
 from payipa.studio.evolve import evolve_asm_table
 from payipa.studio.executor import AssembleContext, AssembleFn, CodeExecutor, LocalExecutor
 from payipa.studio.gateway import QueryGateway
-from payipa.studio.sandbox import SandboxExecutor
+from payipa.studio.sandbox import SandboxExecutor, SandboxPool
 from payipa.studio.watermark import advance_watermarks, get_watermarks
 
 
@@ -59,7 +59,7 @@ async def run_assembly_sandboxed(
     product_code: str,
     script_source: str,
     sources: Sequence[str],
-    sandbox: SandboxExecutor,
+    sandbox: SandboxExecutor | SandboxPool,
     assembly_id: int | None = None,
     fingerprint_keys: Sequence[str] = (),
     indexed_fields: Sequence[str] = (),

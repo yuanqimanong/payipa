@@ -14,7 +14,7 @@
 | 管理界面 | ✅ 已实现 | argon2 + HttpOnly cookie 登录、建源表单、页面级保护、`pyp-admin` 建管理员；**12 个功能页全量接真数据**（仪表盘/监控/节点/任务/规则/组装/推送/用户/角色/配置/存储/审计，数据经 `/api/views/*` + `/api/monitor/*`，RBAC 在数据端点强制，监控/仪表盘 10–15s 自动刷新 + 健康度 meter）；**数据导出（CSV/JSONL 流式下载）+ 数据源一键重跑 + 审计分页/动作筛选** |
 | 生产安全加固 | ✅ 已实现 | `production` 启动前置校验（拒 dev 默认密钥/RBAC 未开/join token 默认值）+ SSR 表单 CSRF 双提交 token + agent WS join token 校验 + `/api/views/*` 强制登录 + 节点按心跳新鲜度判在线（防僵尸） |
 | M2 调度与分布式 | ✅ 已实现 | 持久化派发环 + 租约回收 + 断连重排 + 多波爬行 + 优先级 + cron + 取消 + 节点注册/加权分组 + 每源限流/AIMD + 监控实时聚合 + agent Docker 多容器 |
-| M3 组装沙箱 | ✅ 已实现 | Query Gateway（红线2 唯一取数）+ job_token + 签名游标/配额 + 版本签名门 + 增量水位 + SchemaEvolver + **真 SandboxExecutor（Docker/WSL2 锁定容器 + 路径白名单 egress，含降级）** |
+| M3 组装沙箱 | ✅ 已实现 | Query Gateway（红线2 唯一取数）+ job_token + 签名游标/配额 + 版本签名门 + 增量水位 + SchemaEvolver + **真 SandboxExecutor（Docker/WSL2 锁定容器 + 路径白名单 egress，含降级）+ 常驻 worker 池（预热复用/并发，批量吞吐）** |
 | M4 推送对外 · M5 智能增强 | ✅ 已实现 | 见 SDD §12 与决策记录（outbox/Dataset API/隔离子进程投递/通知；RBAC/monitor/AI Gateway/受控出口/Playwright/点选插件） |
 | M6 采集韧性 | ✅ 已实现 | Retry-After、请求延迟、源级冷却、错误分类、挑战暂停、引擎能力派发、运行态监控与沙箱结果加固 |
 
