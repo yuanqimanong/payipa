@@ -271,10 +271,11 @@ async def list_roles(engine: AsyncEngine) -> list[dict]:
 
 
 async def config_overview(engine: AsyncEngine) -> dict:
-    """公共配置总览：LLM 模型（不回凭证，含默认标注）、通知机器人、存储后端。"""
-    from payipa.ai.registry import list_models
+    """公共配置总览：LLM 模型（不回凭证，含默认标注）、系统提示词、通知机器人、存储后端。"""
+    from payipa.ai.registry import list_models, list_system_prompts
 
     models = await list_models(engine)  # {id,name,provider,enabled,is_default}，凭证不回
+    prompts = await list_system_prompts(engine)  # {id,name,version,length}，全文按需 GET
     async with engine.connect() as conn:
         bots = (await conn.execute(select(NotifyBot.id, NotifyBot.name, NotifyBot.type).order_by(NotifyBot.id))).all()
         stores = (
@@ -284,6 +285,7 @@ async def config_overview(engine: AsyncEngine) -> dict:
         ).all()
     return {
         "models": models,
+        "system_prompts": prompts,
         "notify_bots": [{"id": b.id, "name": b.name, "type": b.type} for b in bots],
         "storage": [{"id": s.id, "name": s.name, "backend": s.backend} for s in stores],
     }

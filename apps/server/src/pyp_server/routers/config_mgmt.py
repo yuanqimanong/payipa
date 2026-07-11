@@ -9,7 +9,7 @@ from __future__ import annotations
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException
-from payipa.ai.registry import register_model, set_default_model, set_model_enabled
+from payipa.ai.registry import get_system_prompt, register_model, set_default_model, set_model_enabled
 from payipa.db.engine import get_engine
 from payipa.db.settings import get_settings as get_db_settings
 from payipa.deliver.notify import NotifyBotStore
@@ -90,3 +90,16 @@ async def set_llm_default(model_id: int) -> dict:
     if not await set_default_model(get_engine("pyp"), model_id):
         raise HTTPException(status_code=404, detail=f"模型 id={model_id} 不存在")
     return {"id": model_id, "is_default": True}
+
+
+# ── 系统提示词（读单条全文；写走既有 /api/llm/prompts，更新即版本 +1）─────────────
+@router.get(
+    "/system-prompts/{name}",
+    summary="取系统提示词全文（供界面编辑加载）",
+    dependencies=[Depends(require_perm("llm.manage"))],
+)
+async def get_prompt(name: str) -> dict:
+    content = await get_system_prompt(get_engine("pyp"), name)
+    if content is None:
+        raise HTTPException(status_code=404, detail=f"系统提示词 {name!r} 不存在")
+    return {"name": name, "content": content}

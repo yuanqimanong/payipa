@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 
 from fastapi.testclient import TestClient
-from payipa.db.pyp import LlmModel, NotifyBot
+from payipa.db.pyp import LlmModel, NotifyBot, SystemPrompt
 from payipa.db.settings import get_settings
 from pyp_server.main import create_app
 from sqlalchemy import delete, select
@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import create_async_engine
 
 _BOT = "cfg-test-bot"
 _MODEL = "cfg-test-model"
+_PROMPT = "cfg-test-prompt"
 
 
 async def _cleanup() -> None:
@@ -20,6 +21,7 @@ async def _cleanup() -> None:
     async with engine.begin() as conn:
         await conn.execute(delete(NotifyBot.__table__).where(NotifyBot.name == _BOT))
         await conn.execute(delete(LlmModel.__table__).where(LlmModel.name == _MODEL))
+        await conn.execute(delete(SystemPrompt.__table__).where(SystemPrompt.name == _PROMPT))
     await engine.dispose()
 
 
@@ -99,5 +101,29 @@ def test_llm_model_register_enable_default(require_pg: None) -> None:
             assert client.post(f"/api/config/llm-models/{mid}/default").status_code == 200
             assert client.post("/api/config/llm-models/99999999/default").status_code == 404
             assert client.post("/api/config/llm-models/99999999/enabled", json={"enabled": True}).status_code == 404
+    finally:
+        asyncio.run(_cleanup())
+
+
+def test_system_prompt_edit(require_pg: None) -> None:
+    """系统提示词：存（走既有 /api/llm/prompts）→ GET 全文回来 → 再存版本 +1 → 出现在总览。"""
+    asyncio.run(_cleanup())
+    try:
+        with TestClient(create_app()) as client:
+            assert (
+                client.post("/api/llm/prompts", json={"name": _PROMPT, "content": "你是数据抽取助手。"}).status_code
+                == 200
+            )
+            got = client.get(f"/api/config/system-prompts/{_PROMPT}")
+            assert got.status_code == 200 and got.json()["content"] == "你是数据抽取助手。"
+
+            # 同名再存 → 版本 +1
+            assert client.post("/api/llm/prompts", json={"name": _PROMPT, "content": "改一版。"}).status_code == 200
+            prompts = {p["name"]: p for p in asyncio.run(_config())["system_prompts"]}
+            assert prompts[_PROMPT]["version"] == 2
+            assert client.get(f"/api/config/system-prompts/{_PROMPT}").json()["content"] == "改一版。"
+
+            # 不存在 → 404
+            assert client.get("/api/config/system-prompts/no-such-prompt").status_code == 404
     finally:
         asyncio.run(_cleanup())

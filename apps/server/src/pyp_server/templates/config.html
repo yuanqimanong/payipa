@@ -26,6 +26,18 @@
 </div>
 
 <div class="card" style="margin-top:16px">
+  <div class="card-head model-head">系统提示词 <button class="btn sm" id="new-prompt" type="button">＋ 新建/编辑</button></div>
+  <div class="card-pad" id="prompt-form" hidden>
+    <div class="field"><label>名称（同名保存即版本 +1）</label><input id="p-name" autocomplete="off" /></div>
+    <div class="field"><label>内容</label><textarea id="p-content" rows="5"></textarea></div>
+    <div id="p-err" class="form-error" hidden></div>
+    <div class="form-actions"><button class="btn" id="p-submit" type="button">保存</button>
+      <button class="btn ghost" id="p-cancel" type="button">取消</button></div>
+  </div>
+  <div id="prompts"></div>
+</div>
+
+<div class="card" style="margin-top:16px">
   <div class="card-head model-head">通知机器人 <button class="btn sm" id="new-bot" type="button">＋ 新建机器人</button></div>
   <div class="card-pad" id="bot-form" hidden>
     <div class="grid cols-2" style="gap:12px">
@@ -117,10 +129,32 @@
     try { return JSON.parse(raw); } catch { errEl.textContent = "配置不是合法 JSON"; errEl.hidden = false; return null; }
   }
 
+  const pForm = document.getElementById("prompt-form"), pErr = document.getElementById("p-err");
+  function renderPrompts(prompts) {
+    const el = document.getElementById("prompts");
+    const cols = [{ key: "name", label: "名称" }, { key: "version", label: "版本", type: "mono" }, { key: "length", label: "字数", type: "mono" }];
+    const head = "<tr>" + cols.map((c) => `<th>${c.label}</th>`).join("") + "<th style='text-align:right'>操作</th></tr>";
+    const rows = prompts.length
+      ? prompts.map((p) => "<tr>" + cols.map((c) => PypViews.cell(p, c)).join("") +
+          `<td style="text-align:right"><button class="btn ghost sm p-edit" data-name="${esc(p.name)}">编辑</button></td></tr>`).join("")
+      : `<tr><td colspan="${cols.length + 1}"><div class="empty">还没有系统提示词</div></td></tr>`;
+    el.innerHTML = `<div class="table-wrap"><table class="tbl"><thead>${head}</thead><tbody>${rows}</tbody></table></div>`;
+    el.querySelectorAll("button.p-edit").forEach((b) => b.addEventListener("click", () => editPrompt(b.dataset.name)));
+  }
+  async function editPrompt(name) {
+    try {
+      const d = await PypViews.fetchJSON(`/api/config/system-prompts/${encodeURIComponent(name)}`);
+      document.getElementById("p-name").value = d.name;
+      document.getElementById("p-content").value = d.content;
+      pForm.hidden = false; pErr.hidden = true;
+    } catch (e) { alert(e.message); }
+  }
+
   async function load() {
     try {
       const d = await PypViews.fetchJSON("/api/views/config");
       renderModels(d.models || []);
+      renderPrompts(d.system_prompts || []);
       renderBots(d.notify_bots || []);
       PypViews.renderTable(document.getElementById("stores"),
         [{ key: "id", label: "#", type: "mono" }, { key: "name", label: "名称" }, { key: "backend", label: "后端", type: "badge" }],
@@ -147,6 +181,22 @@
       document.getElementById("m-config").value = ""; document.getElementById("m-default").checked = false;
       load();
     } catch (e) { mErr.textContent = e.message; mErr.hidden = false; }
+  });
+
+  document.getElementById("new-prompt").addEventListener("click", () => {
+    document.getElementById("p-name").value = ""; document.getElementById("p-content").value = "";
+    pForm.hidden = !pForm.hidden; pErr.hidden = true;
+  });
+  document.getElementById("p-cancel").addEventListener("click", () => { pForm.hidden = true; });
+  document.getElementById("p-submit").addEventListener("click", async () => {
+    pErr.hidden = true;
+    const name = document.getElementById("p-name").value.trim();
+    const content = document.getElementById("p-content").value;
+    if (!name || !content.trim()) { pErr.textContent = "名称与内容必填"; pErr.hidden = false; return; }
+    try {
+      await postJSON("/api/llm/prompts", { name, content });  // 复用既有端点，更新即版本 +1
+      pForm.hidden = true; load();
+    } catch (e) { pErr.textContent = e.message; pErr.hidden = false; }
   });
 
   const bForm = document.getElementById("bot-form"), bErr = document.getElementById("b-err");

@@ -172,11 +172,25 @@ async def get_system_prompt(engine_pyp: AsyncEngine, name: str) -> str | None:
         return (await conn.execute(select(SystemPrompt.content).where(SystemPrompt.name == name))).scalar()
 
 
+async def list_system_prompts(engine_pyp: AsyncEngine) -> list[dict[str, Any]]:
+    """列出系统提示词元信息（name/version/内容长度；不回全文，界面按需 GET 单条）。"""
+    async with engine_pyp.connect() as conn:
+        rows = (
+            await conn.execute(
+                select(SystemPrompt.id, SystemPrompt.name, SystemPrompt.version, SystemPrompt.content).order_by(
+                    SystemPrompt.name
+                )
+            )
+        ).all()
+    return [{"id": r.id, "name": r.name, "version": r.version, "length": len(r.content or "")} for r in rows]
+
+
 __all__ = [
     "ModelHandle",
     "default_model_id",
     "get_system_prompt",
     "list_models",
+    "list_system_prompts",
     "register_model",
     "resolve_model",
     "set_default_model",
