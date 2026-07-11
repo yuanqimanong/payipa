@@ -10,7 +10,8 @@
 <div class="card" id="box"><div class="empty">加载中…</div></div>
 <script src="/static/views.js"></script>
 <script>
-  PypViews.loadTable(document.getElementById("box"), "/api/views/assemblies", [
+  const box = document.getElementById("box");
+  const COLS = [
     { key: "id", label: "#", type: "mono" },
     { key: "name", label: "名称" },
     { key: "product_code", label: "产物表", type: "mono" },
@@ -19,6 +20,51 @@
     { key: "incremental", label: "增量", type: "bool" },
     { key: "signed", label: "已签名", type: "bool" },
     { key: "created_at", label: "创建时间", type: "time" },
-  ]);
+  ];
+
+  function actions(a) {
+    // 已 active 不再重复发布/降级；draft/testing 可流转 + 发布
+    if (a.status === "active") return "<span class='muted'>已发布</span>";
+    const btns = [];
+    if (a.status !== "testing")
+      btns.push(`<button class="btn ghost sm asm-status" data-id="${a.id}" data-to="testing">转测试</button>`);
+    if (a.status !== "draft")
+      btns.push(`<button class="btn ghost sm asm-status" data-id="${a.id}" data-to="draft">转草稿</button>`);
+    btns.push(`<button class="btn sm asm-publish" data-id="${a.id}">发布</button>`);
+    return btns.join(" ");
+  }
+
+  async function load() {
+    try {
+      const rows = await PypViews.fetchJSON("/api/views/assemblies");
+      const head = "<tr>" + COLS.map((c) => `<th>${c.label}</th>`).join("") + "<th style='text-align:right'>操作</th></tr>";
+      const body = rows.length
+        ? rows.map((a) => "<tr>" + COLS.map((c) => PypViews.cell(a, c)).join("") +
+            `<td style="text-align:right">${actions(a)}</td></tr>`).join("")
+        : `<tr><td colspan="${COLS.length + 1}"><div class="empty">还没有组装定义</div></td></tr>`;
+      box.innerHTML = `<div class="table-wrap"><table class="tbl"><thead>${head}</thead><tbody>${body}</tbody></table></div>`;
+      box.querySelectorAll("button.asm-status").forEach((b) =>
+        b.addEventListener("click", () => post(`/api/assemblies/${b.dataset.id}/status`, { status: b.dataset.to }, b)));
+      box.querySelectorAll("button.asm-publish").forEach((b) =>
+        b.addEventListener("click", () => { if (confirm("发布后将签名并置为 active，确认？")) post(`/api/assemblies/${b.dataset.id}/publish`, null, b); }));
+    } catch (e) {
+      box.innerHTML = `<div class="empty err">${PypViews.esc(e.message)}</div>`;
+    }
+  }
+
+  async function post(url, body, btn) {
+    btn.disabled = true;
+    try {
+      const resp = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: body ? JSON.stringify(body) : null,
+      });
+      if (!resp.ok) throw new Error((await resp.json().catch(() => ({}))).detail || `HTTP ${resp.status}`);
+      await load();
+    } catch (e) { alert(`操作失败：${e.message}`); btn.disabled = false; }
+  }
+
+  load();
 </script>
 {% endblock %}

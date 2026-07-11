@@ -29,6 +29,7 @@ from pyp_server.routers import (
     internal,
     manage,
     sources,
+    studio,
     ui,
     views,
     ws,
@@ -76,6 +77,7 @@ def create_app() -> FastAPI:
     app.include_router(api.router)
     app.include_router(views.router)
     app.include_router(manage.router)
+    app.include_router(studio.router)
     app.include_router(explore.router)
     app.include_router(ai.router)
     app.include_router(internal.router)
