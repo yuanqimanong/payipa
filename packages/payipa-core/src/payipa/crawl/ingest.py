@@ -29,9 +29,11 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncEngine
 
+from payipa.db.ident import check_code, check_field
+
 
 def data_table_name(source_uuid: str) -> str:
-    return f"data_{source_uuid}"
+    return f"data_{check_code(source_uuid)}"  # 短码先过统一校验（P0-13）：所有建表/取数路径都经此拼名
 
 
 def build_data_table(source_uuid: str, indexed_fields: Sequence[str] = ()) -> Table:
@@ -60,6 +62,7 @@ def build_data_table(source_uuid: str, indexed_fields: Sequence[str] = ()) -> Ta
         Column("field_meta", JSONB, nullable=False, server_default="{}"),  # 每字段证据链
     ]
     for f in indexed_fields:
+        check_field(f)  # 字段名内插进生成列表达式/索引名，先过统一校验（P0-13）
         columns.append(Column(f"idx_{f}", Text, Computed(f"(fields ->> '{f}')", persisted=True)))
     table = Table(name, md, *columns)
     for f in indexed_fields:

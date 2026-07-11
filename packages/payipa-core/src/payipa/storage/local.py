@@ -2,13 +2,29 @@
 
 from __future__ import annotations
 
+import os
 import shutil
+import tempfile
 from pathlib import Path
 
+import anyio.to_thread
 from payipa_contracts import ArtifactRef
 from payipa_contracts import StorageBackend as BackendKind
 
 from payipa.storage.base import StorageBackend
+
+
+def _atomic_write(path: Path, data: bytes) -> None:
+    """临时文件 + os.replace 原子落盘：崩溃不留半截对象（tmp 与目标同目录，保证同卷可 replace）。"""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
+        os.replace(tmp, path)
+    except OSError:
+        Path(tmp).unlink(missing_ok=True)
+        raise
 
 
 class LocalBackend(StorageBackend):
@@ -33,12 +49,12 @@ class LocalBackend(StorageBackend):
 
     async def save_bytes(self, object_key: str, data: bytes, content_type: str | None = None) -> ArtifactRef:
         path = self._path(object_key)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(data)
+        await anyio.to_thread.run_sync(_atomic_write, path, data)  # 阻塞 IO 下线程，不卡事件循环
         return self._ref(self.bucket, self.kind, object_key, data, content_type)
 
     async def get_bytes(self, object_key: str) -> bytes:
-        return self._path(object_key).read_bytes()
+        return await anyio.to_thread.run_sync(self._path(object_key).read_bytes)
 
     async def delete(self, object_key: str) -> None:
-        self._path(object_key).unlink(missing_ok=True)
+        path = self._path(object_key)
+        await anyio.to_thread.run_sync(lambda: path.unlink(missing_ok=True))

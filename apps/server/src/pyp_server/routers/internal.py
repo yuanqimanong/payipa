@@ -20,7 +20,24 @@ from payipa.studio.cursor import decode_cursor, encode_cursor
 from payipa.studio.gateway import QueryGateway
 from payipa_contracts import ArtifactRef, KeysetCursor, QuotaMeta, RulePack, TableQueryRequest
 
+from pyp_server.settings import get_server_settings
+
 router = APIRouter(prefix="/internal", tags=["internal"])
+
+
+async def _read_body(request: Request, limit: int) -> bytes:
+    """流式读请求体并强制上限：超限即 413 停读（防 Content-Length 缺失/说谎把内存拖爆）。"""
+    declared = request.headers.get("content-length") or ""
+    if declared.isdigit() and int(declared) > limit:
+        raise HTTPException(status_code=413, detail=f"body exceeds upload limit ({limit} bytes)")
+    chunks: list[bytes] = []
+    total = 0
+    async for chunk in request.stream():
+        total += len(chunk)
+        if total > limit:
+            raise HTTPException(status_code=413, detail=f"body exceeds upload limit ({limit} bytes)")
+        chunks.append(chunk)
+    return b"".join(chunks)
 
 
 @router.get("/rules/{content_hash}", response_model=RulePack, summary="agent 按内容 hash 拉规则（内容寻址）")
@@ -51,7 +68,7 @@ async def upload_raw(
     if not storage.disk_ok():
         raise HTTPException(status_code=503, detail="disk watermark low; upload rejected")
 
-    data = await request.body()
+    data = await _read_body(request, get_server_settings().max_upload_mb * 1024 * 1024)
     ref = await storage.save_raw(source_uuid, batch_id, url, data, content_type=content_type)
     expires_at = datetime.now(UTC) + timedelta(days=settings.raw_retention_days)  # raw 保留期 → GC
     await record_artifact(ref, task_id=task_id, agent_id=agent_id, source_id=source_uuid, expires_at=expires_at)
@@ -70,7 +87,10 @@ async def query_gateway(
     claims = decode_job_token(secret, x_job_token)
     if claims is None:
         raise HTTPException(status_code=401, detail="invalid or expired job token")
-    table = data_table_name(req.source)
+    try:  # 短码统一校验（P0-13，data_table_name 内置）：非法 400，不进 scope 匹配/查询
+        table = data_table_name(req.source)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     if not token_allows_table(claims, table):
         raise HTTPException(status_code=403, detail=f"job token scope does not allow table {table}")
 

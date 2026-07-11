@@ -11,11 +11,14 @@ import logging
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from payipa.crawl.ingest import build_data_table
 from payipa.crawl.run import (
+    auth_node,
     defer_request_for_retry,
     enqueue_discovered,
+    fence_ok,
     finalize_batch_if_done,
     finalize_request_batch,
     handle_result,
+    mark_running,
     pause_source_for_request,
     register_agent,
     requeue_agent_inflight,
@@ -25,7 +28,7 @@ from payipa.crawl.run import (
     touch_agent,
 )
 from payipa.db.engine import get_engine
-from payipa.security.tokens import new_node_token
+from payipa.security.tokens import hash_token, new_node_token
 from payipa_contracts import (
     Cancel,
     ClientFrame,
@@ -38,6 +41,7 @@ from payipa_contracts import (
     ResultBatch,
     ResultReport,
     StatusReport,
+    TaskAck,
     is_compatible,
 )
 from pydantic import TypeAdapter, ValidationError
@@ -53,7 +57,9 @@ _client_frame = TypeAdapter(ClientFrame)
 _CLOSE_OK = 1000
 _CLOSE_PROTOCOL = 1002
 _CLOSE_UNSUPPORTED = 1003
-_CLOSE_POLICY = 1008  # 策略违规（join token 不符）
+_CLOSE_POLICY = 1008  # 策略违规（join token / 节点凭证不符）
+_CLOSE_INTERNAL = 1011  # 服务端内部错误（生产注册落库失败 fail closed）
+_CLOSE_SUPERSEDED = 4001  # 同 id 新连接顶替（自定义应用码）
 
 
 def _extract_bearer(header: str) -> str:
@@ -61,15 +67,20 @@ def _extract_bearer(header: str) -> str:
     return header[7:] if header[:7].lower() == "bearer " else header
 
 
-async def _ingest_result(result: ResultBatch, limiter: SourceRateLimiter) -> None:
-    """多波续爬 + 入库 + 收尾。顺序：先把本页发现链接并入同批入队（新 QUEUED 落库、防跨波提前收尾）
-    → 写 data_center（指纹幂等）并置请求成功 → 尝试收尾批次 → AIMD 成功回升该源速率。"""
+async def _ingest_result(result: ResultBatch, limiter: SourceRateLimiter, agent_id: str) -> None:
+    """多波续爬 + 入库 + 收尾。顺序：fencing 预检（迟到/越权结果整体丢弃，连发现链接也不入队）
+    → 把本页发现链接并入同批入队（新 QUEUED 落库、防跨波提前收尾）
+    → 写 data_center（指纹幂等）并置请求成功（事务内权威 fencing 再校验）
+    → 尝试收尾批次 → AIMD 成功回升该源速率。"""
     pyp = get_engine("pyp")
     dc = get_engine("data_center")
+    if not await fence_ok(pyp, int(result.req_id), agent_id, int(result.attempt)):
+        logger.warning("stale result for req %s from %s (attempt=%s); dropped", result.req_id, agent_id, result.attempt)
+        return
     uuid, fingerprint_keys, indexed = await resolve_ingest_context(pyp, int(result.req_id))
     table = build_data_table(uuid, indexed)
     await enqueue_discovered(pyp, int(result.req_id), result.discovered)
-    await handle_result(pyp, dc, table, result, fingerprint_keys=fingerprint_keys)
+    await handle_result(pyp, dc, table, result, fingerprint_keys=fingerprint_keys, agent_id=agent_id)
     if await finalize_batch_if_done(pyp, int(result.batch_id)):  # 唯一那次 running→done
         await on_batch_finalized(int(result.batch_id))  # 链路自动推送 + 收尾通知（best-effort）
     limiter.on_ok(uuid)  # 成功 → AIMD 加性增
@@ -115,7 +126,7 @@ _RETRYABLE = frozenset(
 )
 
 
-async def _defer_retry(frame: StatusReport | ErrorFrame, limiter: SourceRateLimiter) -> bool:
+async def _defer_retry(frame: StatusReport | ErrorFrame, limiter: SourceRateLimiter, agent_id: str) -> bool:
     """持久化退避并同步进程内 AIMD；返回是否已重新排队。"""
     req_id = int(frame.req_id or 0)
     source, requeued = await defer_request_for_retry(
@@ -127,6 +138,8 @@ async def _defer_retry(frame: StatusReport | ErrorFrame, limiter: SourceRateLimi
         reason_code=frame.reason_code if isinstance(frame, StatusReport) else None,
         message=frame.message,
         max_attempt=get_server_settings().max_attempt,
+        agent_id=agent_id,
+        attempt=frame.attempt,
     )
     if source is not None:
         limiter.on_backoff_signal(
@@ -139,14 +152,23 @@ async def _defer_retry(frame: StatusReport | ErrorFrame, limiter: SourceRateLimi
 @router.websocket("/ws/agent")
 async def agent_ws(ws: WebSocket) -> None:
     await ws.accept()
-    # join token 校验：agent 握手须带 Authorization: Bearer <token>，与配置不符即拒接。
-    # 默认 "dev"（开发放行）；生产经 PYP_SERVER_AGENT_JOIN_TOKEN 注入真值（preflight 拒绝默认值）。
-    expected = get_server_settings().agent_join_token
-    if not hmac.compare_digest(_extract_bearer(ws.headers.get("authorization", "")), expected):
+    settings = get_server_settings()
+    bearer = _extract_bearer(ws.headers.get("authorization", ""))
+    # 认证两条路（P0-07）：先按长期节点凭证 hash 匹配（重连，不轮换凭证）；
+    # 无匹配再比对 join token（首次入网，签发新凭证）。默认 "dev"（开发放行）；
+    # 生产经 PYP_SERVER_AGENT_JOIN_TOKEN 注入真值（preflight 拒绝默认值）。
+    bound_agent: str | None = None
+    if bearer:
+        try:
+            bound_agent = await auth_node(get_engine("pyp"), hash_token(bearer))
+        except Exception:  # noqa: BLE001 —— DB 抖动时退回 join token 路径
+            logger.warning("auth_node lookup failed (DB down?); falling back to join token", exc_info=True)
+    if bound_agent is None and not hmac.compare_digest(bearer, settings.agent_join_token):
         await ws.close(code=_CLOSE_POLICY, reason="invalid join token")
         return
     hub = ws.app.state.hub
     agent_id: str | None = None
+    generation: int | None = None
     try:
         raw = await ws.receive_json()
     except ValueError, WebSocketDisconnect:
@@ -164,24 +186,36 @@ async def agent_ws(ws: WebSocket) -> None:
     if not is_compatible(register.contract_version):
         await ws.close(code=_CLOSE_PROTOCOL, reason="contract version incompatible")
         return
+    if bound_agent is not None and register.agent_id != bound_agent:
+        # 凭证与自报身份必须一致：凭证只能代表签发时绑定的节点
+        await ws.close(code=_CLOSE_POLICY, reason="agent_id does not match node credential")
+        return
 
-    agent_id = register.agent_id
-    token, token_hash = new_node_token()  # 长期节点凭证：明文只此一次下发，库存 hash（红线9）
-    try:  # 节点落库为 best-effort：PG 抖动/未起时仍允许注册（内存 hub + 默认权重/分组），不阻断握手
+    reg_id = register.agent_id
+    issue_new = bound_agent is None  # 仅首次入网签发；凭证重连不轮换（否则旧凭证被无谓作废）
+    token, token_hash = new_node_token() if issue_new else ("", None)  # 明文只此一次下发，库存 hash（红线9）
+    try:
         weight, group_name = await register_agent(
             get_engine("pyp"),
-            agent_id,
+            reg_id,
             hostname=register.hostname,
             slot_n=register.slot_n,
             capabilities=register.capabilities.model_dump(),
             node_token_hash=token_hash,
         )
     except Exception:  # noqa: BLE001
+        if settings.environment == "production":
+            # 生产 fail closed（P0-07）：落库失败即拒接，避免 UI/权重/分组/凭证与派发状态漂移
+            logger.error("register_agent %s failed in production; closing", reg_id, exc_info=True)
+            await ws.close(code=_CLOSE_INTERNAL, reason="registration unavailable")
+            return
+        # dev 容忍 PG 未起：内存 hub + 默认权重/分组，不阻断握手
         logger.warning(
-            "register_agent %s failed (DB down?); registering in-memory with defaults", agent_id, exc_info=True
+            "register_agent %s failed (DB down?); registering in-memory with defaults", reg_id, exc_info=True
         )
         weight, group_name = 1, None
-    hub.register(
+    agent_id = reg_id
+    generation, superseded = hub.register(
         agent_id,
         ws,
         register.slot_n,
@@ -189,6 +223,11 @@ async def agent_ws(ws: WebSocket) -> None:
         group_name=group_name,
         engines=register.capabilities.engines,
     )
+    if superseded is not None:  # 同 id 重复连接：关旧留新（P0-08 连接代次）
+        try:
+            await superseded.ws.close(code=_CLOSE_SUPERSEDED, reason="superseded by newer connection")
+        except Exception:  # noqa: BLE001 —— 旧连接可能已半开，关不上交给其 handler 的 finally
+            logger.debug("close superseded connection of %s failed", agent_id, exc_info=True)
     await ws.send_text(RegisterAck(node_token=token).model_dump_json())
 
     try:
@@ -200,8 +239,22 @@ async def agent_ws(ws: WebSocket) -> None:
                     await touch_agent(get_engine("pyp"), agent_id)  # last_heartbeat 落库（best-effort）
                 except Exception:  # noqa: BLE001 —— DB 抖动不该断连接
                     logger.warning("touch_agent %s failed", agent_id, exc_info=True)
+            elif isinstance(frame, TaskAck):
+                try:  # ACK：ASSIGNED→RUNNING + ACK 短租展成执行租约；迟到 ack 记日志即可
+                    if not await mark_running(
+                        get_engine("pyp"),
+                        int(frame.req_id),
+                        agent_id,
+                        frame.attempt,
+                        lease_s=get_server_settings().task_lease_s,
+                    ):
+                        logger.info(
+                            "stale task_ack for req %s from %s (attempt=%s)", frame.req_id, agent_id, frame.attempt
+                        )
+                except Exception:  # noqa: BLE001 —— DB 抖动不断连；租约 reaper 兜底
+                    logger.warning("mark_running req %s failed", frame.req_id, exc_info=True)
             elif isinstance(frame, ResultReport):
-                await _ingest_result(frame.result, ws.app.state.limiter)
+                await _ingest_result(frame.result, ws.app.state.limiter, agent_id)
                 hub.on_finished(agent_id, frame.result.req_id)
             elif isinstance(frame, StatusReport) and (frame.state < 0 or frame.state == int(RequestState.CANCELED)):
                 if frame.state == int(ErrorCode.ACCESS_PAUSED):
@@ -214,9 +267,11 @@ async def agent_ws(ws: WebSocket) -> None:
                     )
                     terminal = True
                 elif frame.state in _RETRYABLE:
-                    terminal = not await _defer_retry(frame, ws.app.state.limiter)
+                    terminal = not await _defer_retry(frame, ws.app.state.limiter, agent_id)
                 else:
-                    await set_request_state(get_engine("pyp"), int(frame.req_id), frame.state)
+                    await set_request_state(
+                        get_engine("pyp"), int(frame.req_id), frame.state, agent_id=agent_id, attempt=frame.attempt
+                    )
                     terminal = True
                 hub.on_finished(agent_id, frame.req_id)
                 if terminal:
@@ -226,9 +281,11 @@ async def agent_ws(ws: WebSocket) -> None:
                     await _pause_source(int(frame.req_id), frame.message, hub)
                     terminal = True
                 elif frame.code in _RETRYABLE:
-                    terminal = not await _defer_retry(frame, ws.app.state.limiter)
+                    terminal = not await _defer_retry(frame, ws.app.state.limiter, agent_id)
                 else:
-                    await set_request_state(get_engine("pyp"), int(frame.req_id), frame.code)
+                    await set_request_state(
+                        get_engine("pyp"), int(frame.req_id), frame.code, agent_id=agent_id, attempt=frame.attempt
+                    )
                     terminal = True
                 hub.on_finished(agent_id, frame.req_id)
                 if terminal:
@@ -236,8 +293,9 @@ async def agent_ws(ws: WebSocket) -> None:
     except WebSocketDisconnect:
         pass
     finally:
-        if agent_id:
-            hub.unregister(agent_id)
+        # 代次守卫（P0-08）：被新连接顶替的旧 handler 不得执行清理——否则会把在线节点标离线、
+        # 把新连接的在途请求误回收。unregister 只在代次吻合时生效并返回 True。
+        if agent_id and hub.unregister(agent_id, generation):
             # 断连即回收该 agent 在途请求 → 回 QUEUED（attempt+1），下一 tick 派发环重排到存活 agent；
             # 失败也不阻断清理，租约 reaper 兜底。
             try:

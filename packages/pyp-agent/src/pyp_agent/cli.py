@@ -19,9 +19,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     join = sub.add_parser("join", help="出站接入主控（注册后进入心跳/领任务循环）")
     join.add_argument("--server", required=True, help="主控 URL，如 https://pyp.example.com")
-    join.add_argument("--token", required=True, help="一次性 join token")
+    join.add_argument("--token", required=True, help="join token（仅首次入网使用；之后自动改用长期节点凭证）")
     join.add_argument("--slots", type=int, default=None, help="并发槽 N（默认按机器规格）")
-    join.add_argument("--agent-id", default=None, help="节点 id（默认取主机名，容器内天然唯一）")
+    join.add_argument("--agent-id", default=None, help="节点 id（默认用身份文件中的稳定 UUID；主机名只作显示）")
+    join.add_argument("--state-dir", default=None, help="身份目录（默认 ~/.pyp-agent；容器请挂持久卷）")
     return parser
 
 
@@ -32,10 +33,20 @@ def main(argv: list[str] | None = None) -> int:
         import anyio
 
         from pyp_agent.conn import AgentConnection
+        from pyp_agent.state import node_id, state_dir
 
-        agent_id = args.agent_id or socket.gethostname()  # 容器内主机名唯一，避免 hub 中 id 冲突
-        conn = AgentConnection(args.server, args.token, slot_n=args.slots or 4, agent_id=agent_id)
-        print(f"[pyp-agent {__version__}] joining {args.server} (slots={conn.slot_n}) …")
+        sdir = state_dir(args.state_dir)
+        # 稳定身份（P0-08）：uuid 存身份文件，容器重建不换节点；hostname 仅上报显示
+        agent_id = args.agent_id or node_id(sdir)
+        conn = AgentConnection(
+            args.server,
+            args.token,
+            slot_n=args.slots or 4,
+            agent_id=agent_id,
+            hostname=socket.gethostname(),
+            state_dir=sdir,
+        )
+        print(f"[pyp-agent {__version__}] joining {args.server} as {agent_id} (slots={conn.slot_n}) …")
         anyio.run(conn.run)  # 出站 WS：注册→心跳→领任务→回报；断线退避重连
         return 0
     parser.print_help()

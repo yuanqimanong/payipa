@@ -51,6 +51,9 @@ class ResultBatch(BaseModel):
 
     batch_id: str = active("所属批次 id（correlation）")
     req_id: str = active("请求数据任务 id（correlation）")
+    attempt: int = active(
+        "执行代次（回显 TaskSpec.attempt；主控 fencing 校验，迟到结果不覆盖）", default=0, ge=0, since="M7"
+    )
     items: list[Item] = active("结构化记录（小 item）", default_factory=list)
     artifacts: list[ArtifactRef] = active("大对象指针（raw/多媒体）", default_factory=list)
     discovered: list[str] = active(

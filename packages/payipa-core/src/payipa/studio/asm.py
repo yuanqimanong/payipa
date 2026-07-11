@@ -27,10 +27,11 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from payipa.crawl.ingest import compute_data_fingerprint  # 复用同一指纹方案（排序 md5）
+from payipa.db.ident import check_code, check_field
 
 
 def asm_table_name(product_code: str) -> str:
-    return f"asm_{product_code}"
+    return f"asm_{check_code(product_code)}"  # 短码先过统一校验（P0-13）：所有建表/取数路径都经此拼名
 
 
 def build_asm_table(product_code: str, indexed_fields: Sequence[str] = ()) -> Table:
@@ -49,6 +50,7 @@ def build_asm_table(product_code: str, indexed_fields: Sequence[str] = ()) -> Ta
         Column("fields", JSONB, nullable=False, server_default="{}"),  # 产物字段袋
     ]
     for f in indexed_fields:
+        check_field(f)  # 字段名内插进生成列表达式/索引名，先过统一校验（P0-13）
         columns.append(Column(f"idx_{f}", Text, Computed(f"(fields ->> '{f}')", persisted=True)))
     table = Table(name, md, *columns)
     for f in indexed_fields:

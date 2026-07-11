@@ -11,7 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncEngine
 
@@ -65,7 +65,9 @@ async def register_model(
             await conn.execute(
                 pg_insert(GlobalParam.__table__)
                 .values(key=_DEFAULT_KEY, value={"model_id": model_id})
-                .on_conflict_do_update(index_elements=["key"], set_={"value": {"model_id": model_id}})
+                .on_conflict_do_update(
+                    index_elements=["key"], set_={"value": {"model_id": model_id}, "updated_at": func.now()}
+                )
             )
     return model_id
 
@@ -85,7 +87,9 @@ async def set_default_model(engine_pyp: AsyncEngine, model_id: int) -> bool:
         await conn.execute(
             pg_insert(GlobalParam.__table__)
             .values(key=_DEFAULT_KEY, value={"model_id": model_id})
-            .on_conflict_do_update(index_elements=["key"], set_={"value": {"model_id": model_id}})
+            .on_conflict_do_update(
+                index_elements=["key"], set_={"value": {"model_id": model_id}, "updated_at": func.now()}
+            )
         )
     return True
 

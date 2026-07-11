@@ -16,9 +16,10 @@ from typing import TYPE_CHECKING
 import anyio
 from cronsim import CronSim, CronSimError
 from payipa.crawl.run import (
-    advance_schedule,
     claim_queued_for_dispatch,
+    claim_schedule,
     create_batch_for_task,
+    disable_schedule,
     due_schedules,
     mark_assigned,
     requeue_expired_leases,
@@ -43,10 +44,14 @@ if TYPE_CHECKING:
 logger = logging.getLogger("pyp_server.scheduler")
 
 
-async def drain_once(hub: AgentHub, pyp: AsyncEngine, secret: str, lease_s: int, limiter: SourceRateLimiter) -> int:
+async def drain_once(hub: AgentHub, pyp: AsyncEngine, secret: str, ack_s: int, limiter: SourceRateLimiter) -> int:
     """把 QUEUED 请求填到匹配的空闲槽，直到无槽/无排队/本轮无进展。返回本轮成功下发数。
 
-    先按 (优先级,深度,序) 取一批候选，逐条选**同组**空闲节点（分组亲和 + 空闲槽/权重择优）；每条还要过**每源限流**
+    派发只给 ACK 短租（ack_s 秒）：TaskAssign 丢失时请求快速被 reaper 回收重派，
+    agent 回 TaskAck 后（ws.mark_running）才展成完整执行租约（P0-10）。
+
+    候选查询在 SQL 侧先做**源轮转 + 在线能力过滤**（P0-11：单源积压或队头缺能力节点都不再饿死后续），
+    取回后逐条选**同组**空闲节点（分组亲和 + 空闲槽/权重择优）；每条还要过**每源限流**
     令牌桶（红线3）。某条无匹配节点或被限流则跳过换下一条，避免头阻塞。on_dispatched 递减空闲槽，故多 agent 铺满。
     """
     rates = await source_rate_limits(pyp)
@@ -54,7 +59,7 @@ async def drain_once(hub: AgentHub, pyp: AsyncEngine, secret: str, lease_s: int,
     while True:
         if hub.pick_free() is None:  # 全无空闲槽 → 本轮到此
             return dispatched
-        specs = await claim_queued_for_dispatch(pyp, limit=32)
+        specs = await claim_queued_for_dispatch(pyp, limit=32, caps=hub.free_caps())
         if not specs:  # 无排队请求
             return dispatched
         progressed = False
@@ -65,9 +70,9 @@ async def drain_once(hub: AgentHub, pyp: AsyncEngine, secret: str, lease_s: int,
             if not limiter.take(spec.source, rates.get(spec.source, 0)):
                 continue  # 该源本 tick 令牌用尽 → 留排队，下一 tick 再派（每源限流）
             req_id = int(spec.req_id)
-            lease_until = datetime.now(UTC) + timedelta(seconds=spec.timeout_s or lease_s)
-            if await mark_assigned(pyp, req_id, conn.agent_id, lease_until) != 1:
-                continue  # 未抢到（状态已变）——试下一条
+            lease_until = datetime.now(UTC) + timedelta(seconds=ack_s)  # ACK 短租；确认后展成执行租约
+            if await mark_assigned(pyp, req_id, conn.agent_id, lease_until, attempt=spec.attempt) != 1:
+                continue  # 未抢到（状态已变/代次已推进）——试下一条
             token = issue_upload_token(secret, spec.source, int(spec.batch_id))
             try:
                 await hub.send_frame(conn.agent_id, TaskAssign(task=spec, upload_token=token))
@@ -84,20 +89,26 @@ async def drain_once(hub: AgentHub, pyp: AsyncEngine, secret: str, lease_s: int,
 
 
 async def fire_due_schedules(pyp: AsyncEngine, now: datetime) -> int:
-    """把到点的 cron 调度实例化成新批次；用 cronsim 从 now 推进 next_run_at。返回触发的批次数。"""
+    """把到点的 cron 调度实例化成新批次；用 cronsim 从 now 推进 next_run_at。返回触发的批次数。
+
+    先认领（claim_schedule 条件推进，DB-010 幂等）再建批次：同一到期时间点只有一个赢家，
+    多进程/重复 tick 不会重复建批次。坏 cron 直接停用，不再每 tick 反复到期告警。
+    """
     fired = 0
     for sched_id, task_id, cron_expr, source_uuid, seeds in await due_schedules(pyp):
-        if not seeds:  # 无存档种子（未经建源流程）→ 只推进时间、不空跑
-            logger.warning("schedule %s (task %s) has no seed_urls; skip firing", sched_id, task_id)
-        else:
-            await create_batch_for_task(pyp, task_id=task_id, source_uuid=source_uuid, seed_urls=seeds)
-            fired += 1
         try:
             next_run = next(CronSim(cron_expr, now))
         except CronSimError, StopIteration:
-            logger.warning("schedule %s bad cron %r; disable by leaving next_run_at as-is", sched_id, cron_expr)
+            logger.warning("schedule %s bad cron %r; disabled", sched_id, cron_expr)
+            await disable_schedule(pyp, sched_id)
             continue
-        await advance_schedule(pyp, sched_id, next_run)
+        if not await claim_schedule(pyp, sched_id, next_run):
+            continue  # 已被其他进程/上一 tick 认领
+        if not seeds:  # 无存档种子（未经建源流程）→ 只推进时间、不空跑
+            logger.warning("schedule %s (task %s) has no seed_urls; skip firing", sched_id, task_id)
+            continue
+        await create_batch_for_task(pyp, task_id=task_id, source_uuid=source_uuid, seed_urls=seeds)
+        fired += 1
     return fired
 
 
@@ -108,18 +119,23 @@ async def dispatch_loop(app: FastAPI) -> None:
     limiter: SourceRateLimiter = app.state.limiter
     pyp = get_engine("pyp")
     secret = get_db_settings().upload_secret
-    interval, lease_s, max_attempt = settings.dispatch_interval_s, settings.task_lease_s, settings.max_attempt
-    logger.info("dispatch loop up (interval=%ss lease=%ss max_attempt=%s)", interval, lease_s, max_attempt)
+    interval, ack_s, max_attempt = settings.dispatch_interval_s, settings.ack_timeout_s, settings.max_attempt
+    logger.info("dispatch loop up (interval=%ss ack=%ss max_attempt=%s)", interval, ack_s, max_attempt)
+    health = getattr(app.state, "loop_health", {}).get("dispatch")  # readyz 心跳档案（P0-06）
     fails = 0
     while True:
         try:
             await fire_due_schedules(pyp, datetime.now(UTC))
             await requeue_expired_leases(pyp, max_attempt=max_attempt)
             await sweep_canceling_batches(pyp)
-            await drain_once(hub, pyp, secret, lease_s, limiter)
+            await drain_once(hub, pyp, secret, ack_s, limiter)
             fails = 0
-        except Exception:  # noqa: BLE001 —— anyio 取消是 BaseException，不会被这里吞掉
+            if health is not None:
+                health.ok()
+        except Exception as exc:  # noqa: BLE001 —— anyio 取消是 BaseException，不会被这里吞掉
             fails += 1
+            if health is not None:
+                health.fail(f"{type(exc).__name__}: {exc}")
             delay = min(30.0, interval * 2 ** min(fails - 1, 5))  # 指数退避，DB 抖动时不忙转拖垮连接池
             logger.exception("dispatch loop tick failed (x%d); backoff %.1fs", fails, delay)
             await anyio.sleep(delay)  # 取消点

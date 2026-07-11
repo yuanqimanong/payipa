@@ -21,6 +21,11 @@ async def _state(pyp, oid: int) -> tuple[str, int]:
     return r.state, r.attempts
 
 
+async def _force_state(pyp, oid: int, state: str) -> None:
+    async with pyp.begin() as conn:
+        await conn.execute(text("UPDATE push_outbox SET state=:s WHERE id=:i"), {"s": state, "i": oid})
+
+
 def test_outbox_state_machine(require_pg: None) -> None:
     async def main() -> None:
         pyp = create_async_engine(get_settings().async_url("pyp"))
@@ -82,10 +87,16 @@ def test_outbox_state_machine(require_pg: None) -> None:
             sent2, failed2 = await outbox.run_outbox_once(pyp, boom, max_attempts=3)
             assert (sent2, failed2) == (0, 0)
 
-            # 4) 达上限 → 死信（直接推进 attempts）
+            # 4) 达上限 → 死信。mark_* 有状态守卫（仅 inflight 可终结），先把行置回 inflight 再失败
+            await _force_state(pyp, oid2, "inflight")
             await outbox.mark_failed(pyp, oid2, error="again", attempts=1, max_attempts=3)  # →2, pending
+            await _force_state(pyp, oid2, "inflight")
             st = await outbox.mark_failed(pyp, oid2, error="final", attempts=2, max_attempts=3)  # →3 ≥ max → dead
             assert st == "dead" and (await _state(pyp, oid2))[0] == "dead"
+
+            # 4b) 状态守卫：非 inflight 行的迟到终结是 no-op（租约被回收重领后旧 Consumer 不能覆盖）
+            await outbox.mark_sent(pyp, oid2)
+            assert (await _state(pyp, oid2))[0] == "dead"
 
             # 5) 租约回收：造一条 inflight + 过期租约 → requeue_expired → pending
             async with pyp.begin() as conn:
@@ -113,5 +124,40 @@ def test_outbox_state_machine(require_pg: None) -> None:
                 )
                 await conn.execute(text("DELETE FROM push_components WHERE name=:n"), {"n": _NAME})
             await pyp.dispose()
+
+    asyncio.run(main())
+
+
+def test_outbox_claim_no_double(require_pg: None) -> None:
+    """DB-009 验收：两个 Consumer 并发领取，领到的集合不相交、合计不超待投递总数。"""
+    name = "m4claimrace"
+
+    async def main() -> None:
+        pyp_a = create_async_engine(get_settings().async_url("pyp"))
+        pyp_b = create_async_engine(get_settings().async_url("pyp"))
+        try:
+            async with pyp_a.begin() as conn:
+                cid = (
+                    await conn.execute(pg_insert(PushComponent.__table__).values(name=name).returning(PushComponent.id))
+                ).scalar_one()
+            for i in range(20):
+                await outbox.enqueue_push(pyp_a, component_id=cid, idempotency_key=f"race-{i}")
+
+            got_a, got_b = await asyncio.gather(outbox.claim_due(pyp_a, limit=50), outbox.claim_due(pyp_b, limit=50))
+            ids_a = {r["id"] for r in got_a if r["component_id"] == cid}
+            ids_b = {r["id"] for r in got_b if r["component_id"] == cid}
+            assert not (ids_a & ids_b), f"并发领取出现重复: {ids_a & ids_b}"
+            assert len(ids_a) + len(ids_b) == 20
+        finally:
+            async with pyp_a.begin() as conn:
+                await conn.execute(
+                    text(
+                        "DELETE FROM push_outbox WHERE component_id IN (SELECT id FROM push_components WHERE name=:n)"
+                    ),
+                    {"n": name},
+                )
+                await conn.execute(text("DELETE FROM push_components WHERE name=:n"), {"n": name})
+            await pyp_a.dispose()
+            await pyp_b.dispose()
 
     asyncio.run(main())

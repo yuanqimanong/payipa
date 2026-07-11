@@ -5,29 +5,20 @@
 - **加法**（新增索引字段）：`ALTER TABLE ADD COLUMN idx_<f> ... GENERATED ALWAYS AS ((fields->>'f')) STORED` + 建索引；
 - **破坏性**（删除已有索引字段）：默认**拦截**（抛 BreakingSchemaChange），除非显式 allow_breaking=True。
 
-字段名仅允许标识符字符（防 DDL 注入，与 asm.py 的内插假设一致）。跨库不 join；只碰目标表自身。
+表名/字段名统一走 payipa.db.ident 校验（防 DDL 注入，与 asm.py 的内插假设一致）。跨库不 join；只碰目标表自身。
 """
 
 from __future__ import annotations
 
-import re
-
 from sqlalchemy import Table, text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
+from payipa.db.ident import check_field, check_ident
 from payipa.studio.asm import create_asm_table
-
-_IDENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 class BreakingSchemaChange(RuntimeError):
     """检测到破坏性表结构变更（删除索引列等），默认拦截不执行。"""
-
-
-def _safe_ident(name: str) -> str:
-    if not _IDENT.match(name):
-        raise ValueError(f"unsafe identifier for DDL: {name!r}")
-    return name
 
 
 async def _table_exists(engine: AsyncEngine, name: str) -> bool:
@@ -59,10 +50,10 @@ async def evolve_asm_table(engine_business: AsyncEngine, table: Table, *, allow_
 
     加法（新增 idx_<f>）总是执行；破坏性（删除现有 idx_<f>）默认抛 BreakingSchemaChange，allow_breaking=True 时才 DROP。
     """
-    name = table.name
+    name = check_ident(table.name)  # 表名同样会内插进裸 DDL（ALTER/CREATE INDEX），先过统一校验
     desired = {c.name for c in table.columns if c.name.startswith("idx_")}
     for col in desired:
-        _safe_ident(col[len("idx_") :])  # 先校验目标字段名（DDL 注入防护），越界即抛 ValueError，不落任何 DDL
+        check_field(col[len("idx_") :])  # 先校验目标字段名（DDL 注入防护），越界即抛 ValueError，不落任何 DDL
 
     if not await _table_exists(engine_business, name):
         await create_asm_table(engine_business, table)
@@ -79,7 +70,7 @@ async def evolve_asm_table(engine_business: AsyncEngine, table: Table, *, allow_
 
     async with engine_business.begin() as conn:
         for col in to_add:
-            field = _safe_ident(col[len("idx_") :])
+            field = check_field(col[len("idx_") :])
             await conn.execute(
                 text(
                     f'ALTER TABLE "{name}" ADD COLUMN "{col}" text '
@@ -89,7 +80,7 @@ async def evolve_asm_table(engine_business: AsyncEngine, table: Table, *, allow_
             await conn.execute(text(f'CREATE INDEX IF NOT EXISTS "ix_{name}_{col}" ON "{name}" ("{col}")'))
         if allow_breaking:
             for col in to_remove:
-                _safe_ident(col)
+                check_ident(col)  # 库中存量列名只需字符集安全即可 DROP（长度可能超新字段上限）
                 await conn.execute(text(f'ALTER TABLE "{name}" DROP COLUMN IF EXISTS "{col}"'))
 
     return {"created": False, "added": to_add, "removed": to_remove if allow_breaking else []}

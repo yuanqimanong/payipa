@@ -32,7 +32,8 @@ class Settings(BaseSettings):
     pg_db_data_center: str = "data_center"  # 采集数据库
     pg_db_business: str = "business"  # 组装产物库
 
-    # 运行时可选组件（M2/M5 接线；缺省 None = 降级）
+    # 可选组件占位（均未实现）：redis_url 无任何消费方（队列走 PG）；s3_* 配置即拒绝启动
+    # （storage.build_storage 报错，preflight 开机即失败）——绝不静默回退 local。
     redis_url: str | None = None
     s3_endpoint: str | None = None
     s3_access_key: str | None = None

@@ -22,6 +22,7 @@
       return `<td><span class="badge ${cls}"><span class="dot"></span>${esc(display)}</span></td>`;
     }
     if (col.type === "meter") {
+      if (v == null) return "<td class='muted'>暂无样本</td>"; // null=无样本，不装 100% 也不装 0%
       const ratio = Math.max(0, Math.min(1, Number(v) || 0));
       const percent = (ratio * 100).toFixed(1);
       const tone = ratio >= 0.95 ? "good" : (ratio >= 0.8 ? "warn" : "bad");

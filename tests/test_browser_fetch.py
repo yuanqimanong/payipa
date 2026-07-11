@@ -117,7 +117,9 @@ def test_http_engine_unaffected(monkeypatch) -> None:
     """http 引擎不碰 playwright（browser_available 与它无关）。"""
     _uninstall_fake()
 
-    async def fake_http(url: str, timeout: float, headers: dict[str, str] | None) -> fetch_mod.FetchResult:
+    async def fake_http(
+        url: str, timeout: float, headers: dict[str, str] | None, max_bytes: int
+    ) -> fetch_mod.FetchResult:
         return fetch_mod.FetchResult(status=200, url=url, body=b"ok", content_type="text/plain")
 
     monkeypatch.setattr(fetch_mod, "_fetch_http", fake_http)

@@ -50,32 +50,38 @@ async def enqueue_push(
 
 
 async def claim_due(engine_pyp: AsyncEngine, *, limit: int = 32, lease_s: int = 300) -> list[dict]:
-    """领取到期待投递（pending 且 next_retry_at 空或已过）行，置 inflight + 租约。返回已领取记录（含解重要字段）。"""
+    """原子领取到期待投递（pending 且 next_retry_at 空或已过）行，置 inflight + 租约。
+
+    单条 ``UPDATE ... WHERE id IN (SELECT ... FOR UPDATE SKIP LOCKED)``：多 Consumer 并发
+    领取互不重复（DB-009），慢事务持有的行被直接跳过而非阻塞。返回已领取记录。
+    """
+    picked = (
+        select(PushOutbox.id)
+        .where(
+            PushOutbox.state == OutboxState.PENDING.value,
+            or_(PushOutbox.next_retry_at.is_(None), PushOutbox.next_retry_at <= func.now()),
+        )
+        .order_by(PushOutbox.id)
+        .limit(limit)
+        .with_for_update(skip_locked=True)
+        .scalar_subquery()
+    )
     async with engine_pyp.begin() as conn:
         rows = (
             await conn.execute(
-                select(
+                update(PushOutbox.__table__)
+                .where(PushOutbox.id.in_(picked))
+                .values(state=OutboxState.INFLIGHT.value, lease_until=datetime.now(UTC) + timedelta(seconds=lease_s))
+                .returning(
                     PushOutbox.id,
                     PushOutbox.component_id,
                     PushOutbox.payload_ref,
                     PushOutbox.idempotency_key,
                     PushOutbox.attempts,
                 )
-                .where(
-                    PushOutbox.state == OutboxState.PENDING.value,
-                    or_(PushOutbox.next_retry_at.is_(None), PushOutbox.next_retry_at <= func.now()),
-                )
-                .order_by(PushOutbox.id)
-                .limit(limit)
             )
         ).all()
-        ids = [r[0] for r in rows]
-        if ids:
-            await conn.execute(
-                update(PushOutbox.__table__)
-                .where(PushOutbox.id.in_(ids))
-                .values(state=OutboxState.INFLIGHT.value, lease_until=datetime.now(UTC) + timedelta(seconds=lease_s))
-            )
+    rows = sorted(rows, key=lambda r: r[0])  # RETURNING 不保证顺序
     return [
         {"id": r[0], "component_id": r[1], "payload_ref": r[2], "idempotency_key": r[3], "attempts": r[4]} for r in rows
     ]
@@ -85,7 +91,8 @@ async def mark_sent(engine_pyp: AsyncEngine, outbox_id: int) -> None:
     async with engine_pyp.begin() as conn:
         await conn.execute(
             update(PushOutbox.__table__)
-            .where(PushOutbox.id == outbox_id)
+            # 状态守卫：仅 inflight 可终结——租约被回收又被他人重领时，迟到的成功不覆盖新状态
+            .where(PushOutbox.id == outbox_id, PushOutbox.state == OutboxState.INFLIGHT.value)
             .values(state=OutboxState.SENT.value, lease_until=None, last_error=None)
         )
 
@@ -99,7 +106,7 @@ async def mark_failed(engine_pyp: AsyncEngine, outbox_id: int, *, error: str, at
     async with engine_pyp.begin() as conn:
         await conn.execute(
             update(PushOutbox.__table__)
-            .where(PushOutbox.id == outbox_id)
+            .where(PushOutbox.id == outbox_id, PushOutbox.state == OutboxState.INFLIGHT.value)
             .values(
                 state=OutboxState.PENDING.value,
                 attempts=new_attempts,
@@ -115,7 +122,7 @@ async def mark_dead(engine_pyp: AsyncEngine, outbox_id: int, *, error: str, atte
     async with engine_pyp.begin() as conn:
         await conn.execute(
             update(PushOutbox.__table__)
-            .where(PushOutbox.id == outbox_id)
+            .where(PushOutbox.id == outbox_id, PushOutbox.state == OutboxState.INFLIGHT.value)
             .values(state=OutboxState.DEAD.value, attempts=attempts, lease_until=None, last_error=error[:2000])
         )
     return OutboxState.DEAD.value

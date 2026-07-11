@@ -28,6 +28,11 @@ class ServerSettings(BaseSettings):
     environment: str = "dev"
     session_secret: str = DEV_SESSION_SECRET  # 生产走 env 注入（≥32B）；production 模式拒绝默认值
     session_ttl_s: int = 7 * 24 * 3600  # 会话有效期
+    build_commit: str = ""  # 构建 commit（正式镜像注入；空=dev，/version 兜底 git rev-parse）
+    build_time: str = ""  # 构建时间（正式镜像注入）
+    # v1 单实例守卫（P0-09）：后台环启动前须拿到 pyp 库 advisory lock；多 worker/多实例拒绝启动。
+    # Hub/限流器是进程内状态，多 worker 会连接分片、限流倍增、调度与 Outbox 竞争——显式关闭后果自负。
+    single_worker_guard: bool = True
     # agent 接入 join token（WS 握手 Authorization: Bearer）。默认 dev；production 模式拒绝默认值。
     agent_join_token: str = "dev"
 
@@ -37,10 +42,14 @@ class ServerSettings(BaseSettings):
     # production 模式强制为 True（preflight 校验），使全部 require_perm 端点登录+鉴权。
     rbac_enabled: bool = False
 
+    # ── 内部上传（/internal/upload）──────────────────────────────────────
+    max_upload_mb: int = 64  # 单次 raw 回传请求体上限（MB）：超限 413；流式读边读边校验，防大对象拖爆内存
+
     # ── M2 派发环（后台调度）─────────────────────────────────────────────
     dispatch_enabled: bool = True  # 后台派发环开关（测试关闭，避免与用例抢 QUEUED 请求）
     dispatch_interval_s: float = 1.0  # 派发/回收扫描间隔（秒）
-    task_lease_s: int = 1800  # 任务租约（秒）：在途无终结超此即视为失联回收；对齐 TaskSpec.timeout_s 默认
+    task_lease_s: int = 1800  # 执行租约（秒）：agent ACK 后展成此值；在途无终结超此即视为失联回收
+    ack_timeout_s: int = 30  # ACK 短租（秒）：下发后 agent 未确认即被 reaper 快速回收重派（P0-10）
     max_attempt: int = 3  # 请求最大尝试次数（含首次）；超过定格 NODE_LOST(-6)
 
     # ── M4 推送 Consumer（outbox 排空环）──────────────────────────────────

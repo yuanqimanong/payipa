@@ -22,7 +22,7 @@ class Artifact(TimestampMixin, OwnedMixin, DataCenterBase):
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     bucket: Mapped[str] = mapped_column(String(255), nullable=False)
     object_key: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
-    storage_backend: Mapped[str] = mapped_column(String(8), default="s3")  # s3/local
+    storage_backend: Mapped[str] = mapped_column(String(8), default="local")  # local（s3 未实现）
     size: Mapped[int] = mapped_column(BigInteger, default=0)
     sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
     etag: Mapped[str | None] = mapped_column(String(128), nullable=True)

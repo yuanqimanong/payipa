@@ -22,11 +22,12 @@ from payipa_contracts import (
     RulePointer,
     TaskSpec,
 )
-from sqlalchemy import Table, case, func, select, update
+from sqlalchemy import Table, case, func, or_, select, tuple_, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
 from payipa.crawl.ingest import Ingestor, build_data_table, create_data_table
+from payipa.db.ident import check_code
 from payipa.db.pyp import Agent, Batch, Request, Rule, Schedule, Source, Task, TaskEvent
 
 ACCESS_BASES = frozenset({"owned", "contracted", "public_policy"})
@@ -72,6 +73,7 @@ async def setup_source(
     seed_urls 存档进 task.params（最近一次为准），供 cron/重跑无需重新提交种子（07 定时触发）。
     新数据源必须显式确认访问依据；既有数据源一旦暂停，只能经人工复核接口恢复。
     """
+    check_code(uuid)  # 短码进 data_{uuid} 分表名/对象存储 key，落库前先过统一校验（P0-13）
     if rate_limit is not None and not 1 <= rate_limit <= 1000:
         raise ValueError("rate_limit 必须在 1–1000 req/s 之间")
     if retry is not None and not 1 <= retry <= 10:
@@ -182,7 +184,7 @@ async def resolve_ingest_context(engine_pyp: AsyncEngine, req_id: int) -> tuple[
                 .join(Batch.__table__, Request.batch_id == Batch.id)
                 .join(Task.__table__, Batch.task_id == Task.id)
                 .join(Source.__table__, Task.source_id == Source.id)
-                .join(Rule.__table__, Rule.content_hash == Request.rule_hash)
+                .join(Rule.__table__, Rule.id == Request.rule_id)
                 .where(Request.id == req_id)
             )
         ).first()
@@ -241,6 +243,7 @@ async def create_batch_with_requests(
                     .values(
                         batch_id=batch_id,
                         target=target,
+                        rule_id=int(rule_ptr.rule_id),
                         rule_hash=rule_ptr.content_hash,
                         rule_version=rule_ptr.version,
                         state=int(RequestState.QUEUED),
@@ -264,6 +267,41 @@ async def create_batch_with_requests(
     return batch_id, specs
 
 
+def _is_stale(row, agent_id: str | None, attempt: int | None) -> bool:
+    """迟到/越权回报判定（P0-10 fencing）：终态、归属不符或代次不符的回报一律视为 stale。"""
+    if row is None:
+        return True
+    if int(row.state) not in (int(RequestState.QUEUED), int(RequestState.ASSIGNED), int(RequestState.RUNNING)):
+        return True  # 已终结（成功/取消/失败）：迟到结果不得覆盖
+    if agent_id is not None and row.agent_id != agent_id:
+        return True  # 回报者不是当前持有者（重派/回收后 agent_id 已换或清空）
+    return attempt is not None and int(row.attempt or 0) != attempt
+
+
+async def fence_ok(engine_pyp: AsyncEngine, req_id: int, agent_id: str | None, attempt: int | None) -> bool:
+    """只读 fencing 预检（供 ws 在续爬入队前调用）；stale 时记 task_event 并返回 False。
+
+    权威校验仍在 :func:`handle_result` 事务内再做一次（预检到写入之间的窄窗口竞态由其兜底）。
+    """
+    async with engine_pyp.begin() as conn:
+        row = (
+            await conn.execute(
+                select(Request.state, Request.agent_id, Request.attempt, Request.batch_id).where(Request.id == req_id)
+            )
+        ).first()
+        if not _is_stale(row, agent_id, attempt):
+            return True
+        if row is not None:
+            await conn.execute(
+                TaskEvent.__table__.insert().values(
+                    batch_id=row.batch_id,
+                    type="request.stale_result",
+                    payload={"req_id": req_id, "agent_id": agent_id, "attempt": attempt, "state": int(row.state)},
+                )
+            )
+    return False
+
+
 async def handle_result(
     engine_pyp: AsyncEngine,
     engine_dc: AsyncEngine,
@@ -271,17 +309,29 @@ async def handle_result(
     result: ResultBatch,
     *,
     fingerprint_keys: Sequence[str] = (),
+    agent_id: str | None = None,
 ) -> int:
-    """收到 ResultBatch：先入库 data_center（指纹幂等）→ 再置 request 成功。返回入库行数。
+    """收到 ResultBatch：fencing 校验 → 入库 data_center（指纹幂等）→ 置 request 成功。返回入库行数。
 
-    同时把 agent 回报的执行摘要计数（解析成功/失败/空白 + 耗时）落到 request 行，供 core.monitor
-    聚合数据质量与时延（M5）。计数缺省 0（旧 agent 无 summary 字段时 pydantic 已补默认）。
+    fencing（P0-10）：在 pyp 事务内先锁行校验（状态在途 + agent 归属 + attempt 代次），迟到/重派后的
+    旧结果既不写数据也不改状态，返回 0。锁行在 data_center 写之前取得，保持「状态=成功 ⟹ 数据已落」。
+    同时把 agent 回报的执行摘要计数落到 request 行，供 core.monitor 聚合数据质量与时延（M5）。
     """
-    written = await Ingestor(engine_dc).upsert(
-        table, result.items, batch_id=int(result.batch_id), fingerprint_keys=fingerprint_keys
-    )
     s = result.summary
     async with engine_pyp.begin() as conn:
+        row = (
+            await conn.execute(
+                select(Request.state, Request.agent_id, Request.attempt)
+                .where(Request.id == int(result.req_id))
+                .with_for_update()
+            )
+        ).first()
+        if _is_stale(row, agent_id, int(result.attempt)):
+            return 0
+        # 持有 pyp 行锁跨库写数据：先数据后状态的顺序不变（SDD §4.4）
+        written = await Ingestor(engine_dc).upsert(
+            table, result.items, batch_id=int(result.batch_id), fingerprint_keys=fingerprint_keys
+        )
         source_id = (
             await conn.execute(
                 select(Task.source_id)
@@ -324,12 +374,22 @@ async def handle_result(
     return written
 
 
-async def set_request_state(engine_pyp: AsyncEngine, req_id: int, state: int) -> None:
-    """置请求状态（正=正常态、负=错误码）。失败/取消回报走此。终态一律释放租约。"""
+async def set_request_state(
+    engine_pyp: AsyncEngine, req_id: int, state: int, *, agent_id: str | None = None, attempt: int | None = None
+) -> int:
+    """置请求状态（正=正常态、负=错误码）。失败/取消回报走此。终态一律释放租约。
+
+    传 agent_id/attempt 时按 fencing 守卫（P0-10）：归属或代次不符的迟到回报不改状态。返回受影响行数。
+    """
+    conds = [Request.id == req_id]
+    if agent_id is not None:
+        conds.append(Request.agent_id == agent_id)
+    if attempt is not None:
+        conds.append(Request.attempt == attempt)
     async with engine_pyp.begin() as conn:
-        await conn.execute(
+        res = await conn.execute(
             update(Request.__table__)
-            .where(Request.id == req_id)
+            .where(*conds)
             .values(
                 state=state,
                 error_code=state if state < 0 else None,
@@ -337,6 +397,7 @@ async def set_request_state(engine_pyp: AsyncEngine, req_id: int, state: int) ->
                 not_before=None,
             )
         )
+    return res.rowcount
 
 
 _RETRYABLE_ERRORS = frozenset(
@@ -362,11 +423,14 @@ async def defer_request_for_retry(
     reason_code: str | None = None,
     message: str | None = None,
     max_attempt: int = 3,
+    agent_id: str | None = None,
+    attempt: int | None = None,
 ) -> tuple[str | None, bool]:
     """把可恢复失败延迟重排；达到源/全局上限则定格失败。
 
     返回 ``(source_uuid, requeued)``。429/5xx 同时设置源级冷却，确保同源其他请求也不会在
     Retry-After 窗口内抢跑；网络类故障只延迟当前请求。
+    传 agent_id/attempt 时按 fencing 守卫（P0-10）：迟到/越权失败回报不消耗新代次的重试预算。
     """
     if error_code not in _RETRYABLE_ERRORS:
         raise ValueError(f"error_code {error_code} 不是可重试错误")
@@ -377,6 +441,7 @@ async def defer_request_for_retry(
                 select(
                     Request.attempt,
                     Request.state,
+                    Request.agent_id,
                     Request.batch_id,
                     Source.id.label("source_id"),
                     Source.uuid,
@@ -395,6 +460,10 @@ async def defer_request_for_retry(
         if row.state not in {int(RequestState.ASSIGNED), int(RequestState.RUNNING)}:
             # 重复/迟到回报不得再次消耗重试预算。已经回队则维持“已重排”语义。
             return str(row.uuid), row.state == int(RequestState.QUEUED)
+        if agent_id is not None and row.agent_id != agent_id:
+            return str(row.uuid), True  # 越权/迟到（请求已重派给他人）：不动新代次
+        if attempt is not None and int(row.attempt or 0) != attempt:
+            return str(row.uuid), True  # 代次不符：旧代次的失败不消耗新代次预算
         next_attempt = int(row.attempt or 0) + 1
         attempt_limit = max(1, min(max_attempt, int(row.retry or max_attempt)))
         delay_s = _retry_delay(error_code, int(row.attempt or 0), retry_after_s)
@@ -522,38 +591,38 @@ async def register_agent(
     hostname: str,
     slot_n: int,
     capabilities: dict,
-    node_token_hash: str,
+    node_token_hash: str | None = None,
 ) -> tuple[int, str | None]:
-    """注册/重连时 upsert agents 行（status=online、刷新 last_heartbeat/能力/槽位/凭证 hash）。
+    """注册/重连时 upsert agents 行（status=online、刷新 last_heartbeat/能力/槽位）。
 
+    node_token_hash 仅在**新签发凭证**时传入并覆盖；重连（凭 node_token 认证）传 None，
+    不得清掉既有凭证 hash（P0-07：凭证生命周期闭环）。
     返回 (weight, group_name)——由管理员在库中预置，回灌 hub 用于加权/分组派发；新节点默认 weight=1。
     """
+    values: dict = {
+        "agent_id": agent_id,
+        "hostname": hostname,
+        "slot_n": slot_n,
+        "capabilities": capabilities,
+        "status": "online",
+        "last_heartbeat": func.now(),
+    }
+    updates = {k: v for k, v in values.items() if k != "agent_id"}
+    if node_token_hash is not None:
+        values["node_token_hash"] = node_token_hash
+        updates["node_token_hash"] = node_token_hash
     async with engine_pyp.begin() as conn:
         await conn.execute(
-            pg_insert(Agent.__table__)
-            .values(
-                agent_id=agent_id,
-                hostname=hostname,
-                slot_n=slot_n,
-                capabilities=capabilities,
-                status="online",
-                node_token_hash=node_token_hash,
-                last_heartbeat=func.now(),
-            )
-            .on_conflict_do_update(
-                index_elements=["agent_id"],
-                set_={
-                    "hostname": hostname,
-                    "slot_n": slot_n,
-                    "capabilities": capabilities,
-                    "status": "online",
-                    "node_token_hash": node_token_hash,
-                    "last_heartbeat": func.now(),
-                },
-            )
+            pg_insert(Agent.__table__).values(**values).on_conflict_do_update(index_elements=["agent_id"], set_=updates)
         )
         row = (await conn.execute(select(Agent.weight, Agent.group_name).where(Agent.agent_id == agent_id))).first()
     return (row[0] if row else 1), (row[1] if row else None)
+
+
+async def auth_node(engine_pyp: AsyncEngine, token_hash: str) -> str | None:
+    """按长期节点凭证 hash 找回 agent_id（重连认证，P0-07）；无匹配返回 None。"""
+    async with engine_pyp.connect() as conn:
+        return (await conn.execute(select(Agent.agent_id).where(Agent.node_token_hash == token_hash).limit(1))).scalar()
 
 
 async def source_rate_limits(engine_pyp: AsyncEngine) -> dict[str, int]:
@@ -739,53 +808,87 @@ def _active_running_batch_ids():
     )
 
 
-async def claim_queued_for_dispatch(engine_pyp: AsyncEngine, *, limit: int = 16) -> list[TaskSpec]:
+def _cap_filter(caps: dict[str | None, set[str]]):
+    """能力过滤条件：只捞「当前有空闲同组节点且具备目标引擎」的请求（P0-11 防队头饥饿）。
+
+    caps 形如 {None: 全部空闲节点引擎并集, 组名: 该组空闲节点引擎并集}。
+    未分组请求可派任意空闲节点（对应 None 键）；分组请求只看本组。
+    """
+    grp = func.coalesce(Task.group_name, Source.agent_group)
+    raw = func.coalesce(Task.params.op("->>")("engine_hint"), EngineHint.HTTP.value)
+    # 未知 engine_hint 与 Python 侧解析同语义：回退 http
+    eng = case((raw.in_([e.value for e in EngineHint]), raw), else_=EngineHint.HTTP.value)
+    conds = []
+    if caps.get(None):
+        conds.append(grp.is_(None) & eng.in_(sorted(caps[None])))
+    pairs = [(g, e) for g, es in caps.items() if g is not None for e in sorted(es)]
+    if pairs:
+        conds.append(tuple_(grp, eng).in_(pairs))
+    return or_(*conds) if conds else None
+
+
+async def claim_queued_for_dispatch(
+    engine_pyp: AsyncEngine, *, limit: int = 16, caps: dict[str | None, set[str]] | None = None
+) -> list[TaskSpec]:
     """只读扫描 running 批次下 state=QUEUED 的请求，组装成可下发的 TaskSpec。
 
     **不改状态**——真正占用由 :func:`mark_assigned` 的乐观锁完成，避免读到即算派发。
-    排序=三元 score（07 定案）：(优先级档, 深度升序=BFS, 入队序)。
+    排序：先按源轮转（row_number 分源取第 N 条，单源积压不能霸占窗口），
+    同轮内仍按三元 score（07 定案）：(优先级档, 深度升序=BFS, 入队序)。
+    caps 非 None 时按在线能力过滤（见 :func:`_cap_filter`），队头缺能力的请求不占窗口。
     """
+    if caps is not None and not caps:
+        return []  # 无空闲节点，无需扫描
+    rr = func.row_number().over(  # 每源内的名次：跨源轮转用
+        partition_by=Source.uuid, order_by=(_PRIORITY_RANK, Request.depth, Request.created_at, Request.id)
+    )
     async with engine_pyp.connect() as conn:
-        rows = (
-            await conn.execute(
-                select(
-                    Request.id,
-                    Request.target,
-                    Request.rule_hash,
-                    Request.rule_version,
-                    Batch.id,
-                    Batch.channel,
-                    Task.id,
-                    Task.priority,
-                    Task.group_name,
-                    Task.params,
-                    Source.uuid,
-                    Source.timeout,
-                    Source.agent_group,
-                    Source.raw_archive,
-                    Rule.id,
-                )
-                .select_from(Request.__table__)
-                .join(Batch.__table__, Request.batch_id == Batch.id)
-                .join(Task.__table__, Batch.task_id == Task.id)
-                .join(Source.__table__, Task.source_id == Source.id)
-                .join(Rule.__table__, Rule.content_hash == Request.rule_hash)
-                .where(
-                    Request.state == int(RequestState.QUEUED),
-                    (Request.not_before.is_(None)) | (Request.not_before <= func.now()),
-                    Batch.status == "running",
-                    Source.access_confirmed_at.is_not(None),
-                    Source.paused_at.is_(None),
-                    (Source.cooldown_until.is_(None)) | (Source.cooldown_until <= func.now()),
-                )
-                .order_by(_PRIORITY_RANK, Request.depth, Request.created_at, Request.id)
-                .limit(limit)
+        stmt = (
+            select(
+                Request.id,
+                Request.target,
+                Request.attempt,
+                Rule.content_hash,
+                Rule.version,
+                Batch.id,
+                Batch.channel,
+                Task.id,
+                Task.priority,
+                Task.group_name,
+                Task.params,
+                Source.uuid,
+                Source.timeout,
+                Source.agent_group,
+                Source.raw_archive,
+                Rule.id,
             )
-        ).all()
+            .select_from(Request.__table__)
+            .join(Batch.__table__, Request.batch_id == Batch.id)
+            .join(Task.__table__, Batch.task_id == Task.id)
+            .join(Source.__table__, Task.source_id == Source.id)
+            .join(Rule.__table__, Rule.id == Request.rule_id)
+            .where(
+                Request.state == int(RequestState.QUEUED),
+                (Request.not_before.is_(None)) | (Request.not_before <= func.now()),
+                Batch.status == "running",
+                Source.access_confirmed_at.is_not(None),
+                Source.paused_at.is_(None),
+                (Source.cooldown_until.is_(None)) | (Source.cooldown_until <= func.now()),
+            )
+            .order_by(rr, _PRIORITY_RANK, Request.depth, Request.created_at, Request.id)
+            .limit(limit)
+        )
+        if caps is not None:
+            cond = _cap_filter(caps)
+            if cond is None:
+                return []
+            stmt = stmt.where(cond)
+        rows = (await conn.execute(stmt)).all()
     specs: list[TaskSpec] = []
     for (
         req_id,
         target,
+        attempt,
         rule_hash,
         rule_version,
         batch_id,
@@ -819,6 +922,7 @@ async def claim_queued_for_dispatch(engine_pyp: AsyncEngine, *, limit: int = 16)
                 channel=Channel(channel),
                 priority=Priority(priority or "mid"),
                 timeout_s=max(1, int(timeout_s or 30)),
+                attempt=int(attempt or 0),
                 engine_hint=engine_hint,
                 group=task_group or source_group,
                 account=account,
@@ -828,21 +932,49 @@ async def claim_queued_for_dispatch(engine_pyp: AsyncEngine, *, limit: int = 16)
     return specs
 
 
-async def mark_assigned(engine_pyp: AsyncEngine, req_id: int, agent_id: str, lease_until: datetime) -> int:
+async def mark_assigned(
+    engine_pyp: AsyncEngine, req_id: int, agent_id: str, lease_until: datetime, *, attempt: int | None = None
+) -> int:
     """乐观占用：仅当仍为 QUEUED 才置 ASSIGNED 并写 agent_id/lease_until。返回受影响行数（1=占用成功）。
 
     调用方必须先检查返回 1 再下发 TaskAssign，否则可能重复派发同一请求。
+    传 attempt 时代次也须吻合（P0-10：claim 到 CAS 之间被重试推进的请求会干净地抢占失败）。
+    """
+    conds = [
+        Request.id == req_id,
+        Request.state == int(RequestState.QUEUED),
+        (Request.not_before.is_(None)) | (Request.not_before <= func.now()),
+        Request.batch_id.in_(_active_running_batch_ids()),
+    ]
+    if attempt is not None:
+        conds.append(Request.attempt == attempt)
+    async with engine_pyp.begin() as conn:
+        res = await conn.execute(
+            update(Request.__table__)
+            .where(*conds)
+            .values(state=int(RequestState.ASSIGNED), agent_id=agent_id, lease_until=lease_until)
+        )
+    return res.rowcount
+
+
+async def mark_running(engine_pyp: AsyncEngine, req_id: int, agent_id: str, attempt: int, *, lease_s: int) -> int:
+    """任务 ACK（P0-10）：ASSIGNED→RUNNING（校验归属与代次），并把 ACK 短租展成执行租约。
+
+    返回受影响行数；0=迟到/越权 ack（已被回收重派），调用方记日志即可。
     """
     async with engine_pyp.begin() as conn:
         res = await conn.execute(
             update(Request.__table__)
             .where(
                 Request.id == req_id,
-                Request.state == int(RequestState.QUEUED),
-                (Request.not_before.is_(None)) | (Request.not_before <= func.now()),
-                Request.batch_id.in_(_active_running_batch_ids()),
+                Request.state == int(RequestState.ASSIGNED),
+                Request.agent_id == agent_id,
+                Request.attempt == attempt,
             )
-            .values(state=int(RequestState.ASSIGNED), agent_id=agent_id, lease_until=lease_until)
+            .values(
+                state=int(RequestState.RUNNING),
+                lease_until=datetime.now(UTC) + timedelta(seconds=lease_s),
+            )
         )
     return res.rowcount
 
@@ -978,6 +1110,7 @@ async def enqueue_discovered(engine_pyp: AsyncEngine, parent_req_id: int, urls: 
                 select(
                     Request.batch_id,
                     Request.depth,
+                    Request.rule_id,
                     Request.rule_hash,
                     Request.rule_version,
                     Source.access_confirmed_at,
@@ -992,13 +1125,13 @@ async def enqueue_discovered(engine_pyp: AsyncEngine, parent_req_id: int, urls: 
         ).first()
         if parent is None:
             return 0
-        batch_id, parent_depth, rule_hash, rule_version, confirmed_at, paused_at = parent
+        batch_id, parent_depth, rule_id, rule_hash, rule_version, confirmed_at, paused_at = parent
         if confirmed_at is None or paused_at is not None:
             return 0
         child_depth = (parent_depth or 0) + 1
         spec = None
-        if rule_hash:
-            spec = (await conn.execute(select(Rule.spec).where(Rule.content_hash == rule_hash))).scalar()
+        if rule_id:
+            spec = (await conn.execute(select(Rule.spec).where(Rule.id == rule_id))).scalar()
         pack = RulePack.model_validate(spec) if spec else None
         max_depth = pack.crawl.max_depth if (pack and pack.crawl) else 0
         if child_depth > max_depth:
@@ -1015,6 +1148,7 @@ async def enqueue_discovered(engine_pyp: AsyncEngine, parent_req_id: int, urls: 
                 .values(
                     batch_id=batch_id,
                     target=url,
+                    rule_id=rule_id,
                     rule_hash=rule_hash,
                     rule_version=rule_version,
                     state=int(RequestState.QUEUED),
@@ -1151,6 +1285,31 @@ async def advance_schedule(engine_pyp: AsyncEngine, schedule_id: int, next_run_a
     """把调度的下次运行时间推进到 next_run_at（由调用方用 cron 表达式算出）。"""
     async with engine_pyp.begin() as conn:
         await conn.execute(update(Schedule.__table__).where(Schedule.id == schedule_id).values(next_run_at=next_run_at))
+
+
+async def claim_schedule(engine_pyp: AsyncEngine, schedule_id: int, next_run_at: datetime) -> bool:
+    """原子认领一次到期触发：仅当调度仍启用且仍到期时推进 next_run_at，返回是否认领成功。
+
+    认领成功者才建批次（DB-010）：多进程/重复 tick 对同一到期时间点只会有一个赢家；
+    建批次前崩溃最多漏触发一次（cron 语义可接受），不会重复触发。
+    """
+    async with engine_pyp.begin() as conn:
+        res = await conn.execute(
+            update(Schedule.__table__)
+            .where(
+                Schedule.id == schedule_id,
+                Schedule.enabled.is_(True),
+                (Schedule.next_run_at.is_(None)) | (Schedule.next_run_at <= func.now()),
+            )
+            .values(next_run_at=next_run_at)
+        )
+    return bool(res.rowcount)
+
+
+async def disable_schedule(engine_pyp: AsyncEngine, schedule_id: int) -> None:
+    """停用调度（如 cron 表达式非法）；避免坏调度每 tick 反复到期。"""
+    async with engine_pyp.begin() as conn:
+        await conn.execute(update(Schedule.__table__).where(Schedule.id == schedule_id).values(enabled=False))
 
 
 async def create_batch_for_task(

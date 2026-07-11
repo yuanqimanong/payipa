@@ -57,7 +57,7 @@ class NodeMetric(BaseModel):
     slot_used: int = active("已占用槽数（运行态）", ge=0, default=0, since="M5")
     ok: int = active("历史成功请求数", ge=0, default=0, since="M5")
     fail: int = active("历史失败请求数", ge=0, default=0, since="M5")
-    success_rate: float = active("成功率 0–1（无样本记 1.0）", ge=0, le=1, default=1.0, since="M5")
+    success_rate: float | None = active("成功率 0–1（None=暂无样本）", ge=0, le=1, default=None, since="M5")
 
 
 class SourceHealth(BaseModel):
@@ -79,7 +79,7 @@ class SourceHealth(BaseModel):
     total: int = active("请求总数（终态）", ge=0, default=0, since="M5")
     ok: int = active("成功数", ge=0, default=0, since="M5")
     fail: int = active("失败数", ge=0, default=0, since="M5")
-    success_rate: float = active("成功率 0–1（无样本记 1.0）", ge=0, le=1, default=1.0, since="M5")
+    success_rate: float | None = active("成功率 0–1（None=暂无样本）", ge=0, le=1, default=None, since="M5")
     quality: QualityMetric | None = active("数据质量（解析成功·失败·空白率）", default=None, since="M5")
     by_error: dict[str, int] = active("失败错误码分布（错误码字符串→计数）", default_factory=dict, since="M5")
 
@@ -93,5 +93,5 @@ class SystemOverview(BaseModel):
     requests_total: int = active("请求总数（终态样本）", ge=0, default=0, since="M5")
     ok: int = active("成功数", ge=0, default=0, since="M5")
     fail: int = active("失败数", ge=0, default=0, since="M5")
-    success_rate: float = active("整体成功率 0–1（无样本记 1.0）", ge=0, le=1, default=1.0, since="M5")
+    success_rate: float | None = active("整体成功率 0–1（None=暂无样本）", ge=0, le=1, default=None, since="M5")
     quality: QualityMetric | None = active("整体数据质量", default=None, since="M5")

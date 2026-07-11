@@ -71,8 +71,8 @@ def test_schema_evolver(require_pg: None) -> None:
             # 5) 幂等：无变化再演进 → 空
             assert await evolve_asm_table(biz, t_a2) == {"created": False, "added": [], "removed": []}
 
-            # 6) 不安全字段名 → ValueError（DDL 注入防护）
-            with pytest.raises(ValueError, match="unsafe identifier"):
+            # 6) 不安全字段名 → ValueError（DDL 注入防护；统一校验已前移到 build_asm_table，P0-13）
+            with pytest.raises(ValueError, match="非法"):
                 await evolve_asm_table(biz, build_asm_table(_PROD, ["a; DROP TABLE x"]))
         finally:
             await drop_asm_table(biz, t_ab)

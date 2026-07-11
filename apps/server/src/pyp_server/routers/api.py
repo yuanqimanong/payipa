@@ -15,6 +15,7 @@ from payipa.crawl.run import cancel_batch as run_cancel_batch
 from payipa.crawl.run import queue_depth as compute_queue_depth
 from payipa.crawl.run import rerun_source, review_source_access
 from payipa.db.engine import get_engine
+from payipa.db.ident import check_code
 from payipa.db.settings import get_settings as get_db_settings
 from payipa.deliver.notify import NotifyError, notify
 from payipa.deliver.outbox import enqueue_push
@@ -41,6 +42,14 @@ from pyp_server.auth import get_current_user, require_perm
 from pyp_server.service import dispatch_source_run
 
 router = APIRouter(prefix="/api", tags=["api"])
+
+
+def _code_or_400(code: str) -> str:
+    """短码进任何 DB/DDL 前先过统一校验（P0-13）；非法直接 400。"""
+    try:
+        return check_code(code)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 class RunRequest(BaseModel):
@@ -153,6 +162,7 @@ async def preview_task(spec: TaskSpec) -> TaskAssign:
     dependencies=[Depends(require_perm("sources.run"))],
 )
 async def run_source(uuid: str, body: RunRequest) -> RunResponse:
+    _code_or_400(uuid)
     try:
         result = await dispatch_source_run(
             uuid=uuid,
@@ -180,6 +190,7 @@ class RerunResponse(BaseModel):
     dependencies=[Depends(require_perm("sources.run"))],
 )
 async def rerun_source_api(uuid: str) -> RerunResponse:
+    _code_or_400(uuid)
     try:
         batch_id = await rerun_source(get_engine("pyp"), uuid)
     except LookupError as exc:
@@ -270,7 +281,7 @@ async def enqueue_push_api(component_id: int, body: PushEnqueueRequest) -> PushE
     if body.rows is not None:
         payload_ref = json.dumps({"kind": "inline", "rows": body.rows})
     elif body.product_code:
-        payload_ref = json.dumps({"kind": "dataset", "product_code": body.product_code})
+        payload_ref = json.dumps({"kind": "dataset", "product_code": _code_or_400(body.product_code)})
     else:
         payload_ref = None
     n = await enqueue_push(

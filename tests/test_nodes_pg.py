@@ -59,6 +59,18 @@ def test_register_agent_lifecycle(require_pg: None) -> None:
                 ).first()
             assert cnt == 1 and row.slot_n == 8 and row.hostname == "hostA2" and row.node_token_hash == h2
 
+            # 凭证重连（node_token_hash=None）：既有凭证 hash 必须保留，不得被清掉（P0-07）
+            await run.register_agent(pyp, _AID, hostname="hostA3", slot_n=8, capabilities={})
+            async with pyp.begin() as conn:
+                row = (
+                    await conn.execute(select(Agent.hostname, Agent.node_token_hash).where(Agent.agent_id == _AID))
+                ).first()
+            assert row.hostname == "hostA3" and row.node_token_hash == h2
+
+            # 凭证认证：hash 命中回 agent_id；不命中回 None
+            assert await run.auth_node(pyp, h2) == _AID
+            assert await run.auth_node(pyp, "0" * 64) is None
+
             # touch 刷新 last_heartbeat（新值 ≥ 旧值）
             async with pyp.begin() as conn:
                 before = (await conn.execute(select(Agent.last_heartbeat).where(Agent.agent_id == _AID))).scalar()
@@ -80,5 +92,31 @@ def test_register_agent_lifecycle(require_pg: None) -> None:
             async with pyp.begin() as conn:
                 await conn.execute(text("DELETE FROM agents WHERE agent_id=:a"), {"a": _AID})
             await pyp.dispose()
+
+    asyncio.run(main())
+
+
+def test_singleton_lock(require_pg: None) -> None:
+    """P0-09：单实例 advisory lock——第二个连接拿不到；释放后可再拿。"""
+
+    async def main() -> None:
+        from pyp_server.runtime import try_lock, unlock
+
+        e1 = create_async_engine(get_settings().async_url("pyp"))
+        e2 = create_async_engine(get_settings().async_url("pyp"))
+        try:
+            c1 = await e1.connect()
+            assert await try_lock(c1) is True
+            async with e2.connect() as c2:
+                assert await try_lock(c2) is False  # 第二实例拒绝
+            # close 只把连接还回池子（会话未断，锁仍持有）——必须显式 unlock
+            await unlock(c1)
+            await c1.close()
+            async with e2.connect() as c3:
+                assert await try_lock(c3) is True
+                await unlock(c3)
+        finally:
+            await e1.dispose()
+            await e2.dispose()
 
     asyncio.run(main())

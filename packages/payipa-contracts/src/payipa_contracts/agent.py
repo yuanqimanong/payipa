@@ -45,12 +45,26 @@ class Heartbeat(BaseModel):
     metrics: dict[str, Any] = reserved("机器/运行指标（喂 monitor）", default_factory=dict, since="M5")
 
 
+class TaskAck(BaseModel):
+    """任务接收确认：agent 收到 TaskAssign 即回；主控据此把请求 ASSIGNED→RUNNING 并展成执行租约。"""
+
+    type: Literal["task_ack"] = "task_ack"
+    req_id: str = active("请求任务 id", since="M7")
+    attempt: int = active("执行代次（回显 TaskSpec.attempt）", default=0, ge=0, since="M7")
+
+
 class StatusReport(BaseModel):
     """请求任务状态回报。state：>=0 正常态(RequestState)，<0 错误码(ErrorCode)。"""
 
     type: Literal["status"] = "status"
     req_id: str = active("请求任务 id")
     state: int = active("状态：正数=正常态、负数=错误码", since="M1")
+    attempt: int | None = active(
+        "执行代次（fencing：回显 TaskSpec.attempt；空=旧版 agent，主控只按 agent 归属校验）",
+        default=None,
+        ge=0,
+        since="M7",
+    )
     result_ref: ArtifactRef | None = active("结果工件指针（大对象）", default=None, since="M1")
     message: str | None = active("附加说明（失败原因等）", default=None)
     response_status: int | None = active("目标端 HTTP 状态码（无响应时为空）", default=None, ge=100, le=599, since="M6")
@@ -69,6 +83,9 @@ class ErrorFrame(BaseModel):
     code: int = active("错误码（见 errors.ErrorCode）")
     message: str = active("错误描述")
     req_id: str | None = active("关联请求任务 id（若有）", default=None)
+    attempt: int | None = active(
+        "执行代次（fencing：回显 TaskSpec.attempt；空=旧版 agent）", default=None, ge=0, since="M7"
+    )
 
 
 class ResultReport(BaseModel):
@@ -83,7 +100,7 @@ class RegisterAck(BaseModel):
     """注册应答：换取长期节点凭证 + 契约版本。"""
 
     type: Literal["register_ack"] = "register_ack"
-    node_token: str = active("长期节点凭证（存 hash，明文只此一次下发）")
+    node_token: str = active("长期节点凭证（存 hash，明文仅首次入网下发；重连时为空串=沿用既有凭证）", default="")
     contract_version: int = active("主控契约版本", default=CONTRACT_VERSION)
     heartbeat_interval_s: int = active("心跳间隔建议（秒）", default=20, gt=0)
 
@@ -108,7 +125,7 @@ class Cancel(BaseModel):
 
 # ── 判别联合（供 server 端点分发 / OpenAPI）────────────────────────────────
 ClientFrame = Annotated[
-    RegisterReq | Heartbeat | StatusReport | ResultReport | ErrorFrame,
+    RegisterReq | Heartbeat | TaskAck | StatusReport | ResultReport | ErrorFrame,
     Field(discriminator="type"),
 ]
 ServerFrame = Annotated[

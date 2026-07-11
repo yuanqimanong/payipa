@@ -104,8 +104,19 @@ def test_priority_cancel_schedule(require_pg: None) -> None:
             due = await run.due_schedules(pyp)
             mine = [d for d in due if d[0] == sched_id]
             assert mine and mine[0][3] == _UUID and mine[0][4] == ["https://x.com/seed"]
-            await run.advance_schedule(pyp, sched_id, datetime.now(UTC) + timedelta(hours=1))
+
+            # ── DB-010：claim_schedule 对同一到期时间点只有一个赢家；认领后不再到期 ──
+            future = datetime.now(UTC) + timedelta(hours=1)
+            first = await run.claim_schedule(pyp, sched_id, future)
+            second = await run.claim_schedule(pyp, sched_id, future)
+            assert first is True and second is False
             assert not [d for d in await run.due_schedules(pyp) if d[0] == sched_id]
+
+            # 停用后即使到期也不能认领
+            async with pyp.begin() as conn:
+                await conn.execute(text("UPDATE schedules SET next_run_at=NULL WHERE id=:i"), {"i": sched_id})
+            await run.disable_schedule(pyp, sched_id)
+            assert await run.claim_schedule(pyp, sched_id, future) is False
         finally:
             async with pyp.begin() as conn:
                 for sql in (

@@ -9,6 +9,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from payipa.crawl.ingest import build_data_table
 from payipa.crawl.run import source_field_names
 from payipa.db.engine import get_engine
+from payipa.db.ident import check_code
 from payipa.explore.export import stream_csv, stream_jsonl
 from payipa.explore.query import query_data
 from sqlalchemy.exc import ProgrammingError
@@ -19,6 +20,14 @@ from pyp_server.auth import get_current_user, require_perm
 router = APIRouter(tags=["explore"])
 
 _BRACKET = re.compile(r"(\w+)\[(\d+)\]\[(\w+)\]")
+
+
+def _code_or_400(code: str) -> str:
+    """短码统一校验（P0-13）：非法直接 400，不进 build_data_table/查询。"""
+    try:
+        return check_code(code)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 def _collect(qp: QueryParams, prefix: str) -> list[dict]:
@@ -43,6 +52,7 @@ def _parse_tabulator(qp: QueryParams) -> tuple[int, int, list[dict], list[dict]]
     dependencies=[Depends(require_perm("data.read"))],
 )
 async def get_data(source: str, request: Request) -> dict:
+    _code_or_400(source)
     page, size, sorters, filters = _parse_tabulator(request.query_params)
     table = build_data_table(source)
     try:
@@ -71,6 +81,7 @@ def _safe_filename(source: str, ext: str) -> str:
 )
 async def export_data(source: str, request: Request, fmt: str = "csv") -> StreamingResponse:
     """流式导出全部产出行。fmt=csv（列=系统列+规则字段，带 BOM）| jsonl（每行一 JSON）。"""
+    _code_or_400(source)
     if fmt not in ("csv", "jsonl"):
         raise HTTPException(status_code=400, detail="fmt 仅支持 csv 或 jsonl")
     filters = _collect(request.query_params, "filter")

@@ -3,14 +3,18 @@
 dev 模式（默认）宽松：仅在 API 免登录时打一条醒目告警。production 模式（PYP_SERVER_ENVIRONMENT=production）
 严格：session_secret / upload_secret / cred_kek / agent_join_token 仍为 dev 默认或过短、或 RBAC 未开，
 一律 RuntimeError 拒绝启动——把"忘了配密钥就上线"从隐患变成开机即失败。
+
+配置诚实（P0-16，两种模式都查）：配了未实现的存储后端（S3_*）开机即失败；REDIS_URL 无消费方，配置只告警。
 """
 
 from __future__ import annotations
 
 import logging
+import os
 
 from payipa.db.settings import Settings as DbSettings
 from payipa.db.settings import get_settings as get_db_settings
+from payipa.storage import build_storage
 
 from pyp_server.settings import DEV_SESSION_SECRET, MIN_SESSION_SECRET_BYTES, ServerSettings, get_server_settings
 
@@ -40,10 +44,32 @@ def _production_problems(s: ServerSettings, db: DbSettings) -> list[str]:
     return problems
 
 
+def _reject_multi_worker(s: ServerSettings) -> None:
+    """环境变量声明了多 worker（WEB_CONCURRENCY/UVICORN_WORKERS>1）即拒绝启动。
+
+    Hub/限流器是进程内状态，多 worker 会连接分片、限流倍增、调度与 Outbox 竞争（P0-09）。
+    `uvicorn --workers N` 不设环境变量，这层只是廉价预检；权威互斥在 lifespan 的 PG advisory lock。
+    """
+    if not s.single_worker_guard:
+        return
+    for var in ("WEB_CONCURRENCY", "UVICORN_WORKERS"):
+        raw = os.environ.get(var, "")
+        try:
+            n = int(raw)
+        except ValueError:
+            continue
+        if n > 1:
+            raise RuntimeError(f"payipa v1 只支持单 worker（{var}={n}）；请设 workers=1 或去掉该环境变量")
+
+
 def run_preflight(server_settings: ServerSettings | None = None, db_settings: DbSettings | None = None) -> None:
     """启动时调用。production 模式有问题即抛 RuntimeError；dev 模式仅在 API 开放时告警。"""
     s = server_settings or get_server_settings()
     db = db_settings or get_db_settings()
+    build_storage(db)  # 配置诚实：配了未实现的存储后端（S3_*）→ 开机即失败，而非首次上传才炸
+    _reject_multi_worker(s)  # P0-09：v1 单实例单 worker 是硬约束，多 worker 环境变量开机即拒
+    if db.redis_url:
+        logger.warning("REDIS_URL 已配置但未接线（队列走 PG，无组件消费 Redis），该配置不会生效")
     if s.environment == "production":
         problems = _production_problems(s, db)
         if problems:

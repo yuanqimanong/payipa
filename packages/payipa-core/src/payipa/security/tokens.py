@@ -20,7 +20,12 @@ def new_node_token() -> tuple[str, str]:
     明文只在 RegisterAck 里下发一次；库里只存 hash（SDD 红线9：token 存 hash、脚本不接触明文）。
     """
     plain = secrets.token_urlsafe(32)
-    return plain, hashlib.sha256(plain.encode()).hexdigest()
+    return plain, hash_token(plain)
+
+
+def hash_token(plain: str) -> str:
+    """token 明文 → 库存 hash（sha256 hex）；重连认证按此匹配 node_token_hash。"""
+    return hashlib.sha256(plain.encode()).hexdigest()
 
 
 def _b64(data: bytes) -> str:

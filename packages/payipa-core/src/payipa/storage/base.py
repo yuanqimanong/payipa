@@ -9,6 +9,7 @@ import hashlib
 from abc import ABC, abstractmethod
 from compression import zstd
 
+import anyio.to_thread
 from payipa_contracts import ArtifactRef
 from payipa_contracts import StorageBackend as BackendKind
 
@@ -49,12 +50,12 @@ class StorageBackend(ABC):
     ) -> ArtifactRef:
         """raw 归档：zstd 压缩后按 key 方案落库，返回工件指针。"""
         key = raw_object_key(source_uuid, batch_id, url)
-        compressed = zstd.compress(data, level=level)
+        compressed = await anyio.to_thread.run_sync(zstd.compress, data, level)  # CPU 密集下线程
         return await self.save_bytes(key, compressed, content_type=content_type or "application/zstd")
 
     async def get_raw(self, object_key: str) -> bytes:
         """取回并解压 raw。"""
-        return zstd.decompress(await self.get_bytes(object_key))
+        return await anyio.to_thread.run_sync(zstd.decompress, await self.get_bytes(object_key))
 
     @staticmethod
     def _ref(bucket: str, kind: BackendKind, object_key: str, data: bytes, content_type: str | None) -> ArtifactRef:

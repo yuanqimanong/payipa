@@ -74,3 +74,40 @@ def test_pick_free_requires_engine_capability() -> None:
     assert hub.pick_free(engine="browser").agent_id == "browser-node"
     assert hub.pick_free(engine="http").agent_id == "http-only"
     assert hub.pick_free(engine="unknown") is None
+
+
+def test_connection_generation_guard() -> None:
+    """P0-08：同 id 重连产生新代次；旧连接的 unregister 不得删掉新连接。"""
+    hub = AgentHub()
+    gen1, old1 = hub.register("a", _WS(), slot_n=2)
+    assert old1 is None
+    gen2, old2 = hub.register("a", _WS(), slot_n=2)  # 重连：顶替旧连接
+    assert gen2 > gen1 and old2 is not None and old2.generation == gen1
+
+    # 旧代次收尾 → 不删（新连接仍在线）；新代次收尾 → 真删
+    assert hub.unregister("a", gen1) is False
+    assert hub.pick_free() is not None
+    assert hub.unregister("a", gen2) is True
+    assert hub.pick_free() is None
+    # 已删后再收尾 → False（幂等）
+    assert hub.unregister("a", gen2) is False
+
+
+def test_free_caps_summary() -> None:
+    """free_caps：None 键=全部空闲节点引擎并集；分组键只含本组空闲节点。"""
+    hub = AgentHub()
+    hub.register("plain", _WS(), slot_n=1, engines=["http"])
+    hub.register("gpu-1", _WS(), slot_n=1, group_name="gpu", engines=["http", "browser"])
+    caps = hub.free_caps()
+    assert caps[None] == {"http", "browser"}
+    assert caps["gpu"] == {"http", "browser"}
+
+    # gpu 节点满槽 → gpu 键消失；None 键只剩 plain 的引擎
+    hub.on_dispatched("gpu-1", "r1")
+    caps = hub.free_caps()
+    assert "gpu" not in caps
+    assert caps[None] == {"http"}
+
+    # 全部满槽 → 空 dict
+    hub.on_dispatched("plain", "r2")
+    assert hub.free_caps() == {}

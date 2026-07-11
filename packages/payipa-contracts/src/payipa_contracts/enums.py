@@ -20,6 +20,7 @@ class RequestState(IntEnum):
 
 class BatchStatus(StrEnum):
     RUNNING = "running"
+    CANCELING = "canceling"  # 取消含在途请求的批次：sweep 收口后才进 canceled
     DONE = "done"
     FAILED = "failed"
     CANCELED = "canceled"

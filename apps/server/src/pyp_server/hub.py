@@ -24,11 +24,13 @@ class AgentConn:
     weight: int = 1  # 加权派发：来自 agents 表（管理员预置），平手时权重高者优先
     group_name: str | None = None  # 能力分组：任务带 group 时只派给同组节点（分组亲和）
     engines: frozenset[str] = field(default_factory=lambda: frozenset({"http"}))
+    generation: int = 0  # 连接代次：同 id 重连递增；旧连接收尾不得误删新连接（P0-08）
 
 
 class AgentHub:
     def __init__(self) -> None:
         self._agents: dict[str, AgentConn] = {}
+        self._gen = 0  # 单调连接代次计数
 
     def register(
         self,
@@ -39,7 +41,10 @@ class AgentHub:
         weight: int = 1,
         group_name: str | None = None,
         engines: list[str] | None = None,
-    ) -> None:
+    ) -> tuple[int, AgentConn | None]:
+        """登记连接；返回 (本连接代次, 被顶替的旧连接或 None)。调用方负责关闭旧连接的 WS。"""
+        old = self._agents.get(agent_id)
+        self._gen += 1
         self._agents[agent_id] = AgentConn(
             agent_id,
             ws,
@@ -48,10 +53,20 @@ class AgentHub:
             weight=weight,
             group_name=group_name,
             engines=frozenset(engines or ["http"]),
+            generation=self._gen,
         )
+        return self._gen, old
 
-    def unregister(self, agent_id: str) -> None:
-        self._agents.pop(agent_id, None)
+    def unregister(self, agent_id: str, generation: int | None = None) -> bool:
+        """注销连接；带 generation 时仅当代次吻合才删（旧连接的 finally 不能删掉新连接）。
+
+        返回是否真的删除了——调用方据此决定是否执行断连清理（回收在途/标记离线）。
+        """
+        conn = self._agents.get(agent_id)
+        if conn is None or (generation is not None and conn.generation != generation):
+            return False
+        del self._agents[agent_id]
+        return True
 
     def update_heartbeat(self, agent_id: str) -> None:
         """心跳只刷新存活标记。**槽位/在途仍以服务端 on_dispatched/on_finished 记账为准**——
@@ -75,6 +90,21 @@ class AgentHub:
             if c.free_slots > 0 and (group is None or c.group_name == group) and (engine is None or engine in c.engines)
         ]
         return max(candidates, key=lambda c: (c.free_slots, c.weight)) if candidates else None
+
+    def free_caps(self) -> dict[str | None, set[str]]:
+        """空闲节点能力汇总：{None: 全部空闲节点引擎并集, 组名: 该组空闲节点引擎并集}。
+
+        None 键对应未分组请求（可派任意空闲节点）；分组请求只匹配同组键。空 dict = 无空闲节点。
+        供派发环把能力过滤下推到 SQL（P0-11 防队头饥饿）。
+        """
+        caps: dict[str | None, set[str]] = {}
+        for c in self._agents.values():
+            if c.free_slots <= 0:
+                continue
+            caps.setdefault(None, set()).update(c.engines)
+            if c.group_name is not None:
+                caps.setdefault(c.group_name, set()).update(c.engines)
+        return caps
 
     def on_dispatched(self, agent_id: str, req_id: str) -> None:
         conn = self._agents.get(agent_id)

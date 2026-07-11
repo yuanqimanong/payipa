@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Header, HTTPException, Query
 from payipa.db.engine import get_engine
+from payipa.db.ident import check_code
 from payipa.deliver.dataset import api_key_allows_dataset, read_dataset, verify_api_key
 from sqlalchemy.exc import ProgrammingError
 
@@ -25,6 +26,10 @@ async def get_dataset(
         raise HTTPException(status_code=401, detail="invalid or revoked api key")
     if not api_key_allows_dataset(scope, product_code):
         raise HTTPException(status_code=403, detail=f"api key not scoped for dataset {product_code}")
+    try:  # 短码统一校验（P0-13）：非法 400，不进 build_asm_table/查询
+        check_code(product_code)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     try:
         rows, next_after = await read_dataset(get_engine("business"), product_code, after_id=cursor, limit=limit)
     except ProgrammingError:  # 产物表尚不存在（未产出过）

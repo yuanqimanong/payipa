@@ -13,6 +13,7 @@
 <script src="/static/views.js"></script>
 <script>
   const pct = (x) => (x == null ? "—" : (x * 100).toFixed(1) + "%");
+  const rate = (x) => (x == null ? "暂无样本" : pct(x)); // 成功率 null=无样本，不渲染成 100%
   const stateLabels = { active: "正常", cooling: "冷却中", paused: "已暂停", review: "待复核" };
   async function loadDashboard() {
     const statsEl = document.getElementById("stats");
@@ -27,7 +28,7 @@
         { k: "在线节点", v: `${ov.nodes_online}/${ov.nodes_total}` },
         { k: "待执行请求", v: ov.queue_depth, d: ov.queue_depth ? "需要关注" : "运行平稳", dir: ov.queue_depth ? "down" : "up" },
         { k: "正常数据源", v: count("active"), d: `冷却 ${count("cooling")} · 暂停 ${count("paused")}`, dir: count("paused") ? "down" : "flat" },
-        { k: "整体成功率", v: pct(ov.success_rate), d: `解析 ${pct(q.parse_ok_rate)}`, dir: ov.fail ? "down" : "up" },
+        { k: "整体成功率", v: rate(ov.success_rate), d: `解析 ${pct(q.parse_ok_rate)}`, dir: ov.success_rate == null ? "flat" : (ov.fail ? "down" : "up") },
       ]);
       PypViews.renderTable(document.getElementById("sources"), [
         { key: "source", label: "数据源", type: "mono" },

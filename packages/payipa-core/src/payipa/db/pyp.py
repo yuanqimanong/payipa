@@ -12,6 +12,7 @@ from datetime import datetime
 from sqlalchemy import (
     BigInteger,
     Boolean,
+    CheckConstraint,
     DateTime,
     ForeignKey,
     Integer,
@@ -23,7 +24,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
-from payipa.db.base import OwnedMixin, PypBase, TimestampMixin
+from payipa.db.base import MutableTimestampMixin, OwnedMixin, PypBase, TimestampMixin
 
 
 def _pk() -> Mapped[int]:
@@ -31,8 +32,9 @@ def _pk() -> Mapped[int]:
 
 
 # ══ RBAC / 用户 / 审计 ══════════════════════════════════════════════════════
-class User(TimestampMixin, PypBase):
+class User(MutableTimestampMixin, PypBase):
     __tablename__ = "users"
+    __table_args__ = (CheckConstraint("status IN ('active', 'disabled')", name="status_valid"),)
 
     id: Mapped[int] = _pk()
     username: Mapped[str] = mapped_column(String(128), unique=True, nullable=False)
@@ -41,7 +43,7 @@ class User(TimestampMixin, PypBase):
     display_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
 
 
-class Role(TimestampMixin, PypBase):
+class Role(MutableTimestampMixin, PypBase):
     __tablename__ = "roles"
 
     id: Mapped[int] = _pk()
@@ -56,7 +58,7 @@ class UserRole(PypBase):
     role_id: Mapped[int] = mapped_column(ForeignKey("roles.id"), primary_key=True)
 
 
-class Permission(TimestampMixin, PypBase):
+class Permission(MutableTimestampMixin, PypBase):
     __tablename__ = "permissions"
 
     id: Mapped[int] = _pk()
@@ -94,8 +96,15 @@ class AuditLog(TimestampMixin, PypBase):
 
 
 # ══ 数据源 / 规则 ═══════════════════════════════════════════════════════════
-class Source(TimestampMixin, OwnedMixin, PypBase):
+class Source(MutableTimestampMixin, OwnedMixin, PypBase):
     __tablename__ = "sources"
+    __table_args__ = (
+        CheckConstraint("channel_default IN ('test', 'prod')", name="channel_valid"),
+        CheckConstraint("consecutive_failures >= 0", name="failures_nonneg"),
+        CheckConstraint("retry >= 0", name="retry_nonneg"),
+        CheckConstraint("timeout > 0", name="timeout_positive"),
+        CheckConstraint("rate_limit > 0", name="rate_limit_positive"),
+    )
 
     id: Mapped[int] = _pk()
     uuid: Mapped[str] = mapped_column(String(32), unique=True, nullable=False)  # 分表短码来源
@@ -122,21 +131,27 @@ class Source(TimestampMixin, OwnedMixin, PypBase):
     raw_archive: Mapped[bool] = mapped_column(Boolean, default=False)  # 是否开启 raw 存档
 
 
-class Rule(TimestampMixin, PypBase):
+class Rule(MutableTimestampMixin, PypBase):
     __tablename__ = "rules"
-    __table_args__ = (UniqueConstraint("source_id", "version"),)
+    __table_args__ = (
+        UniqueConstraint("source_id", "version"),
+        # 显式命名：命名约定只取首列，否则与上面的 uq_rules_source_id 撞名
+        UniqueConstraint("source_id", "content_hash", name="uq_rules_source_id_content_hash"),
+        CheckConstraint("status IN ('draft', 'testing', 'active')", name="status_valid"),
+        CheckConstraint("version >= 1", name="version_min"),
+    )
 
     id: Mapped[int] = _pk()
     source_id: Mapped[int] = mapped_column(ForeignKey("sources.id"), nullable=False)
     version: Mapped[int] = mapped_column(Integer, nullable=False)
-    content_hash: Mapped[str] = mapped_column(String(64), nullable=False)  # 内容寻址
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False)  # 内容寻址（源内唯一，跨源可同）
     status: Mapped[str] = mapped_column(String(16), default="draft")  # draft/testing/active
     spec: Mapped[dict] = mapped_column(JSONB, nullable=False)  # 选择器/清洗/版型识别
     created_by: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
 
 
 # ══ 任务 / 调度 / 批次 / 请求 ═══════════════════════════════════════════════
-class Task(TimestampMixin, OwnedMixin, PypBase):
+class Task(MutableTimestampMixin, OwnedMixin, PypBase):
     __tablename__ = "tasks"
 
     id: Mapped[int] = _pk()
@@ -148,7 +163,7 @@ class Task(TimestampMixin, OwnedMixin, PypBase):
     chain_task_id: Mapped[int | None] = mapped_column(ForeignKey("tasks.id"), nullable=True)  # 链式上游
 
 
-class Schedule(PypBase):
+class Schedule(MutableTimestampMixin, PypBase):
     __tablename__ = "schedules"
 
     id: Mapped[int] = _pk()
@@ -160,6 +175,11 @@ class Schedule(PypBase):
 
 class Batch(TimestampMixin, PypBase):
     __tablename__ = "batches"
+    __table_args__ = (
+        # 必须含 canceling：取消含在途请求的批次先进 canceling、sweep 后才收口
+        CheckConstraint("status IN ('running', 'canceling', 'done', 'failed', 'canceled')", name="status_valid"),
+        CheckConstraint("channel IN ('test', 'prod')", name="channel_valid"),
+    )
 
     id: Mapped[int] = _pk()
     task_id: Mapped[int] = mapped_column(ForeignKey("tasks.id"), nullable=False)
@@ -172,13 +192,18 @@ class Batch(TimestampMixin, PypBase):
 
 class Request(TimestampMixin, PypBase):
     __tablename__ = "requests"
+    __table_args__ = (
+        CheckConstraint("depth >= 0", name="depth_nonneg"),
+        CheckConstraint("attempt >= 0", name="attempt_nonneg"),
+        CheckConstraint("state <= 4", name="state_max"),  # 正常态 0–4；负数错误码开放
+    )
 
     id: Mapped[int] = _pk()
     batch_id: Mapped[int] = mapped_column(ForeignKey("batches.id"), nullable=False)
     target: Mapped[str] = mapped_column(Text, nullable=False)
-    rule_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
-    rule_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    rule_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    rule_id: Mapped[int | None] = mapped_column(ForeignKey("rules.id"), nullable=True, index=True)  # 权威规则引用
+    rule_version: Mapped[int | None] = mapped_column(Integer, nullable=True)  # 派发时快照（不可变，仅溯源）
+    rule_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)  # 派发时快照（不可变，仅溯源）
     depth: Mapped[int] = mapped_column(Integer, default=0)
     state: Mapped[int] = mapped_column(SmallInteger, default=0)  # 正=正常态、负=错误码
     attempt: Mapped[int] = mapped_column(Integer, default=0)
@@ -209,8 +234,13 @@ class TaskEvent(TimestampMixin, PypBase):
     payload: Mapped[dict] = mapped_column(JSONB, default=dict)
 
 
-class Agent(TimestampMixin, PypBase):
+class Agent(MutableTimestampMixin, PypBase):
     __tablename__ = "agents"
+    __table_args__ = (
+        CheckConstraint("status IN ('online', 'offline')", name="status_valid"),
+        CheckConstraint("slot_n >= 0", name="slot_n_nonneg"),
+        CheckConstraint("weight >= 0", name="weight_nonneg"),
+    )
 
     id: Mapped[int] = _pk()
     agent_id: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
@@ -225,7 +255,7 @@ class Agent(TimestampMixin, PypBase):
     last_heartbeat: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
-class Credential(TimestampMixin, PypBase):
+class Credential(MutableTimestampMixin, PypBase):
     __tablename__ = "credentials"
 
     id: Mapped[int] = _pk()
@@ -236,8 +266,9 @@ class Credential(TimestampMixin, PypBase):
 
 
 # ══ 推送 / 对外 / 通知 ══════════════════════════════════════════════════════
-class ApiKey(TimestampMixin, OwnedMixin, PypBase):
+class ApiKey(MutableTimestampMixin, OwnedMixin, PypBase):
     __tablename__ = "api_keys"
+    __table_args__ = (CheckConstraint("quota IS NULL OR quota >= 0", name="quota_nonneg"),)
 
     id: Mapped[int] = _pk()
     name: Mapped[str] = mapped_column(String(128), nullable=False)
@@ -247,7 +278,7 @@ class ApiKey(TimestampMixin, OwnedMixin, PypBase):
     revoked: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
-class NotifyBot(TimestampMixin, OwnedMixin, PypBase):
+class NotifyBot(MutableTimestampMixin, OwnedMixin, PypBase):
     __tablename__ = "notify_bots"
 
     id: Mapped[int] = _pk()
@@ -256,8 +287,12 @@ class NotifyBot(TimestampMixin, OwnedMixin, PypBase):
     config: Mapped[dict | None] = mapped_column(JSONB, nullable=True)  # 加密存储（用户级自管）
 
 
-class PushComponent(TimestampMixin, OwnedMixin, PypBase):
+class PushComponent(MutableTimestampMixin, OwnedMixin, PypBase):
     __tablename__ = "push_components"
+    __table_args__ = (
+        CheckConstraint("status IN ('draft', 'testing', 'active')", name="status_valid"),
+        CheckConstraint("version >= 1", name="version_min"),
+    )
 
     id: Mapped[int] = _pk()
     name: Mapped[str] = mapped_column(String(128), nullable=False)
@@ -275,6 +310,10 @@ class PushOutbox(TimestampMixin, OwnedMixin, PypBase):
     """事务性 outbox（汲取点②）：退避 / 消费租约防重 / 死信 / 审计。"""
 
     __tablename__ = "push_outbox"
+    __table_args__ = (
+        CheckConstraint("state IN ('pending', 'inflight', 'sent', 'dead')", name="state_valid"),
+        CheckConstraint("attempts >= 0", name="attempts_nonneg"),
+    )
 
     id: Mapped[int] = _pk()
     component_id: Mapped[int] = mapped_column(ForeignKey("push_components.id"), nullable=False)
@@ -288,8 +327,12 @@ class PushOutbox(TimestampMixin, OwnedMixin, PypBase):
     idempotency_key: Mapped[str | None] = mapped_column(String(128), nullable=True)
 
 
-class Assembly(TimestampMixin, OwnedMixin, PypBase):
+class Assembly(MutableTimestampMixin, OwnedMixin, PypBase):
     __tablename__ = "assemblies"
+    __table_args__ = (
+        CheckConstraint("status IN ('draft', 'testing', 'active')", name="status_valid"),
+        CheckConstraint("script_ver >= 1", name="script_ver_min"),
+    )
 
     id: Mapped[int] = _pk()
     name: Mapped[str] = mapped_column(String(128), nullable=False)
@@ -308,14 +351,17 @@ class Assembly(TimestampMixin, OwnedMixin, PypBase):
     indexed_fields: Mapped[list] = mapped_column(JSONB, default=list)  # 产物勾索引字段
 
 
-class AssemblyWatermark(TimestampMixin, PypBase):
+class AssemblyWatermark(MutableTimestampMixin, PypBase):
     """增量组装读侧水位（M3 slice-8）：某组装从某数据源已消费到的最大 data_* id。
 
     读腿可重算：清零该行即从头重读（写腿 asm_ 指纹幂等去重，故重读不产重复）。按 (assembly_id, source) 唯一。
     """
 
     __tablename__ = "assembly_watermarks"
-    __table_args__ = (UniqueConstraint("assembly_id", "source", name="uq_assembly_watermark"),)
+    __table_args__ = (
+        UniqueConstraint("assembly_id", "source", name="uq_assembly_watermark"),
+        CheckConstraint("position >= 0", name="position_nonneg"),
+    )
 
     id: Mapped[int] = _pk()
     assembly_id: Mapped[int] = mapped_column(ForeignKey("assemblies.id"), nullable=False)
@@ -324,7 +370,7 @@ class AssemblyWatermark(TimestampMixin, PypBase):
 
 
 # ══ 公共配置 ════════════════════════════════════════════════════════════════
-class LlmModel(TimestampMixin, PypBase):
+class LlmModel(MutableTimestampMixin, PypBase):
     __tablename__ = "llm_models"
 
     id: Mapped[int] = _pk()
@@ -334,8 +380,9 @@ class LlmModel(TimestampMixin, PypBase):
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
 
 
-class SystemPrompt(TimestampMixin, PypBase):
+class SystemPrompt(MutableTimestampMixin, PypBase):
     __tablename__ = "system_prompts"
+    __table_args__ = (CheckConstraint("version >= 1", name="version_min"),)
 
     id: Mapped[int] = _pk()
     name: Mapped[str] = mapped_column(String(128), nullable=False)
@@ -343,7 +390,7 @@ class SystemPrompt(TimestampMixin, PypBase):
     version: Mapped[int] = mapped_column(Integer, default=1)
 
 
-class GlobalParam(TimestampMixin, PypBase):
+class GlobalParam(MutableTimestampMixin, PypBase):
     __tablename__ = "global_params"
 
     id: Mapped[int] = _pk()
@@ -351,10 +398,10 @@ class GlobalParam(TimestampMixin, PypBase):
     value: Mapped[dict] = mapped_column(JSONB, default=dict)
 
 
-class StorageConfig(TimestampMixin, PypBase):
+class StorageConfig(MutableTimestampMixin, PypBase):
     __tablename__ = "storage_config"
 
     id: Mapped[int] = _pk()
     name: Mapped[str] = mapped_column(String(128), nullable=False)
-    backend: Mapped[str] = mapped_column(String(16), default="s3")  # s3/local
+    backend: Mapped[str] = mapped_column(String(16), default="local")  # local（s3 未实现）
     config: Mapped[dict | None] = mapped_column(JSONB, nullable=True)  # 加密存储

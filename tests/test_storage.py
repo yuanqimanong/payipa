@@ -1,4 +1,4 @@
-"""M1-2 单元测试（无 DB）：URL 指纹/key 方案、LocalBackend zstd 存取、上传 token。"""
+"""M1-2 单元测试（无 DB）：URL 指纹/key 方案、LocalBackend zstd 存取、上传 token、配置诚实。"""
 
 from __future__ import annotations
 
@@ -6,7 +6,9 @@ import asyncio
 from pathlib import Path
 
 import pytest
+from payipa.db.settings import Settings
 from payipa.security.tokens import issue_upload_token, verify_upload_token
+from payipa.storage import build_storage
 from payipa.storage.keys import canonicalize_url, raw_object_key, url_fingerprint
 from payipa.storage.local import LocalBackend
 
@@ -50,6 +52,27 @@ def test_local_backend_rejects_path_traversal(tmp_path: Path) -> None:
         backend = LocalBackend(tmp_path)
         with pytest.raises(ValueError):
             await backend.save_bytes("../evil", b"x")
+
+    asyncio.run(main())
+
+
+def test_build_storage_rejects_unimplemented_s3() -> None:
+    # 配置诚实（P0-16）：配了未实现的 S3 后端必须报错，绝不静默回退 local
+    with pytest.raises(RuntimeError, match="S3"):
+        build_storage(Settings(_env_file=None, s3_endpoint="http://minio:9000"))
+    with pytest.raises(RuntimeError, match="S3"):
+        build_storage(Settings(_env_file=None, s3_bucket="raw"))
+    assert isinstance(build_storage(Settings(_env_file=None)), LocalBackend)  # 无 S3 配置 → local
+
+
+def test_save_bytes_atomic_no_tmp_leftover(tmp_path: Path) -> None:
+    async def main() -> None:
+        backend = LocalBackend(tmp_path)
+        await backend.save_bytes("a/b.bin", b"v1")
+        assert (tmp_path / "a" / "b.bin").read_bytes() == b"v1"
+        await backend.save_bytes("a/b.bin", b"v2-longer")  # 覆盖写同样原子（os.replace）
+        assert (tmp_path / "a" / "b.bin").read_bytes() == b"v2-longer"
+        assert not list(tmp_path.rglob("*.tmp"))  # 不留半截临时文件
 
     asyncio.run(main())
 

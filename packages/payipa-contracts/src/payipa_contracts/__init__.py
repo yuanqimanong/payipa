@@ -18,6 +18,7 @@ from payipa_contracts.agent import (
     ResultReport,
     ServerFrame,
     StatusReport,
+    TaskAck,
     TaskAssign,
 )
 from payipa_contracts.artifact import Artifact, ArtifactRef
@@ -127,6 +128,7 @@ __all__ = [
     "StorageBackend",
     "SystemOverview",
     "TableQueryRequest",
+    "TaskAck",
     "TaskAssign",
     "TaskSpec",
     "TriggerType",

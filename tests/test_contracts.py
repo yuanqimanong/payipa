@@ -8,8 +8,8 @@ from pydantic import TypeAdapter
 
 
 def test_contract_version_handshake() -> None:
-    assert c.CONTRACT_VERSION == 3
-    assert c.MIN_SUPPORTED_CONTRACT_VERSION == 3
+    assert c.CONTRACT_VERSION == 4  # v4：attempt fencing + TaskAck（P0-10）
+    assert c.MIN_SUPPORTED_CONTRACT_VERSION == 4
     assert c.is_compatible(c.CONTRACT_VERSION)
     assert not c.is_compatible(1)
     assert not c.is_compatible(c.CONTRACT_VERSION + 1)
@@ -78,6 +78,19 @@ def test_client_frame_discriminated_union_roundtrip() -> None:
     # 错误码作为负数 state 也能承载
     err = adapter.validate_python({"type": "status", "req_id": "r2", "state": int(c.ErrorCode.ACCESS_PAUSED)})
     assert err.state == -3
+
+
+def test_monitor_success_rate_nullable() -> None:
+    # P0-25：无样本成功率必须是 None（暂无样本），绝不默认 1.0 装健康
+    for model, kw in [
+        (c.NodeMetric, {"agent_id": "a1", "online": True, "slot_n": 4}),
+        (c.SourceHealth, {"source": "s1"}),
+        (c.SystemOverview, {}),
+    ]:
+        m = model(**kw)
+        assert m.success_rate is None
+        assert "暂无样本" in model.model_json_schema()["properties"]["success_rate"]["description"]
+    assert c.SourceHealth(source="s1", success_rate=0.5).success_rate == 0.5
 
 
 def test_task_assign_carries_task_spec() -> None:

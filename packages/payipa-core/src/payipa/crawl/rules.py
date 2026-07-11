@@ -26,15 +26,19 @@ class RuleStore:
     async def put(
         self, source_id: int, pack: RulePack, *, status: str = "active", created_by: int | None = None
     ) -> RulePointer:
-        """登记规则（按 content_hash 去重）；返回可放入 TaskSpec 的指针。"""
+        """登记规则（按 (source_id, content_hash) 源内去重）；返回可放入 TaskSpec 的指针。
+
+        跨源相同 spec 各自成行（DB-001）：归属、版本、派发互不串。并发重复 put 依赖
+        唯一约束 uq_rules_source_id_content_hash 兜底，冲突后重查返回已有行。
+        """
         digest = content_hash(pack)
         async with self.engine.begin() as conn:
-            existing = (await conn.execute(select(Rule.id, Rule.version).where(Rule.content_hash == digest))).first()
+            existing = await self._find(conn, source_id, digest)
             if existing:
-                return RulePointer(rule_id=str(existing[0]), version=existing[1], content_hash=digest)
+                return existing
             max_v = (await conn.execute(select(func.max(Rule.version)).where(Rule.source_id == source_id))).scalar()
             version = (max_v or 0) + 1
-            rule_id = (
+            row = (
                 await conn.execute(
                     pg_insert(Rule.__table__)
                     .values(
@@ -45,12 +49,30 @@ class RuleStore:
                         spec=pack.model_dump(mode="json"),
                         created_by=created_by,
                     )
+                    .on_conflict_do_nothing(constraint="uq_rules_source_id_content_hash")
                     .returning(Rule.id)
                 )
-            ).scalar_one()
-        return RulePointer(rule_id=str(rule_id), version=version, content_hash=digest)
+            ).first()
+        if row is not None:
+            return RulePointer(rule_id=str(row[0]), version=version, content_hash=digest)
+        # 并发对手先插成功：重查取已有行
+        async with self.engine.begin() as conn:
+            existing = await self._find(conn, source_id, digest)
+        if existing is None:  # pragma: no cover - 仅约束异常时可达
+            raise RuntimeError(f"规则登记冲突后重查失败：source_id={source_id} hash={digest[:12]}")
+        return existing
+
+    @staticmethod
+    async def _find(conn, source_id: int, digest: str) -> RulePointer | None:
+        row = (
+            await conn.execute(
+                select(Rule.id, Rule.version).where(Rule.source_id == source_id, Rule.content_hash == digest)
+            )
+        ).first()
+        return RulePointer(rule_id=str(row[0]), version=row[1], content_hash=digest) if row else None
 
     async def get_by_hash(self, digest: str) -> RulePack | None:
+        """按内容哈希取 spec。hash 只在源内唯一，但内容寻址保证同 hash 同 spec，任取一行即可。"""
         async with self.engine.begin() as conn:
-            row = (await conn.execute(select(Rule.spec).where(Rule.content_hash == digest))).first()
+            row = (await conn.execute(select(Rule.spec).where(Rule.content_hash == digest).limit(1))).first()
         return RulePack.model_validate(row[0]) if row else None

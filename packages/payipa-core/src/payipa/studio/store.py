@@ -17,6 +17,7 @@ from sqlalchemy import Row, func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncEngine
 
+from payipa.db.ident import check_code
 from payipa.db.pyp import Assembly
 
 # get/get_active 返回的行视图列（经 Core 连接查显式列，非 ORM 实体）
@@ -86,6 +87,7 @@ class AssemblyStore:
         upstream_task_id: int | None = None,
     ) -> tuple[int, str, int]:
         """登记组装（content_hash 去重）；返回 (assembly_id, content_hash, version)。新内容 status=draft。"""
+        check_code(product_code)  # 产物短码进 asm_{code} 分表名，登记前先过统一校验（P0-13）
         digest = assembly_content_hash(
             script_ref=script_ref,
             product_code=product_code,

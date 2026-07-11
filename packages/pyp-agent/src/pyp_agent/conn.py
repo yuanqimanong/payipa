@@ -18,21 +18,24 @@ from payipa_contracts import (
     ErrorFrame,
     ExecSummary,
     Heartbeat,
+    RegisterAck,
     RegisterReq,
     RequestState,
     ResultBatch,
     ResultReport,
     ServerFrame,
     StatusReport,
+    TaskAck,
     TaskAssign,
     TaskSpec,
 )
 from pydantic import TypeAdapter
 
-from pyp_agent.fetch import FetchNetworkError, FetchTimeout, browser_available, fetch
+from pyp_agent.fetch import FetchNetworkError, FetchTimeout, FetchTooLarge, browser_available, fetch
 from pyp_agent.interpret import interpret_page
 from pyp_agent.response_policy import assess_response
 from pyp_agent.rules import RuleCache
+from pyp_agent.state import load_state, save_state
 from pyp_agent.upload import upload_raw_via_server
 
 _server_frame = TypeAdapter(ServerFrame)
@@ -67,6 +70,7 @@ async def process_task(
             message=f"request timed out after {task.timeout_s}s",
             reason_code="transport_timeout",
             retry_after_s=5.0,
+            attempt=task.attempt,
         )
     except FetchNetworkError as exc:
         return StatusReport(
@@ -75,6 +79,15 @@ async def process_task(
             message=str(exc),
             reason_code="transport_error",
             retry_after_s=5.0,
+            attempt=task.attempt,
+        )
+    except FetchTooLarge as exc:  # 超限即失败（不重试）：永久超大的页重试也没用，不进解析/归档
+        return StatusReport(
+            req_id=task.req_id,
+            state=int(ErrorCode.SOFT_FAIL),
+            message=str(exc),
+            reason_code="response_too_large",
+            attempt=task.attempt,
         )
 
     decision = assess_response(fetched.status, fetched.headers, fetched.body, fetched.content_type)
@@ -86,6 +99,7 @@ async def process_task(
             response_status=fetched.status or None,
             reason_code=decision.reason_code,
             retry_after_s=decision.retry_after_s,
+            attempt=task.attempt,
         )
 
     artifacts = []
@@ -120,6 +134,7 @@ async def process_task(
         result=ResultBatch(
             batch_id=task.batch_id,
             req_id=task.req_id,
+            attempt=task.attempt,  # 代次回显：主控 fencing 据此拒绝迟到结果
             items=parsed.items,
             artifacts=artifacts,
             discovered=parsed.links,  # type=link/store+link 字段值 → 主控去重后并入同批入队（多波爬行）
@@ -140,20 +155,25 @@ class AgentConnection:
         agent_id: str = "agent-1",
         hostname: str = "localhost",
         heartbeat_s: float = 20.0,
+        state_dir=None,
     ) -> None:
         self.server = server
-        self.token = token
+        self.token = token  # join token：仅首次入网使用
         self.slot_n = slot_n
         self.agent_id = agent_id
         self.hostname = hostname
         self.heartbeat_s = heartbeat_s
+        self.state_dir = state_dir  # 身份目录（None=不持久化，测试用）
+        # 长期节点凭证（P0-07）：入网后由 RegisterAck 下发并持久化，重连凭它认证（空串=已作废）
+        self.node_token: str | None = (load_state(state_dir).get("node_token") or None) if state_dir else None
         self.rule_cache = RuleCache(server)
         self._scopes: dict[str, anyio.CancelScope] = {}  # req_id → 取消域（收 Cancel 帧就地取消该任务）
 
     async def run_once(self) -> None:
         """连接一次并进入收发循环（连接关闭即返回）。"""
+        bearer = self.node_token or self.token  # 有节点凭证用凭证（重连）；否则 join token（首次入网）
         async with websockets.connect(
-            _ws_url(self.server), additional_headers={"authorization": f"Bearer {self.token}"}
+            _ws_url(self.server), additional_headers={"authorization": f"Bearer {bearer}"}
         ) as ws:
             has_browser = browser_available()  # 装了 playwright extra 才上报 automation 能力（分组派发据此）
             await ws.send(
@@ -167,7 +187,14 @@ class AgentConnection:
                     slot_n=self.slot_n,
                 ).model_dump_json()
             )
-            await ws.recv()  # register_ack（M1 不深校验；M2 起校验契约版本）
+            ack = _server_frame.validate_json(await ws.recv())
+            if isinstance(ack, RegisterAck):
+                if ack.heartbeat_interval_s > 0:
+                    self.heartbeat_s = float(ack.heartbeat_interval_s)  # 采纳主控建议的心跳间隔
+                if ack.node_token:  # 首次入网：持久化长期凭证，之后重连只用它（空串=沿用既有）
+                    self.node_token = ack.node_token
+                    if self.state_dir:
+                        save_state(self.state_dir, node_token=ack.node_token)
             async with anyio.create_task_group() as tg:
                 tg.start_soon(self._heartbeat_loop, ws)
                 async for message in ws:
@@ -190,6 +217,9 @@ class AgentConnection:
 
     async def _handle_task(self, ws, assign: TaskAssign) -> None:
         req_id = assign.task.req_id
+        attempt = assign.task.attempt
+        # 先 ACK（P0-10）：主控收到才把请求 ASSIGNED→RUNNING 并展成执行租约；丢失则被快速回收重派
+        await ws.send(TaskAck(req_id=req_id, attempt=attempt).model_dump_json())
         scope = anyio.CancelScope()
         self._scopes[req_id] = scope
         try:
@@ -205,22 +235,38 @@ class AgentConnection:
                     await ws.send(report.model_dump_json())
                 except Exception as exc:  # noqa: BLE001  单任务失败回错误帧，不拖垮连接
                     await ws.send(
-                        ErrorFrame(code=int(ErrorCode.SOFT_FAIL), message=str(exc), req_id=req_id).model_dump_json()
+                        ErrorFrame(
+                            code=int(ErrorCode.SOFT_FAIL), message=str(exc), req_id=req_id, attempt=attempt
+                        ).model_dump_json()
                     )
         finally:
             self._scopes.pop(req_id, None)
         if scope.cancel_called:  # 被取消：域外回报 CANCELED（域内 send 会被取消掉）
             await ws.send(
-                StatusReport(req_id=req_id, state=int(RequestState.CANCELED), message="canceled").model_dump_json()
+                StatusReport(
+                    req_id=req_id, state=int(RequestState.CANCELED), message="canceled", attempt=attempt
+                ).model_dump_json()
             )
 
     async def run(self, *, max_retries: int | None = None) -> None:
-        """断线指数退避重连（简版）。max_retries=None 表示无限重连。"""
+        """断线指数退避重连（简版）。max_retries=None 表示无限重连。
+
+        节点凭证被拒（策略关闭 1008，如管理员撤销）时丢弃本地凭证，退回 join token 重新入网。
+        """
         attempt = 0
         while True:
             try:
                 await self.run_once()
                 attempt = 0
+            except websockets.exceptions.ConnectionClosedError as exc:
+                if self.node_token and exc.rcvd is not None and exc.rcvd.code == 1008:
+                    self.node_token = None  # 凭证已失效：下次用 join token 重新换发
+                    if self.state_dir:
+                        save_state(self.state_dir, node_token="")
+                if max_retries is not None and attempt >= max_retries:
+                    raise
+                attempt += 1
+                await anyio.sleep(backoff_delay(attempt, base=1.0, cap=30.0, jitter=True))
             except Exception:  # noqa: BLE001  连接层异常 → 退避重连
                 if max_retries is not None and attempt >= max_retries:
                     raise

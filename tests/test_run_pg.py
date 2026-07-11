@@ -117,3 +117,76 @@ def test_run_end_to_end_logic(require_pg: None) -> None:
             await dc.dispose()
 
     asyncio.run(main())
+
+
+def test_rule_dedup_scoped_to_source(require_pg: None) -> None:
+    """DB-001 验收：两个源提交相同 spec 各得其行；重复 put 幂等；请求 rule_id 指向本源规则。"""
+    uuids = ("m1rula", "m1rulb")
+
+    async def main() -> None:
+        pyp = create_async_engine(get_settings().async_url("pyp"))
+        try:
+            src_ids: list[int] = []
+            task_ids: list[int] = []
+            async with pyp.begin() as conn:
+                for u in uuids:
+                    sid = (
+                        await conn.execute(
+                            pg_insert(Source.__table__)
+                            .values(
+                                uuid=u,
+                                name=f"规则归属 {u}",
+                                connector_type="web",
+                                access_basis="owned",
+                                access_reference="test fixture",
+                                access_confirmed_at=func.now(),
+                            )
+                            .returning(Source.id)
+                        )
+                    ).scalar_one()
+                    tid = (
+                        await conn.execute(
+                            pg_insert(Task.__table__).values(source_id=sid, trigger_type="manual").returning(Task.id)
+                        )
+                    ).scalar_one()
+                    src_ids.append(sid)
+                    task_ids.append(tid)
+
+            store = RuleStore(pyp)
+            ptr_a = await store.put(src_ids[0], _rule())
+            ptr_b = await store.put(src_ids[1], _rule())
+            # 相同 spec、不同源 → 各自成行、各自 version=1
+            assert ptr_a.content_hash == ptr_b.content_hash
+            assert ptr_a.rule_id != ptr_b.rule_id
+            assert ptr_a.version == 1
+            assert ptr_b.version == 1
+            # 同源重复 put → 幂等返回同一行
+            again = await store.put(src_ids[0], _rule())
+            assert again.rule_id == ptr_a.rule_id
+            assert again.version == ptr_a.version
+
+            # 请求写入权威 rule_id，且指向本源的规则行
+            for tid, u, ptr in ((task_ids[0], uuids[0], ptr_a), (task_ids[1], uuids[1], ptr_b)):
+                _, specs = await run.create_batch_with_requests(
+                    pyp, task_id=tid, source_uuid=u, targets=[f"https://x.com/{u}"], rule_ptr=ptr
+                )
+                assert specs[0].rule_ptr.rule_id == ptr.rule_id
+                async with pyp.begin() as conn:
+                    rid = (
+                        await conn.execute(select(Request.rule_id).where(Request.id == int(specs[0].req_id)))
+                    ).scalar()
+                assert rid == int(ptr.rule_id)
+        finally:
+            async with pyp.begin() as conn:
+                for u in uuids:
+                    for sql in (
+                        "DELETE FROM requests WHERE batch_id IN (SELECT b.id FROM batches b JOIN tasks t ON b.task_id=t.id JOIN sources s ON t.source_id=s.id WHERE s.uuid=:u)",  # noqa: E501
+                        "DELETE FROM batches WHERE task_id IN (SELECT t.id FROM tasks t JOIN sources s ON t.source_id=s.id WHERE s.uuid=:u)",  # noqa: E501
+                        "DELETE FROM rules WHERE source_id IN (SELECT id FROM sources WHERE uuid=:u)",
+                        "DELETE FROM tasks WHERE source_id IN (SELECT id FROM sources WHERE uuid=:u)",
+                        "DELETE FROM sources WHERE uuid=:u",
+                    ):
+                        await conn.execute(text(sql), {"u": u})
+            await pyp.dispose()
+
+    asyncio.run(main())

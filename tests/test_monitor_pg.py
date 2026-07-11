@@ -15,7 +15,7 @@ from payipa.crawl.ingest import build_data_table, drop_data_table
 from payipa.crawl.rules import RuleStore
 from payipa.db.pyp import Request, User
 from payipa.db.settings import get_settings
-from payipa.monitor import node_metrics, source_health, system_overview
+from payipa.monitor import _rate, node_metrics, source_health, system_overview
 from payipa.security.rbac import make_superuser, seed_default_rbac
 from pyp_server.auth import COOKIE_NAME, create_session
 from pyp_server.main import app
@@ -73,6 +73,13 @@ async def _purge(pyp, dc) -> None:
     await drop_data_table(dc, build_data_table(_UUID, ["title"]))
 
 
+def test_rate_no_sample() -> None:
+    """_rate 纯函数（免 PG）：无样本记 None——绝不装 100% 健康；有样本按比例。"""
+    assert _rate(0, 0) is None
+    assert _rate(1, 2) == 0.5
+    assert _rate(2, 2) == 1.0
+
+
 def test_monitor_aggregation(require_pg: None) -> None:
     async def main() -> dict:
         pyp = create_async_engine(get_settings().async_url("pyp"))
@@ -98,6 +105,10 @@ def test_monitor_aggregation(require_pg: None) -> None:
             await run.register_agent(pyp, _AGENT, hostname="h", slot_n=4, capabilities={}, node_token_hash="x")
             async with pyp.begin() as conn:
                 await conn.execute(update(Request.__table__).where(Request.id.in_([r0, r1])).values(agent_id=_AGENT))
+
+            # 尚无终态样本（4 条全在排队）：成功率必须是 None，不得装 100% 健康（P0-25）
+            pre = next(s for s in await source_health(pyp) if s.source == _UUID)
+            assert pre.total == 0 and pre.success_rate is None
 
             # r0 成功：3 ok / 0 blank；r1 成功：0 ok / 1 blank
             # （单条空白：多条全空 item 指纹相同会在批内 upsert 冲突，属 Ingestor 既有行为、非本切片范畴）
@@ -207,8 +218,9 @@ def test_zombie_node_judged_offline(require_pg: None) -> None:
         pyp = create_async_engine(get_settings().async_url("pyp"))
         try:
             await run.register_agent(pyp, _ZOMBIE, hostname="h", slot_n=4, capabilities={}, node_token_hash="t")
-            fresh = {n.agent_id: n.online for n in await node_metrics(pyp)}
-            assert fresh[_ZOMBIE] is True  # 刚注册（心跳新鲜）→ 在线
+            fresh = {n.agent_id: n for n in await node_metrics(pyp)}
+            assert fresh[_ZOMBIE].online is True  # 刚注册（心跳新鲜）→ 在线
+            assert fresh[_ZOMBIE].success_rate is None  # 零请求节点无样本 → None，不装 100%（P0-25）
 
             async with pyp.begin() as conn:  # 心跳做旧但状态列仍 online（模拟硬崩溃）
                 await conn.execute(

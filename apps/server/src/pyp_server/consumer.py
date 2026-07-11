@@ -25,7 +25,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger("pyp_server.consumer")
 
 
-async def consumer_loop(app: FastAPI) -> None:  # noqa: ARG001 —— 对齐 dispatch_loop 签名（挂 lifespan）
+async def consumer_loop(app: FastAPI) -> None:
     """长驻后台环：排空 push_outbox。业务异常指数退避、不退出；lifespan 关停时在 sleep 处优雅结束。"""
     settings = get_server_settings()
     db = get_db_settings()
@@ -39,6 +39,7 @@ async def consumer_loop(app: FastAPI) -> None:  # noqa: ARG001 —— 对齐 dis
         settings.push_lease_s,
         settings.push_max_attempts,
     )
+    health = getattr(app.state, "loop_health", {}).get("consumer")  # readyz 心跳档案（P0-06）
     fails = 0
     while True:
         try:
@@ -52,8 +53,12 @@ async def consumer_loop(app: FastAPI) -> None:  # noqa: ARG001 —— 对齐 dis
             if sent or failed:
                 logger.info("outbox drained: sent=%d failed=%d", sent, failed)
             fails = 0
-        except Exception:  # noqa: BLE001 —— anyio 取消是 BaseException，不会被吞
+            if health is not None:
+                health.ok()
+        except Exception as exc:  # noqa: BLE001 —— anyio 取消是 BaseException，不会被吞
             fails += 1
+            if health is not None:
+                health.fail(f"{type(exc).__name__}: {exc}")
             delay = min(30.0, interval * 2 ** min(fails - 1, 5))
             logger.exception("consumer tick failed (x%d); backoff %.1fs", fails, delay)
             await anyio.sleep(delay)

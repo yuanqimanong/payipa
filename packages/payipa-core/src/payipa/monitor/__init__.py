@@ -6,7 +6,7 @@
 - **系统总览**：节点/队列/请求成败/整体质量一屏 → SystemOverview。
 
 数据质量来自 requests 的 count_ok/fail/blank（agent ExecSummary 回填，见 crawl/run.handle_result）；
-无样本（NULL/0）时质量记 None、成功率记 1.0（诚实：没有负面信号）。接口在 apps/server，页在 06（SSE 实时）。
+无样本（NULL/0）时质量与成功率均记 None（诚实：没证据就不装健康）。接口在 apps/server，页在 06（SSE 实时）。
 """
 
 from __future__ import annotations
@@ -29,9 +29,9 @@ from payipa.db.pyp import Agent, Batch, Request, Source, Task
 _SUCCESS = int(RequestState.SUCCESS)
 
 
-def _rate(ok: int, total: int) -> float:
-    """成功率：无样本记 1.0（无负面信号），否则 ok/total 保留 4 位。"""
-    return 1.0 if total <= 0 else round(ok / total, 4)
+def _rate(ok: int, total: int) -> float | None:
+    """成功率：无样本记 None（没证据不装健康），否则 ok/total 保留 4 位。"""
+    return None if total <= 0 else round(ok / total, 4)
 
 
 def _quality(ok: int, fail: int, blank: int) -> QualityMetric | None:

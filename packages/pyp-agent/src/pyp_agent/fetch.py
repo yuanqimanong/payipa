@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 
 import niquests
@@ -18,6 +19,19 @@ from payipa_contracts import EngineHint
 
 # Playwright 默认加载完成信号（DOM 就绪即可，避免长尾资源拖慢）。
 _BROWSER_WAIT_UNTIL = "domcontentloaded"
+
+# 响应体上限：默认 10MB，环境变量 PYP_AGENT_MAX_BODY_MB 或 fetch(max_bytes=) 可调（防超大页 OOM）。
+_DEFAULT_MAX_BODY_BYTES = 10 * 1024 * 1024
+_HTTP_CHUNK = 64 * 1024
+
+
+def max_body_bytes() -> int:
+    """响应体上限（字节）。PYP_AGENT_MAX_BODY_MB 可调；缺失/非法/非正值回落默认 10MB。"""
+    try:
+        mb = int(os.environ.get("PYP_AGENT_MAX_BODY_MB", ""))
+    except ValueError:
+        return _DEFAULT_MAX_BODY_BYTES
+    return mb * 1024 * 1024 if mb > 0 else _DEFAULT_MAX_BODY_BYTES
 
 
 @dataclass(slots=True)
@@ -41,6 +55,10 @@ class FetchNetworkError(FetchFailure):
     """DNS、连接、TLS 或连接重置等无有效 HTTP 响应的故障。"""
 
 
+class FetchTooLarge(FetchFailure):
+    """响应体超出上限：超限即停读断开，绝不整页拉进内存。"""
+
+
 def browser_available() -> bool:
     """agent 是否具备浏览器自动化能力（装了 playwright extra）。用于注册时上报 automation 能力。"""
     try:
@@ -50,24 +68,36 @@ def browser_available() -> bool:
     return True
 
 
-async def _fetch_http(url: str, timeout: float, headers: dict[str, str] | None) -> FetchResult:
+async def _fetch_http(url: str, timeout: float, headers: dict[str, str] | None, max_bytes: int) -> FetchResult:
     try:
         async with niquests.AsyncSession() as session:
-            resp = await session.get(url, timeout=timeout, headers=headers or {})
+            resp = await session.get(url, timeout=timeout, headers=headers or {}, stream=True)
+            declared = resp.headers.get("content-length") or ""
+            if declared.isdigit() and int(declared) > max_bytes:  # 头先拒：一个字节都不读
+                await resp.close()
+                raise FetchTooLarge(f"response Content-Length exceeds {max_bytes} bytes cap")
+            chunks: list[bytes] = []
+            total = 0
+            async for chunk in await resp.iter_content(_HTTP_CHUNK):  # 流式累积，防 Content-Length 缺失/说谎
+                total += len(chunk)
+                if total > max_bytes:
+                    await resp.close()  # 超限立即断开，不再继续读
+                    raise FetchTooLarge(f"response body exceeds {max_bytes} bytes cap")
+                chunks.append(chunk)
+            return FetchResult(
+                status=resp.status_code or 0,
+                url=str(resp.url),
+                body=b"".join(chunks),
+                content_type=resp.headers.get("content-type"),
+                headers={str(k).lower(): str(v) for k, v in resp.headers.items()},
+            )
     except niquests.exceptions.Timeout as exc:
         raise FetchTimeout(f"HTTP request timed out after {timeout:g}s") from exc
     except niquests.exceptions.RequestException as exc:
         raise FetchNetworkError(f"HTTP transport failed ({type(exc).__name__})") from exc
-    return FetchResult(
-        status=resp.status_code or 0,
-        url=str(resp.url),
-        body=resp.content or b"",
-        content_type=resp.headers.get("content-type"),
-        headers={str(k).lower(): str(v) for k, v in resp.headers.items()},
-    )
 
 
-async def _fetch_browser(url: str, timeout: float, headers: dict[str, str] | None) -> FetchResult:
+async def _fetch_browser(url: str, timeout: float, headers: dict[str, str] | None, max_bytes: int) -> FetchResult:
     """标准 Playwright 渲染取页（惰性导入）。渲染后回传 HTML（content-type 恒 text/html）。"""
     import playwright.async_api as playwright_api  # 惰性导入：仅 browser 任务才需运行时
 
@@ -95,10 +125,13 @@ async def _fetch_browser(url: str, timeout: float, headers: dict[str, str] | Non
         raise FetchTimeout(f"browser navigation timed out after {timeout:g}s") from exc
     except PlaywrightError as exc:
         raise FetchNetworkError(f"browser transport failed ({type(exc).__name__})") from exc
+    body = html.encode("utf-8")
+    if len(body) > max_bytes:  # Playwright 只能整页取回，渲染后立刻校验，超限不再向下游传播
+        raise FetchTooLarge(f"rendered page exceeds {max_bytes} bytes cap")
     return FetchResult(
         status=status,
         url=final_url,
-        body=html.encode("utf-8"),
+        body=body,
         content_type="text/html; charset=utf-8",
         headers={str(k).lower(): str(v) for k, v in response_headers.items()},
     )
@@ -110,15 +143,20 @@ async def fetch(
     engine_hint: EngineHint = EngineHint.HTTP,
     timeout: float = 30.0,
     headers: dict[str, str] | None = None,
+    max_bytes: int | None = None,
 ) -> FetchResult:
-    """按 engine_hint 取页。browser 需 agent 具备自动化能力（未装 playwright → 明确报错，由分组派发规避）。"""
+    """按 engine_hint 取页。browser 需 agent 具备自动化能力（未装 playwright → 明确报错，由分组派发规避）。
+
+    max_bytes：响应体上限（None → 取 PYP_AGENT_MAX_BODY_MB / 默认 10MB）；超限抛 FetchTooLarge。
+    """
+    cap = max_bytes if max_bytes is not None else max_body_bytes()
     if engine_hint is EngineHint.HTTP:
-        return await _fetch_http(url, timeout, headers)
+        return await _fetch_http(url, timeout, headers, cap)
     if engine_hint is EngineHint.BROWSER:
         if not browser_available():
             raise NotImplementedError(
                 "browser 引擎需 playwright 运行时（uv sync 装 pyp-agent[browser] + playwright install chromium）；"
                 "本 agent 无自动化能力——主控应按能力分组只派 http 任务给它"
             )
-        return await _fetch_browser(url, timeout, headers)
+        return await _fetch_browser(url, timeout, headers, cap)
     raise NotImplementedError(f"未知采集引擎 {engine_hint}")

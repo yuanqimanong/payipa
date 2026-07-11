@@ -23,6 +23,9 @@ class TaskSpec(BaseModel):
     channel: Channel = active("通道 test/prod（test 产出隔离、不入正式库）", default=Channel.PROD)
     priority: Priority = active("优先级（高插队）", default=Priority.MID)
     timeout_s: int = active("单任务硬超时（秒）", default=1800, gt=0)
+    attempt: int = active(
+        "执行代次（fencing token：来自请求行 attempt；agent 须在 ack/结果/状态帧回显）", default=0, ge=0, since="M7"
+    )
     params: dict[str, Any] = active("运行参数（能力参数化：页数/范围等）", default_factory=dict)
     engine_hint: EngineHint = active("采集引擎提示；当前使用 http，browser 为可选能力", default=EngineHint.HTTP)
     archive_raw: bool = active("成功响应是否归档 raw；拒绝/挑战响应始终不归档", default=False, since="M6")

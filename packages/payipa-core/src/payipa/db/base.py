@@ -46,6 +46,19 @@ class TimestampMixin:
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 
+class MutableTimestampMixin(TimestampMixin):
+    """可变配置表带 updated_at（DB-014）：UI/审计可区分创建与最近修改。
+
+    注意 onupdate 只在 ORM/Core UPDATE 生效，**ON CONFLICT DO UPDATE 不触发**——
+    upsert 的 set_ 必须显式带 ``updated_at=func.now()``（参照 crawl/ingest.py 的既有写法）。
+    追加式表（audit_log/task_events）与高频状态机（requests/batches/push_outbox）不挂此 mixin。
+    """
+
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+
 class OwnedMixin:
     """业务/资源表带 owner_id（应用层 owner 过滤）+ 预留 tenant_id（RLS 暂不启用）。"""
 

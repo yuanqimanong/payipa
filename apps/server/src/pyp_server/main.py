@@ -6,14 +6,18 @@ M0 空壳：健康检查 + 契约 stub API + agent WS 握手 + OpenAPI（/openap
 
 from __future__ import annotations
 
+import logging
+import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 import anyio
+import anyio.abc
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from payipa.db.engine import get_engine
 
 from pyp_server.consumer import consumer_loop
 from pyp_server.hub import AgentHub
@@ -35,28 +39,82 @@ from pyp_server.routers import (
     views,
     ws,
 )
+from pyp_server.runtime import LoopHealth, try_lock, unlock
 from pyp_server.scheduler import dispatch_loop
 from pyp_server.settings import get_server_settings
 
 _HERE = Path(__file__).parent
+logger = logging.getLogger("pyp_server.main")
+
+
+async def _guarded_loops(app: FastAPI, tg: anyio.abc.TaskGroup) -> None:
+    """先拿单实例锁（P0-09）再启动后台环：同库第二个进程/worker 拒绝启动后台环。
+
+    PG 未起：退避重试（保持「无 DB 也能启动」，readyz 期间报后台环未就绪）；
+    锁被他人持有：短暂等待（容忍滚动重启交接）后抛错拒绝启动本进程。
+    """
+    settings = get_server_settings()
+    engine = get_engine("pyp")
+    held_since: float | None = None
+    delay = 1.0
+    while True:
+        conn = None
+        try:
+            conn = await engine.connect()
+            if await try_lock(conn):
+                app.state.lock_conn = conn  # 持有到进程退出；连接关闭即自动释放
+                break
+            await conn.aclose()
+            if held_since is None:
+                held_since = time.monotonic()
+            elif time.monotonic() - held_since > 15:
+                raise RuntimeError(
+                    "另一进程已持有 payipa 单实例锁——v1 只支持单主控实例、单 uvicorn worker（workers=1）"
+                )
+        except RuntimeError:
+            raise
+        except Exception:  # noqa: BLE001 —— PG 未起/抖动：退避重试
+            if conn is not None:
+                await conn.aclose()
+            logger.warning("acquire singleton lock failed (DB down?); retry in %.0fs", delay, exc_info=True)
+        await anyio.sleep(delay)
+        delay = min(delay * 2, 30.0)
+    if settings.dispatch_enabled:
+        tg.start_soon(dispatch_loop, app)
+    if settings.push_enabled:
+        tg.start_soon(consumer_loop, app)
 
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     """服务生命周期：在 anyio 结构化并发下拉起后台派发环 + 推送 Consumer，关停时整树取消。"""
     settings = get_server_settings()
+    app.state.loop_health = {}  # readyz 据此判断后台环心跳（P0-06）
+    app.state.lock_conn = None
     if not (settings.dispatch_enabled or settings.push_enabled):
         yield  # 测试/特殊部署：不启后台环
         return
+    if settings.dispatch_enabled:
+        app.state.loop_health["dispatch"] = LoopHealth("dispatch", settings.dispatch_interval_s)
+    if settings.push_enabled:
+        app.state.loop_health["consumer"] = LoopHealth("consumer", settings.push_interval_s)
     async with anyio.create_task_group() as tg:
-        if settings.dispatch_enabled:
-            tg.start_soon(dispatch_loop, app)
-        if settings.push_enabled:
-            tg.start_soon(consumer_loop, app)
+        if settings.single_worker_guard:
+            tg.start_soon(_guarded_loops, app, tg)
+        else:
+            if settings.dispatch_enabled:
+                tg.start_soon(dispatch_loop, app)
+            if settings.push_enabled:
+                tg.start_soon(consumer_loop, app)
         try:
             yield
         finally:
             tg.cancel_scope.cancel()
+            if app.state.lock_conn is not None:
+                try:
+                    await unlock(app.state.lock_conn)  # close 只还池不断会话，须显式释放锁
+                finally:
+                    await app.state.lock_conn.aclose()
 
 
 def create_app() -> FastAPI:

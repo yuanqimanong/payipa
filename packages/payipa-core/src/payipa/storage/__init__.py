@@ -1,6 +1,6 @@
-"""storage —— 存储抽象：S3Backend(M5) / LocalBackend(M1 兜底，via jbutils.s3 直传随 M5)。
+"""storage —— 存储抽象：LocalBackend（当前唯一后端）；S3 未实现，配置即报错（配置诚实）。
 
-M0 占位已由本包替代。M1：LocalBackend + zstd raw 存档 + 工件登记（永久 object_key 入 artifacts 表）。
+M1：LocalBackend + zstd raw 存档 + 工件登记（永久 object_key 入 artifacts 表）。
 """
 
 from __future__ import annotations
@@ -33,9 +33,13 @@ __all__ = [
 
 
 def build_storage(settings: Settings | None = None) -> StorageBackend:
-    """按配置构建存储后端。M1：本地兜底；配置 S3 后走 S3Backend（M5）。"""
+    """按配置构建存储后端。当前仅 local；配了未实现的后端立即报错，绝不静默回退。"""
     settings = settings or get_settings()
-    # M5：if settings.s3_endpoint: return S3Backend(...)
+    if settings.s3_endpoint or settings.s3_access_key or settings.s3_secret_key or settings.s3_bucket:
+        raise RuntimeError(
+            "S3 后端尚未实现：检测到 S3_* 配置，但当前只有 local 后端，拒绝静默回退本地磁盘——"
+            "请移除 S3_ENDPOINT/S3_ACCESS_KEY/S3_SECRET_KEY/S3_BUCKET 配置，或等 S3 支持落地后再启用"
+        )
     return LocalBackend(settings.data_root, min_free_bytes=settings.min_free_mb * 1024 * 1024)
 
 
