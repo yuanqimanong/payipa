@@ -47,6 +47,15 @@ jobs:
           docker build -f deploy/Dockerfile.server -t payipa-server:ci .
           docker build -f packages/pyp-agent/Dockerfile -t payipa-agent:ci .
           docker build -f packages/pyp-agent/Dockerfile.browser -t payipa-agent-browser:ci .
+      - name: Clean Compose install smoke
+        # 用发布编排真实启动 db -> migrate -> server；防止文档和静态 config 校验绿、实际容器起不来的回归。
+        run: |
+          uv run pypctl doctor
+          uv run pypctl up --build
+          uv run pypctl smoke
+      - name: Clean Compose teardown
+        if: always()
+        run: docker compose -f deploy/compose.yml --env-file deploy/.env.compose down -v --remove-orphans
       - name: Create three databases
         run: |
           for db in pyp_sys data_center business; do

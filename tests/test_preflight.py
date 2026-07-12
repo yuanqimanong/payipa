@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 from payipa.db.settings import Settings as DbSettings
+from pydantic import ValidationError
 from pyp_server.preflight import run_preflight
 from pyp_server.settings import ServerSettings
 
@@ -23,6 +24,11 @@ def _db(**kw) -> DbSettings:
 def test_dev_mode_never_raises() -> None:
     # dev 默认（RBAC 关 + dev 密钥）只告警不抛
     run_preflight(ServerSettings(environment="dev", rbac_enabled=False), _db())
+
+
+def test_environment_only_allows_dev_or_production() -> None:
+    with pytest.raises(ValidationError, match="dev|production"):
+        ServerSettings(environment="prod")
 
 
 def test_production_all_good_passes() -> None:
@@ -47,6 +53,10 @@ def test_production_requires_rbac() -> None:
 def test_production_requires_trusted_hosts() -> None:
     with pytest.raises(RuntimeError, match="ALLOWED_HOSTS"):
         run_preflight(_server(allowed_hosts="*"), _db())
+    with pytest.raises(RuntimeError, match="ALLOWED_HOSTS"):
+        run_preflight(_server(allowed_hosts="pyp.example.test,*"), _db())
+    with pytest.raises(RuntimeError, match="ALLOWED_HOSTS"):
+        run_preflight(_server(allowed_hosts="*.example.test"), _db())
 
 
 def test_production_rejects_default_bootstrap_token() -> None:

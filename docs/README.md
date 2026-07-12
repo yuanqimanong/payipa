@@ -2,7 +2,7 @@
 
 > 本目录是 payipa / 爬亿爬 的**设计与实现方案**（原「新方案」讨论定案记录，现随代码归入 `payipa/docs/`）。
 > **开工蓝图 = [软件需求与详细设计说明书.md](软件需求与详细设计说明书.md)（SDD）**，综合全部定案；冲突以 SDD + [决策记录.md](决策记录.md) 为准。
-> 落地约定/命令见 [../CLAUDE.md](../CLAUDE.md)；本地试用见 [../QUICKSTART.md](../QUICKSTART.md)；
+> 落地约定/命令见 [../CLAUDE.md](../CLAUDE.md)；容器化安装、生产配置与上线验收见 [Docker Compose 安装与验收](install/docker-compose.md)；本地试用见 [../QUICKSTART.md](../QUICKSTART.md)；
 > **干净机器从零用 PyCharm 调试全链路见 [从零开始调试测试.md](从零开始调试测试.md)（手把手）**。
 
 ## 实现进度（2026-07-11）

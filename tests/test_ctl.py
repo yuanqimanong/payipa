@@ -1,6 +1,6 @@
 """pypctl 纯单元测试（P0-03；无 Docker/网络/PG）。
 
-覆盖：init 生成的 env 各密钥互不相同且非 dev 默认值、二次 init 拒绝覆盖；
+覆盖：init 的本地/生产配置、配置前置诊断、隐藏 Agent 入网码输入；
 status/smoke 对 monkeypatch 的 probe 探测函数正确汇总（就绪/未就绪/revision 不一致）。
 """
 
@@ -24,7 +24,14 @@ def _parse_env(text: str) -> dict[str, str]:
     return dict(line.split("=", 1) for line in text.splitlines() if line and not line.startswith("#"))
 
 
+def _make_repo(tmp_path) -> None:
+    deploy = tmp_path / "deploy"
+    deploy.mkdir()
+    (deploy / "compose.yml").write_text("services: {}\n", encoding="utf-8")
+
+
 def test_init_secrets_unique_and_non_default(tmp_path, monkeypatch) -> None:
+    _make_repo(tmp_path)
     monkeypatch.chdir(tmp_path)
     assert ctl.main(["init"]) == 0
     env = _parse_env((tmp_path / "deploy" / ".env.compose").read_text(encoding="utf-8"))
@@ -36,15 +43,61 @@ def test_init_secrets_unique_and_non_default(tmp_path, monkeypatch) -> None:
     assert len(env["PYP_SERVER_SESSION_SECRET"].encode()) >= 32  # preflight 的 HS256 下限
     assert env["PG_HOST"] == "db"  # compose 内网服务名，不指宿主
     assert env["DATA_ROOT"] == "/data"
-    assert env["PYP_SERVER_ENVIRONMENT"] == "dev"  # 冒烟走 dev；生产必改（模板已注明）
+    assert env["PYP_DEPLOY_BIND_ADDRESS"] == "127.0.0.1"
+    assert env["PYP_SERVER_ENVIRONMENT"] == "dev"
+    assert env["PYP_SERVER_ALLOWED_HOSTS"] == ctl.LOCAL_ALLOWED_HOSTS
+    assert env["PYP_SERVER_RBAC_ENABLED"] == "false"
 
 
 def test_init_refuses_overwrite(tmp_path, monkeypatch) -> None:
+    _make_repo(tmp_path)
     monkeypatch.chdir(tmp_path)
     assert ctl.main(["init"]) == 0
     before = (tmp_path / "deploy" / ".env.compose").read_text(encoding="utf-8")
     assert ctl.main(["init"]) == 1  # 二次 init 拒绝覆盖
     assert (tmp_path / "deploy" / ".env.compose").read_text(encoding="utf-8") == before
+
+
+def test_init_production_creates_strict_baseline(tmp_path, monkeypatch) -> None:
+    _make_repo(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    assert ctl.main(["init", "--production-host", "PYP.Example.COM"]) == 0
+    env = _parse_env((tmp_path / "deploy" / ".env.compose").read_text(encoding="utf-8"))
+    assert env["PYP_SERVER_ENVIRONMENT"] == "production"
+    assert env["PYP_SERVER_RBAC_ENABLED"] == "true"
+    assert env["PYP_SERVER_ALLOWED_HOSTS"] == f"{ctl.LOCAL_ALLOWED_HOSTS},pyp.example.com"
+    assert ctl._deployment_config_problems(env) == []
+
+
+def test_init_refuses_outside_repository(tmp_path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    assert ctl.main(["init"]) == 1
+    assert not (tmp_path / "deploy").exists()
+
+
+def test_deployment_config_rejects_production_rbac_and_duplicate_databases() -> None:
+    env = _parse_env(ctl.gen_env("pyp.example.com"))
+    env["PYP_SERVER_RBAC_ENABLED"] = "false"
+    env["PG_DB_BUSINESS"] = env["PG_DB_DATA_CENTER"]
+    env["PYP_SERVER_ALLOWED_HOSTS"] = "*.example.com"
+    problems = ctl._deployment_config_problems(env)
+    assert any("RBAC" in problem for problem in problems)
+    assert any("互不相同" in problem for problem in problems)
+    assert any("ALLOWED_HOSTS" in problem for problem in problems)
+
+
+def test_agent_prompts_for_token_without_exposing_it(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(ctl.getpass, "getpass", lambda _prompt: "one-time-token")
+
+    def fake_start_agent(token: str, build: bool = False) -> int:
+        captured["token"] = token
+        captured["build"] = build
+        return 0
+
+    monkeypatch.setattr(ctl, "start_agent", fake_start_agent)
+    assert ctl.main(["agent", "--build"]) == 0
+    assert captured == {"token": "one-time-token", "build": True}
 
 
 def _fake_probe(responses: dict[str, tuple[int, dict]]):

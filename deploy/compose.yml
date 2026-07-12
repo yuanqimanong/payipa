@@ -1,9 +1,8 @@
 # payipa 主控一键编排（P0-02）：db → migrate（one-shot 迁移）→ server（readyz 健康门）→ 可选 agent。
-# 先 `uv run pypctl init` 生成 deploy/.env.compose（或抄 .env.compose.example 填真值），再在 payipa/ 下：
-#   docker compose -f deploy/compose.yml --env-file deploy/.env.compose up -d
-#   docker compose -f deploy/compose.yml --env-file deploy/.env.compose --profile agents up -d   # 带采集节点
-#   docker compose -f deploy/compose.yml --env-file deploy/.env.compose down    # 停（加 -v 连数据卷清掉重来）
-# 亦可全部经 pypctl 完成（init/doctor/up/status/smoke/down，见 docs/install/docker-compose.md）。
+# 推荐从 payipa 仓库根执行 `uv run pypctl init` → `doctor` → `up --build`；
+# 生产配置可直接用 `uv run pypctl init --production-host pyp.example.com` 生成。
+# 亦可直接调用 docker compose（需显式 --env-file deploy/.env.compose）。
+# 默认只把主控绑定到 127.0.0.1:8100；生产由同机 TLS 反向代理转发。
 # 约定：db 不映射宿主端口（服务间内网互联即可，避免与本机已有 PostgreSQL 的 5432 冲突）；
 #      server 映射宿主 8100 → 容器 8000（8000 常被本机 dev 主控占用）。
 name: payipa
@@ -15,6 +14,8 @@ services:
       POSTGRES_USER: ${PG_USER:-postgres}
       POSTGRES_PASSWORD: ${PG_PASSWORD:?先 uv run pypctl init 生成 deploy/.env.compose 并以 --env-file 传入}
       POSTGRES_DB: ${PG_DB_PYP:-pyp_sys} # 平台库；另外两库由 initdb 脚本补建
+      PG_DB_DATA_CENTER: ${PG_DB_DATA_CENTER:-data_center}
+      PG_DB_BUSINESS: ${PG_DB_BUSINESS:-business}
     volumes:
       - pgdata:/var/lib/postgresql # postgres 18 起数据卷挂载点为 /var/lib/postgresql（非 …/data）
       - ./initdb:/docker-entrypoint-initdb.d:ro # 首次初始化补建 data_center / business 两库
@@ -45,7 +46,7 @@ services:
       dockerfile: deploy/Dockerfile.server
     env_file: .env.compose
     ports:
-      - "8100:8000"
+      - "${PYP_DEPLOY_BIND_ADDRESS:-127.0.0.1}:8100:8000"
     volumes:
       - pyp_data:/data # 本地对象存储根（镜像内 DATA_ROOT=/data）
     depends_on:
@@ -67,7 +68,7 @@ services:
       start_period: 10s
     restart: unless-stopped
 
-  # 可选单采集节点：先启动主控、创建管理员，再从节点页签发一次性入网码并执行 `pypctl agent --token ...`。
+  # 可选单采集节点：先启动主控、创建管理员，再从节点页签发一次性入网码并执行 `pypctl agent --build`。
   agent:
     profiles: ["agents"]
     image: payipa-agent:local

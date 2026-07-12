@@ -47,7 +47,8 @@ def _production_problems(s: ServerSettings, db: DbSettings) -> list[str]:
         problems.append("PYP_SERVER_BOOTSTRAP_TOKEN 仍为 dev 默认值，首个管理员可被抢注")
     if len(s.bootstrap_token.encode()) < 24:
         problems.append("PYP_SERVER_BOOTSTRAP_TOKEN 少于 24 字节")
-    if not s.allowed_hosts.strip() or s.allowed_hosts.strip() == "*":
+    allowed_hosts = [host.strip() for host in s.allowed_hosts.split(",") if host.strip()]
+    if not allowed_hosts or any("*" in host for host in allowed_hosts):
         problems.append("PYP_SERVER_ALLOWED_HOSTS 必须填写生产域名或 IP，不能使用 *")
     if db.upload_secret == _DEV_UPLOAD_SECRET:
         problems.append("UPLOAD_SECRET 仍为 dev 默认值，内部上传/作业令牌可被伪造")

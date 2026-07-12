@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from functools import lru_cache
+from typing import Literal
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -26,7 +27,7 @@ class ServerSettings(BaseSettings):
     debug: bool = False
     # 运行环境：dev（默认，宽松：API 免登录、允许 dev 默认密钥）/ production（严：强制真密钥 + RBAC）。
     # 生产部署置 PYP_SERVER_ENVIRONMENT=production，启动前置校验（preflight.py）会拒绝不安全配置。
-    environment: str = "dev"
+    environment: Literal["dev", "production"] = "dev"
     session_secret: str = DEV_SESSION_SECRET  # 生产走 env 注入（≥32B）；production 模式拒绝默认值
     # 空库创建首个管理员时必须提交；pypctl init 生成随机值，避免公开 /setup 被抢注。
     bootstrap_token: str = DEV_BOOTSTRAP_TOKEN

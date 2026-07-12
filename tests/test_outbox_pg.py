@@ -29,7 +29,10 @@ async def _force_state(pyp, oid: int, state: str, claim_token: str | None = None
         )
 
 
-def test_outbox_state_machine(require_pg: None) -> None:
+def test_outbox_state_machine(require_pg: None, monkeypatch) -> None:
+    # 生产退避带 jitter；状态机断言只关心「下一轮尚未到期」，固定它避免慢 CI 偶发跨过随机短窗口。
+    monkeypatch.setattr(outbox, "backoff_delay", lambda *_args, **_kwargs: 2.0)
+
     async def main() -> None:
         pyp = create_async_engine(get_settings().async_url("pyp"))
         try:

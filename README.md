@@ -19,21 +19,17 @@ tests/                 跨包集成/冒烟测试
 ## 快速开始
 
 ```bash
-# 1) 安装锁定依赖并生成部署配置
-uv sync --all-packages --locked
+# 在 payipa 仓库根执行：安装锁定依赖并生成本地试用配置
+uv sync --package pyp-server --locked
 uv run pypctl init
 
-# 2) 构建并启动三库与主控
-docker compose -f deploy/compose.yml --env-file deploy/.env.compose up -d --build db server
+# 启动前检查，再构建并启动三库、迁移和主控
+uv run pypctl doctor
+uv run pypctl up --build
 uv run pypctl smoke
-
-# 3) 本地质量闸
-uv run ruff check && uv run ruff format --check
-uv run lint-imports          # 模块边界
-uv run pytest
 ```
 
-完整安装顺序、首个管理员和 Agent 接入见 [QUICKSTART.md](QUICKSTART.md)。健康端点为 `/livez`、`/readyz` 和 `/version`。
+随后打开 `http://127.0.0.1:8100/setup`，使用 `deploy/.env.compose` 中的安装码创建首个管理员。生产环境请改用 `uv run pypctl init --production-host pyp.example.com`，完整安装顺序、TLS、首个管理员、Agent 接入与验收见 [Docker Compose 安装与验收](docs/install/docker-compose.md)。健康端点为 `/livez`、`/readyz` 和 `/version`。
 
 当前 `0.1.x` 支持 Linux 单主控、单 worker、PostgreSQL 三库和本地持久卷。S3、Redis 和多主控尚未接线，配置后会在启动阶段明确拒绝。许可证见 [LICENSE](LICENSE)，漏洞请按 [SECURITY.md](SECURITY.md) 私密报告。
 

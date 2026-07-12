@@ -7,11 +7,15 @@
 主控 + PostgreSQL 三库 + 迁移 + 可选 agent 已有完整 Compose 编排与 `pypctl` 运维 CLI（P0-02/03）：
 
 ```bash
-uv run pypctl init && uv run pypctl up --build && uv run pypctl smoke
+uv sync --package pyp-server --locked
+uv run pypctl init
+uv run pypctl doctor
+uv run pypctl up --build
+uv run pypctl smoke
 # 然后打开 http://127.0.0.1:8100/setup，用 deploy/.env.compose 中的安装码创建首个管理员
 ```
 
-详见 **[docs/install/docker-compose.md](docs/install/docker-compose.md)**（端口/卷/生产必改项）。
+这条路径只验证主控与迁移；接入 Agent 后再按安装文档的“首次验收”完成真实采集验证。生产部署请不要先执行默认 `init`，而是按 **[docs/install/docker-compose.md](docs/install/docker-compose.md)** 使用 `pypctl init --production-host` 并配置 TLS。
 以下章节是**本地开发路径**（宿主机 PG + uvicorn，便于断点调试）。
 
 ## 前置
@@ -53,18 +57,18 @@ uv run uvicorn pyp_server.main:app --host 0.0.0.0 --port 8000
 
 # 1) 登录主控，在「节点管理 → 添加节点」生成一次性入网码
 
-# 2) 启动一个 Agent，并把身份持久化到独立目录
+# 2) 启动一个 Agent；Compose project 的 named volume 会持久化节点身份
 PYP_SERVER=http://host.docker.internal:8000 PYP_TOKEN='<一次性入网码>' \
-PYP_AGENT_STATE_DIR=./var/agent-1 docker compose -f deploy/docker-compose.agents.yml up --build -d
+docker compose -p pyp-agent-local -f deploy/docker-compose.agents.yml up --build -d
 
 # 3) 看在线节点
 curl -s http://127.0.0.1:8000/api/agents
 
 # 停：
-docker compose -f deploy/docker-compose.agents.yml down
+docker compose -p pyp-agent-local -f deploy/docker-compose.agents.yml down
 ```
 
-不要用 `--scale` 共享同一个身份目录。多个 Agent 应逐个签发入网码，并使用不同主机或不同 Compose project/状态目录。需要浏览器能力时设置 `PYP_AGENT_DOCKERFILE=packages/pyp-agent/Dockerfile.browser`。
+不要用 `--scale` 共享同一个身份。多个 Agent 应逐个签发入网码，并使用不同主机或不同 Compose project。需要浏览器能力时设置 `PYP_AGENT_DOCKERFILE=packages/pyp-agent/Dockerfile.browser`。
 
 派发由**后台派发环**负责：请求先以 QUEUED 落库，主控每秒把排队请求铺到各在线容器的空闲槽（跨容器公平铺满）。
 所以**请求数超过总槽数也不会丢**——多的排队、随空闲槽腾出陆续下发；某容器中途挂掉，它的在途请求自动回队重排到存活容器（`/api/agents` 的 `slot_used`/`inflight` 会随之变化）。抓完数据进 `/data/{短码}`。
@@ -81,7 +85,7 @@ curl "http://127.0.0.1:8000/api/monitor/batches/<batch_id>"
 > 返回里 `dispatched` 恒为 0：派发不在建批次时同步发生，改由后台环负责（见上）。
 > API 运行只接受已经留存访问依据且未暂停的数据源；首次创建请使用 `/sources/new`，或由管理员先完成访问复核。
 > 页面（`/data`、`/sources`）需登录；JSON API 的 RBAC 权限闸门默认关（`PYP_SERVER_RBAC_ENABLED=false`，保持开放便于本地起步）。
-> 生产启用：`uv run pyp-admin seed-rbac` 播种权限目录+四角色 → `uv run pyp-admin grant-role <用户> <角色>` → `.env` 置 `PYP_SERVER_RBAC_ENABLED=true`。
+> 生产启用：首次 `/setup` 会自动播种默认角色并赋首个管理员；其他用户可用 `uv run pyp-admin grant-role <用户> <角色>` 授权。Compose 部署在 `deploy/.env.compose` 置 `PYP_SERVER_RBAC_ENABLED=true`；本地开发路径则使用 `.env`。
 
 ## 还不能测（后续里程碑）
 
