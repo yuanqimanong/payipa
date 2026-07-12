@@ -27,6 +27,37 @@ class ParseResult:
     links: list[str] = field(default_factory=list)  # type=link/store+link 产出的新链接（M2 follow）
 
 
+def fail_when_reason(rule: RulePack, status: int, body: bytes) -> str | None:
+    """Evaluate the source-specific soft-failure policy after transport acceptance."""
+    policy = rule.fail_when
+    if policy is None:
+        return None
+    if status in policy.status_in:
+        return f"response status {status} matched fail_when"
+    text = body.decode("utf-8", errors="replace")
+    for marker in policy.body_contains:
+        if marker in text:
+            return "response body matched fail_when marker"
+    for pattern in policy.body_regex:
+        if re.search(pattern, text):
+            return "response body matched fail_when regex"
+    return None
+
+
+def layout_mismatch_reason(rule: RulePack, body: bytes, url: str) -> str | None:
+    """Return a stable reason when the fetched page does not match its declared layout."""
+    layout = rule.layout_match
+    if layout is None:
+        return None
+    if re.search(layout.url_regex, url) is None:
+        return "final URL did not match layout_match.url_regex"
+    if layout.body_regex is not None:
+        text = body.decode("utf-8", errors="replace")
+        if re.search(layout.body_regex, text) is None:
+            return "response body did not match layout_match.body_regex"
+    return None
+
+
 def _looks_json(body: bytes) -> bool:
     head = body.lstrip()[:1]
     return head in (b"{", b"[")

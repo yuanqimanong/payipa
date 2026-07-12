@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import asyncio
 
+import pytest
 from payipa.crawl import run
 from payipa.db.pyp import Agent
 from payipa.db.settings import get_settings
-from payipa.security.tokens import new_node_token
+from payipa.security.tokens import hash_token, new_node_token
 from sqlalchemy import select, text, update
 from sqlalchemy.ext.asyncio import create_async_engine
 
@@ -36,14 +37,20 @@ def test_register_agent_lifecycle(require_pg: None) -> None:
                 ).first()
             assert row.status == "online" and row.slot_n == 4 and row.node_token_hash == h1 and row.last_heartbeat
 
-            # 管理员预置 weight/group 后重连（upsert）：应回灌新值，且不新增行
+            # 管理员预置 weight/group 后，任何新注册都不得覆盖已有长期凭证。
             async with pyp.begin() as conn:
                 await conn.execute(
                     update(Agent.__table__).where(Agent.agent_id == _AID).values(weight=7, group_name="automation")
                 )
             t2, h2 = new_node_token()
+            with pytest.raises(PermissionError):
+                await run.register_agent(
+                    pyp, _AID, hostname="hostA2", slot_n=8, capabilities={"automation": True}, node_token_hash=h2
+                )
+
+            # 凭证重连（node_token_hash=None）：回灌权重/分组、刷新能力，但保留原凭证 hash。
             weight2, group2 = await run.register_agent(
-                pyp, _AID, hostname="hostA2", slot_n=8, capabilities={"automation": True}, node_token_hash=h2
+                pyp, _AID, hostname="hostA3", slot_n=8, capabilities={"automation": True}
             )
             assert weight2 == 7 and group2 == "automation"
             async with pyp.begin() as conn:
@@ -57,19 +64,51 @@ def test_register_agent_lifecycle(require_pg: None) -> None:
                         select(Agent.slot_n, Agent.hostname, Agent.node_token_hash).where(Agent.agent_id == _AID)
                     )
                 ).first()
-            assert cnt == 1 and row.slot_n == 8 and row.hostname == "hostA2" and row.node_token_hash == h2
-
-            # 凭证重连（node_token_hash=None）：既有凭证 hash 必须保留，不得被清掉（P0-07）
-            await run.register_agent(pyp, _AID, hostname="hostA3", slot_n=8, capabilities={})
-            async with pyp.begin() as conn:
-                row = (
-                    await conn.execute(select(Agent.hostname, Agent.node_token_hash).where(Agent.agent_id == _AID))
-                ).first()
-            assert row.hostname == "hostA3" and row.node_token_hash == h2
+            assert cnt == 1 and row.slot_n == 8 and row.hostname == "hostA3" and row.node_token_hash == h1
 
             # 凭证认证：hash 命中回 agent_id；不命中回 None
-            assert await run.auth_node(pyp, h2) == _AID
+            assert await run.auth_node(pyp, h1) == _AID
             assert await run.auth_node(pyp, "0" * 64) is None
+
+            # 一次性入网码无法劫持已有 id；显式撤销后可原子消费并重新绑定，且不能复用。
+            enrollment, expires_at = await run.issue_agent_enrollment(pyp, created_by=None, ttl_s=600)
+            assert enrollment.startswith("pyp_enroll_") and expires_at
+            assert (
+                await run.enroll_agent(
+                    pyp,
+                    hash_token(enrollment),
+                    _AID,
+                    hostname="hijack",
+                    slot_n=1,
+                    capabilities={},
+                    node_token_hash=h2,
+                )
+                is None
+            )
+            assert await run.revoke_agent_credential(pyp, _AID) is True
+            assert await run.auth_node(pyp, h1) is None
+            assert await run.enroll_agent(
+                pyp,
+                hash_token(enrollment),
+                _AID,
+                hostname="hostB",
+                slot_n=6,
+                capabilities={"automation": True},
+                node_token_hash=h2,
+            ) == (7, "automation")
+            assert await run.auth_node(pyp, h2) == _AID
+            assert (
+                await run.enroll_agent(
+                    pyp,
+                    hash_token(enrollment),
+                    "other-agent",
+                    hostname="other",
+                    slot_n=1,
+                    capabilities={},
+                    node_token_hash="f" * 64,
+                )
+                is None
+            )
 
             # touch 刷新 last_heartbeat（新值 ≥ 旧值）
             async with pyp.begin() as conn:
@@ -90,6 +129,7 @@ def test_register_agent_lifecycle(require_pg: None) -> None:
             assert row.status == "offline" and row.weight == 7 and row.group_name == "automation"
         finally:
             async with pyp.begin() as conn:
+                await conn.execute(text("DELETE FROM agent_enrollments WHERE agent_id=:a"), {"a": _AID})
                 await conn.execute(text("DELETE FROM agents WHERE agent_id=:a"), {"a": _AID})
             await pyp.dispose()
 

@@ -51,6 +51,15 @@ def test_internal_upload_roundtrip(require_pg: None, tmp_path: Path, monkeypatch
                 content=raw,
             )
             assert bad.status_code == 401
+
+            test_token = issue_upload_token("testsecret", "srcX", 3, ttl_s=60, channel="test")
+            isolated = client.post(
+                "/internal/upload",
+                params={"source_uuid": "srcX", "batch_id": 3, "url": "https://books.example.com/test"},
+                headers={"x-upload-token": test_token},
+                content=raw,
+            )
+            assert isolated.status_code == 401
     finally:
         st.get_settings.cache_clear()
         sto.get_storage.cache_clear()

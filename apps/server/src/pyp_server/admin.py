@@ -1,18 +1,21 @@
 """管理员运维命令（`pyp-admin`）。无自助注册（06 定案）+ RBAC 播种/授权（M5）。
 
 用法：
-  uv run pyp-admin create-user <username> <password> [--superuser]   # 建用户（可直接设超级管理员）
+  uv run pyp-admin create-user <username> [--superuser]              # 密码隐藏输入
   uv run pyp-admin seed-rbac                                          # 播种默认权限目录 + 四角色矩阵
   uv run pyp-admin grant-role <username> <role>                      # 给用户赋角色（如 管理员/技术/运营/运维）
+  uv run pyp-admin schema-status                                     # 查看动态表 provisioning 异常
 """
 
 from __future__ import annotations
 
 import argparse
 import asyncio
+import getpass
+import sys
 
 from payipa.db.engine import get_engine
-from payipa.db.pyp import User
+from payipa.db.pyp import Source, User
 from payipa.security.rbac import DEFAULT_ROLES, assign_role, make_superuser, seed_default_rbac
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -72,20 +75,53 @@ async def _grant_role(username: str, role: str) -> str:
         await engine.dispose()
 
 
+async def _schema_status() -> tuple[int, str]:
+    """Return actionable dynamic-schema issues without exposing them on the public health endpoint."""
+    engine = get_engine("pyp")
+    try:
+        async with engine.connect() as conn:
+            rows = (
+                await conn.execute(
+                    select(
+                        Source.uuid,
+                        Source.name,
+                        Source.provisioning_state,
+                        Source.provisioning_error,
+                    )
+                    .where(Source.provisioning_state != "ready")
+                    .order_by(Source.id)
+                )
+            ).all()
+        if not rows:
+            return 0, "动态表 provisioning 全部 ready"
+        lines = [f"发现 {len(rows)} 个动态表 provisioning 异常："]
+        for code, name, state, error in rows:
+            detail = (error or "等待后台 reconciliation")[:500]
+            lines.append(f"- {code} ({name}): {state} - {detail}")
+        return 2, "\n".join(lines)
+    finally:
+        await engine.dispose()
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="pyp-admin", description="payipa 运维命令")
     sub = parser.add_subparsers(dest="cmd")
     cu = sub.add_parser("create-user", help="创建用户（管理员开通）")
     cu.add_argument("username")
-    cu.add_argument("password")
+    cu.add_argument("--password-stdin", action="store_true", help="从标准输入读取密码（自动化用，不回显）")
     cu.add_argument("--superuser", action="store_true", help="同时播种 RBAC 并赋『管理员』角色")
     sub.add_parser("seed-rbac", help="播种默认权限目录 + 四角色矩阵")
+    sub.add_parser("schema-status", help="查看动态表 provisioning 状态与错误")
     gr = sub.add_parser("grant-role", help="给用户赋角色")
     gr.add_argument("username")
     gr.add_argument("role")
     args = parser.parse_args(argv)
     if args.cmd == "create-user":
-        print(asyncio.run(_create_user(args.username, args.password, superuser=args.superuser)))
+        password = sys.stdin.readline().rstrip("\r\n") if args.password_stdin else getpass.getpass("密码：")
+        if not password:
+            print("密码不能为空", file=sys.stderr)
+            return 2
+        print(asyncio.run(_create_user(args.username, password, superuser=args.superuser)))
         return 0
     if args.cmd == "seed-rbac":
         print(asyncio.run(_seed_rbac()))
@@ -93,6 +129,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "grant-role":
         print(asyncio.run(_grant_role(args.username, args.role)))
         return 0
+    if args.cmd == "schema-status":
+        code, message = asyncio.run(_schema_status())
+        print(message)
+        return code
     parser.print_help()
     return 1
 

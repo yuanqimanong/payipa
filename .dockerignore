@@ -1,0 +1,12 @@
+.git
+.github
+.venv
+.pytest_cache
+.pytest-tmp-*
+__pycache__
+*.pyc
+*.pyo
+.env
+deploy/.env.compose
+var
+历史资料

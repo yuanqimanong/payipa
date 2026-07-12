@@ -17,6 +17,7 @@ var/
 # 工具缓存
 .ruff_cache/
 .pytest_cache/
+.pytest-tmp-*/
 .mypy_cache/
 .coverage
 htmlcov/

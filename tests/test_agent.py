@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import socket
 import subprocess
 import sys
 from pathlib import Path
@@ -12,8 +13,17 @@ import pytest
 from pyp_agent import conn as conn_mod
 from pyp_agent import fetch as fetch_mod
 from pyp_agent.fetch import FetchNetworkError, FetchResult, FetchTimeout, FetchTooLarge
+from pyp_agent.url_policy import URLPolicyError
 
 FIXTURE = Path(__file__).parent / "fixtures" / "books_list.html"
+
+
+@pytest.fixture(autouse=True)
+def _public_test_dns(monkeypatch):
+    async def public_dns(_host: str, _port: int) -> set[str]:
+        return {"93.184.216.34"}
+
+    monkeypatch.setattr("pyp_agent.url_policy.resolve_host", public_dns)
 
 
 def test_cli_parser_join() -> None:
@@ -66,7 +76,7 @@ def test_process_task_full_flow(monkeypatch) -> None:
     uploaded: dict = {}
 
     class FakeCache:
-        async def get(self, ptr: c.RulePointer) -> c.RulePack:
+        async def get(self, ptr: c.RulePointer, token: str | None = None) -> c.RulePack:
             return rule
 
     async def fake_fetch(url: str, **_kw) -> FetchResult:
@@ -102,12 +112,127 @@ def test_process_task_full_flow(monkeypatch) -> None:
     assert uploaded["source_uuid"] == "books"  # 上传带对了 source/batch
 
 
+def test_process_task_applies_rule_failure_and_layout_policies(monkeypatch) -> None:
+    async def fake_fetch(url: str, **_kw) -> FetchResult:
+        return FetchResult(status=200, url=url, body=b"<html>challenge page</html>", content_type="text/html")
+
+    monkeypatch.setattr(conn_mod, "fetch", fake_fetch)
+
+    class FailCache:
+        async def get(self, _ptr, token=None):
+            return c.RulePack(
+                fields=[c.FieldRule(name="title", locator=c.Locator(type=c.LocatorType.CSS, expr="h1"))],
+                fail_when=c.FailWhen(body_contains=["challenge page"]),
+            )
+
+    task = c.TaskSpec(
+        task_id="policy",
+        req_id="fail-when",
+        batch_id="b",
+        source="books",
+        target="https://example.test/page",
+        rule_ptr=c.RulePointer(rule_id="1", version=1, content_hash="h"),
+    )
+    report = asyncio.run(
+        conn_mod.process_task(task, upload_token=None, server_base="http://x", rule_cache=FailCache(), agent_id="a")
+    )
+    assert isinstance(report, c.StatusReport)
+    assert report.state == int(c.ErrorCode.SOFT_FAIL)
+    assert report.reason_code == "rule_fail_when"
+
+    class LayoutCache:
+        async def get(self, _ptr, token=None):
+            return c.RulePack(
+                fields=[c.FieldRule(name="title", locator=c.Locator(type=c.LocatorType.CSS, expr="h1"))],
+                layout_match=c.LayoutMatch(url_regex=r"/detail/", body_regex=r"product-main"),
+            )
+
+    report = asyncio.run(
+        conn_mod.process_task(task, upload_token=None, server_base="http://x", rule_cache=LayoutCache(), agent_id="a")
+    )
+    assert isinstance(report, c.StatusReport)
+    assert report.state == int(c.ErrorCode.PARSE_FAIL)
+    assert report.reason_code == "layout_mismatch"
+
+
+def test_process_task_uses_final_url_and_never_archives_test_channel(monkeypatch) -> None:
+    uploaded: list[dict] = []
+
+    class FakeCache:
+        async def get(self, _ptr, token=None):
+            return c.RulePack(
+                fields=[
+                    c.FieldRule(
+                        name="url",
+                        locator=c.Locator(type=c.LocatorType.CSS, expr="a@href"),
+                        type=c.FieldType.STORE_LINK,
+                        clean=[c.CleanOp(op="url_normalize")],
+                    )
+                ]
+            )
+
+    async def fake_fetch(_url: str, **_kw) -> FetchResult:
+        return FetchResult(
+            status=200,
+            url="https://example.test/redirected/index.html",
+            body=b'<a href="detail/1">one</a>',
+            content_type="text/html",
+        )
+
+    async def fake_upload(*_args, **kwargs):
+        uploaded.append(kwargs)
+
+    monkeypatch.setattr(conn_mod, "fetch", fake_fetch)
+    monkeypatch.setattr(conn_mod, "upload_raw_via_server", fake_upload)
+    task = c.TaskSpec(
+        task_id="test-channel",
+        req_id="r",
+        batch_id="b",
+        source="books",
+        target="https://example.test/start",
+        rule_ptr=c.RulePointer(rule_id="1", version=1, content_hash="h"),
+        channel=c.Channel.TEST,
+        archive_raw=True,
+    )
+    report = asyncio.run(
+        conn_mod.process_task(task, upload_token="token", server_base="http://x", rule_cache=FakeCache(), agent_id="a")
+    )
+    assert isinstance(report, c.ResultReport)
+    assert report.result.items[0].fields["url"] == "https://example.test/redirected/detail/1"
+    assert uploaded == []
+
+
+def test_process_task_enforces_result_frame_budget(monkeypatch) -> None:
+    class FakeCache:
+        async def get(self, _ptr, token=None):
+            return c.RulePack(fields=[c.FieldRule(name="title", locator=c.Locator(type=c.LocatorType.CSS, expr="h1"))])
+
+    async def fake_fetch(url: str, **_kw) -> FetchResult:
+        return FetchResult(status=200, url=url, body=b"<h1>large result</h1>", content_type="text/html")
+
+    monkeypatch.setattr(conn_mod, "fetch", fake_fetch)
+    monkeypatch.setattr(conn_mod, "max_result_bytes", lambda: 32)
+    task = c.TaskSpec(
+        task_id="budget",
+        req_id="r",
+        batch_id="b",
+        source="books",
+        target="https://example.test/page",
+        rule_ptr=c.RulePointer(rule_id="1", version=1, content_hash="h"),
+    )
+    report = asyncio.run(
+        conn_mod.process_task(task, upload_token=None, server_base="http://x", rule_cache=FakeCache(), agent_id="a")
+    )
+    assert isinstance(report, c.StatusReport)
+    assert report.reason_code == "result_too_large"
+
+
 def test_process_task_pauses_before_parse_or_archive(monkeypatch) -> None:
     """明确的访问拒绝必须在解析和 raw 归档前停止。"""
     called = {"upload": False}
 
     class FakeCache:
-        async def get(self, ptr: c.RulePointer) -> c.RulePack:
+        async def get(self, ptr: c.RulePointer, token: str | None = None) -> c.RulePack:
             return _books_rule()
 
     async def fake_fetch(url: str, **_kw) -> FetchResult:
@@ -143,7 +268,7 @@ def test_process_task_honors_retry_after_before_parse_or_archive(monkeypatch) ->
     called = {"upload": False}
 
     class FakeCache:
-        async def get(self, _ptr):
+        async def get(self, _ptr, token=None):
             return _books_rule()
 
     async def fake_fetch(url: str, **_kw) -> FetchResult:
@@ -221,7 +346,7 @@ class _FakeSession:
 def test_fetch_http_caps_body(monkeypatch) -> None:
     """流式读超限 → FetchTooLarge 并立即断开（防 Content-Length 缺失/说谎）。"""
     resp = _FakeResp(b"x" * 4096)
-    monkeypatch.setattr(fetch_mod.niquests, "AsyncSession", lambda: _FakeSession(resp))
+    monkeypatch.setattr(fetch_mod.niquests, "AsyncSession", lambda **_kwargs: _FakeSession(resp))
     with pytest.raises(FetchTooLarge):
         asyncio.run(fetch_mod.fetch("https://x.test/page", max_bytes=1024))
     assert resp.closed
@@ -230,7 +355,7 @@ def test_fetch_http_caps_body(monkeypatch) -> None:
 def test_fetch_http_rejects_declared_oversize_without_reading(monkeypatch) -> None:
     """Content-Length 超限：头先拒，一个字节都不读。"""
     resp = _FakeResp(b"x" * 4096, headers={"content-length": "4096"})
-    monkeypatch.setattr(fetch_mod.niquests, "AsyncSession", lambda: _FakeSession(resp))
+    monkeypatch.setattr(fetch_mod.niquests, "AsyncSession", lambda **_kwargs: _FakeSession(resp))
     with pytest.raises(FetchTooLarge):
         asyncio.run(fetch_mod.fetch("https://x.test/page", max_bytes=1024))
     assert resp.closed
@@ -240,11 +365,56 @@ def test_fetch_http_rejects_declared_oversize_without_reading(monkeypatch) -> No
 def test_fetch_http_within_cap_streams_full_body(monkeypatch) -> None:
     body = b"y" * 2000
     resp = _FakeResp(body, headers={"content-length": "2000", "content-type": "text/html"})
-    monkeypatch.setattr(fetch_mod.niquests, "AsyncSession", lambda: _FakeSession(resp))
+    monkeypatch.setattr(fetch_mod.niquests, "AsyncSession", lambda **_kwargs: _FakeSession(resp))
     result = asyncio.run(fetch_mod.fetch("https://x.test/page", max_bytes=4096))
     assert result.body == body
     assert result.status == 200
     assert result.content_type == "text/html"
+
+
+def test_url_policy_rejects_private_and_mixed_dns(monkeypatch) -> None:
+    from pyp_agent.url_policy import validate_url
+
+    async def private_dns(_host: str, _port: int) -> set[str]:
+        return {"93.184.216.34", "127.0.0.1"}
+
+    monkeypatch.setattr("pyp_agent.url_policy.resolve_host", private_dns)
+    with pytest.raises(URLPolicyError, match="non-public"):
+        asyncio.run(validate_url("https://allowed.test/page", ["allowed.test"]))
+
+
+def test_url_policy_rejects_cross_domain_and_non_http() -> None:
+    from pyp_agent.url_policy import validate_url
+
+    with pytest.raises(URLPolicyError, match="allowlist"):
+        asyncio.run(validate_url("https://other.test/page", ["allowed.test"]))
+    with pytest.raises(URLPolicyError, match="http"):
+        asyncio.run(validate_url("file:///etc/passwd", ["allowed.test"]))
+
+
+def test_http_connector_resolver_rejects_rebound_private_address() -> None:
+    from pyp_agent.url_policy import PublicAddressResolver
+
+    class ReboundResolver:
+        def is_available(self):
+            return True
+
+        async def close(self):
+            return None
+
+        async def getaddrinfo(self, host, port, family, type, proto=0, flags=0, **_kwargs):
+            return [(family, type, proto, "", ("127.0.0.1", int(port)))]
+
+    resolver = PublicAddressResolver(["allowed.test"], resolver=ReboundResolver())
+    with pytest.raises(URLPolicyError, match="non-public"):
+        asyncio.run(
+            resolver.getaddrinfo(
+                "allowed.test",
+                443,
+                socket.AF_INET,
+                socket.SOCK_STREAM,
+            )
+        )
 
 
 def test_max_body_bytes_env_knob(monkeypatch) -> None:
@@ -262,7 +432,7 @@ def test_process_task_maps_oversize_response(monkeypatch) -> None:
     """超限响应 → SOFT_FAIL + response_too_large（不重试），不进解析/归档。"""
 
     class FakeCache:
-        async def get(self, _ptr):
+        async def get(self, _ptr, token=None):
             return _books_rule()
 
     async def too_large(*_args, **_kwargs):
@@ -288,7 +458,7 @@ def test_process_task_maps_oversize_response(monkeypatch) -> None:
 
 def test_process_task_maps_transport_failures(monkeypatch) -> None:
     class FakeCache:
-        async def get(self, _ptr):
+        async def get(self, _ptr, token=None):
             return _books_rule()
 
     task = c.TaskSpec(
@@ -324,7 +494,7 @@ def test_process_task_echoes_attempt(monkeypatch) -> None:
     html = FIXTURE.read_bytes()
 
     class FakeCache:
-        async def get(self, _ptr):
+        async def get(self, _ptr, token=None):
             return _books_rule()
 
     async def fake_fetch(url: str, **_kw) -> FetchResult:
@@ -377,6 +547,45 @@ def test_handle_task_acks_first(monkeypatch) -> None:
     assert sent[1]["type"] == "status" and sent[1]["attempt"] == 1
 
 
+def test_agent_local_slot_limit_is_enforced(monkeypatch) -> None:
+    """即使主控误超发，本地同时执行数也不得超过 slot_n。"""
+    active = 0
+    peak = 0
+
+    class FakeWS:
+        async def send(self, _text: str) -> None:
+            pass
+
+    async def fake_process(task, **_kw):
+        nonlocal active, peak
+        active += 1
+        peak = max(peak, active)
+        await asyncio.sleep(0.03)
+        active -= 1
+        return c.StatusReport(req_id=task.req_id, state=int(c.ErrorCode.SOFT_FAIL), attempt=task.attempt)
+
+    monkeypatch.setattr(conn_mod, "process_task", fake_process)
+    ac = conn_mod.AgentConnection("http://x", "tok", slot_n=1)
+
+    def assigned(req_id: str) -> c.TaskAssign:
+        return c.TaskAssign(
+            task=c.TaskSpec(
+                task_id="t-slot",
+                req_id=req_id,
+                batch_id="b-slot",
+                source="books",
+                target="https://x.test/",
+                rule_ptr=c.RulePointer(rule_id="1", version=1, content_hash="h"),
+            )
+        )
+
+    async def run_both() -> None:
+        await asyncio.gather(ac._handle_task(FakeWS(), assigned("r1")), ac._handle_task(FakeWS(), assigned("r2")))
+
+    asyncio.run(run_both())
+    assert peak == 1
+
+
 def test_state_identity_persists(tmp_path) -> None:
     """P0-08：node_uuid 首启生成后稳定；save_state 合并写不丢字段。"""
     from pyp_agent import state
@@ -386,3 +595,25 @@ def test_state_identity_persists(tmp_path) -> None:
     state.save_state(tmp_path, node_token="tk1")
     st = state.load_state(tmp_path)
     assert st["node_token"] == "tk1" and st["node_uuid"] == a
+
+
+def test_result_spool_survives_until_ack(tmp_path) -> None:
+    from pyp_agent import spool
+
+    report = c.ResultReport(
+        result=c.ResultBatch(
+            batch_id="b-spool",
+            req_id="r-spool",
+            attempt=3,
+            items=[c.Item(fields={"title": "durable"})],
+            summary=c.ExecSummary(elapsed_s=0.1, count_ok=1),
+        )
+    )
+    spool.put(tmp_path, report)
+    restored = spool.pending(tmp_path)
+    assert len(restored) == 1
+    assert restored[0].result.items[0].fields["title"] == "durable"
+    assert spool.ack(tmp_path, "r-spool", 2) is False
+    assert len(spool.pending(tmp_path)) == 1
+    assert spool.ack(tmp_path, "r-spool", 3) is True
+    assert spool.pending(tmp_path) == []

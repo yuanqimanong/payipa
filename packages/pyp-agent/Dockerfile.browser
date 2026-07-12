@@ -1,0 +1,20 @@
+# Browser-capable Agent image. Build context is the payipa repository root.
+FROM python:3.14-slim
+COPY --from=ghcr.io/astral-sh/uv:0.11.26 /uv /bin/uv
+WORKDIR /app
+COPY pyproject.toml uv.lock ./
+COPY apps ./apps
+COPY packages ./packages
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+RUN uv sync --frozen --no-dev --package pyp-agent --extra browser --no-editable \
+ && /app/.venv/bin/playwright install --with-deps chromium \
+ && rm -rf apps packages pyproject.toml uv.lock \
+ && useradd --system --create-home --uid 10001 payipa \
+ && mkdir -p /state \
+ && chown -R payipa:payipa /state /app \
+ && chmod -R a+rX /ms-playwright
+USER payipa
+ENV PATH="/app/.venv/bin:$PATH" \
+    PYTHONUNBUFFERED=1
+ENTRYPOINT ["pyp-agent"]
+CMD ["--help"]

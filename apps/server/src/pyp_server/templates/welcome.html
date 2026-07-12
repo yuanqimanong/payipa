@@ -36,12 +36,11 @@
 <div class="card wiz-card" id="step2">
   <div class="wiz-head"><span class="wiz-num" id="n2">2</span><h3>接入第一个采集节点</h3></div>
   <div class="wiz-body">
-    <p>采集由独立的节点（agent）执行。在<b>要跑采集的机器</b>上任选一种方式启动（首次接入用 join token，之后节点自动换发长期凭证）：</p>
-    <div class="cmd"><code class="line" id="cmd-cli">uv run pyp-agent join --server {{ server_url }} --token {{ join_token or "<PYP_SERVER_AGENT_JOIN_TOKEN>" }} --state-dir ~/.pyp-agent</code><button class="btn ghost sm" data-copy="cmd-cli">复制</button></div>
+    <p>采集由独立的节点（agent）执行。页面会签发一个十分钟有效、只能使用一次的入网码；接入后节点自动保存长期凭证：</p>
+    <div class="cmd"><code class="line" id="cmd-cli">正在生成一次性入网码…</code><button class="btn ghost sm" data-copy="cmd-cli">复制</button></div>
     <div class="cmd"><code class="line" id="cmd-docker">docker compose -f deploy/docker-compose.agents.yml up -d</code><button class="btn ghost sm" data-copy="cmd-docker">复制</button></div>
     <p>
       说明：<code>--server</code> 请改为节点<b>可达</b>的主控地址（当前页面地址是 {{ server_url }}）；
-      {% if join_token %}开发环境 join token 为 <code>{{ join_token }}</code>；{% else %}join token 从部署环境变量 <code>PYP_SERVER_AGENT_JOIN_TOKEN</code> 获取；{% endif %}
       节点身份保存在 <code>--state-dir</code> 目录（容器请挂持久卷，重建不换身份）。
     </p>
     <div class="wiz-status" id="agent-status">等待节点接入…（每 3 秒自动检测）</div>
@@ -135,6 +134,16 @@
     return resp.json();
   }
 
+  async function createEnrollment() {
+    try {
+      const enrollment = await postJSON("/api/agents/enrollments");
+      $("cmd-cli").textContent = `uv run pyp-agent join --server {{ server_url }} --token ${enrollment.token} --state-dir ~/.pyp-agent`;
+      $("cmd-docker").textContent = `PYP_TOKEN=${enrollment.token} docker compose -f deploy/docker-compose.agents.yml up -d`;
+    } catch (e) {
+      $("cmd-cli").textContent = "一次性入网码生成失败：" + e.message;
+    }
+  }
+
   $("run-demo").addEventListener("click", async () => {
     $("run-demo").disabled = true;
     $("demo-status").textContent = "正在创建示例数据源…";
@@ -166,6 +175,7 @@
   });
 
   checkReady();
+  createEnrollment();
   checkAgents();
   renderChecklist();
 </script>

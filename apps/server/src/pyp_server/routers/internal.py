@@ -14,7 +14,7 @@ from payipa.crawl.rules import RuleStore
 from payipa.db.engine import get_engine
 from payipa.db.settings import get_settings
 from payipa.security.job_token import decode_job_token, token_allows_table
-from payipa.security.tokens import verify_upload_token
+from payipa.security.tokens import verify_rule_token, verify_upload_token
 from payipa.storage import get_storage, record_artifact
 from payipa.studio.cursor import decode_cursor, encode_cursor
 from payipa.studio.gateway import QueryGateway
@@ -41,7 +41,12 @@ async def _read_body(request: Request, limit: int) -> bytes:
 
 
 @router.get("/rules/{content_hash}", response_model=RulePack, summary="agent 按内容 hash 拉规则（内容寻址）")
-async def get_rule(content_hash: str) -> RulePack:
+async def get_rule(
+    content_hash: str,
+    x_rule_token: str = Header(..., description="绑定 content_hash 的短期规则读取 token"),
+) -> RulePack:
+    if not verify_rule_token(get_settings().upload_secret, x_rule_token, content_hash):
+        raise HTTPException(status_code=401, detail="invalid or expired rule token")
     pack = await RuleStore(get_engine("pyp")).get_by_hash(content_hash)
     if pack is None:
         raise HTTPException(status_code=404, detail="rule not found")
@@ -61,7 +66,12 @@ async def upload_raw(
 ) -> ArtifactRef:
     settings = get_settings()
     claims = verify_upload_token(settings.upload_secret, x_upload_token)
-    if not claims or claims.get("s") != source_uuid or str(claims.get("b")) != str(batch_id):
+    if (
+        not claims
+        or claims.get("s") != source_uuid
+        or str(claims.get("b")) != str(batch_id)
+        or claims.get("c") != "prod"
+    ):
         raise HTTPException(status_code=401, detail="invalid or mismatched upload token")
 
     storage = get_storage()

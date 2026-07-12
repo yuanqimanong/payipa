@@ -9,6 +9,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 # dev 默认密钥（production 模式下 preflight 校验拒绝这些值）。
 DEV_SESSION_SECRET = "dev-session-secret-change-me-in-production-please"
 MIN_SESSION_SECRET_BYTES = 32
+DEV_BOOTSTRAP_TOKEN = "dev"
 
 
 class ServerSettings(BaseSettings):
@@ -27,13 +28,17 @@ class ServerSettings(BaseSettings):
     # 生产部署置 PYP_SERVER_ENVIRONMENT=production，启动前置校验（preflight.py）会拒绝不安全配置。
     environment: str = "dev"
     session_secret: str = DEV_SESSION_SECRET  # 生产走 env 注入（≥32B）；production 模式拒绝默认值
+    # 空库创建首个管理员时必须提交；pypctl init 生成随机值，避免公开 /setup 被抢注。
+    bootstrap_token: str = DEV_BOOTSTRAP_TOKEN
     session_ttl_s: int = 7 * 24 * 3600  # 会话有效期
     build_commit: str = ""  # 构建 commit（正式镜像注入；空=dev，/version 兜底 git rev-parse）
     build_time: str = ""  # 构建时间（正式镜像注入）
+    # 逗号分隔 Host 白名单；"*" 仅适合开发。生产部署应填写实际域名/IP。
+    allowed_hosts: str = "*"
     # v1 单实例守卫（P0-09）：后台环启动前须拿到 pyp 库 advisory lock；多 worker/多实例拒绝启动。
     # Hub/限流器是进程内状态，多 worker 会连接分片、限流倍增、调度与 Outbox 竞争——显式关闭后果自负。
     single_worker_guard: bool = True
-    # agent 接入 join token（WS 握手 Authorization: Bearer）。默认 dev；production 模式拒绝默认值。
+    # 仅供 dev 本地兼容的一次性接入替代。production 完全忽略此共享值，只接受 UI 签发的一次性入网码。
     agent_join_token: str = "dev"
 
     # ── M5 RBAC ────────────────────────────────────────────────────────
@@ -52,6 +57,9 @@ class ServerSettings(BaseSettings):
     ack_timeout_s: int = 60  # ACK 短租（秒）：下发后 agent 未确认即被 reaper 快速回收重派（P0-10）。
     # 取 60 而非 30：结果帧与 ack 在同一 WS 上串行处理，重负载下 ack 可能排队，过短会误回收健康节点的任务。
     max_attempt: int = 3  # 请求最大尝试次数（含首次）；超过定格 NODE_LOST(-6)
+    # raw/artifact 保留期回收（GC）在后台环内低频执行。此前 gc_expired_artifacts 已实现却从未被调度，
+    # 配合「磁盘低水位即拒上传 + readyz 转 503」会演化成不可自愈的磁盘写满宕机（本值 ≤0 关闭 GC tick）。
+    gc_interval_s: float = 300.0
 
     # ── M4 推送 Consumer（outbox 排空环）──────────────────────────────────
     push_enabled: bool = True  # 后台推送 Consumer 开关（测试关闭）

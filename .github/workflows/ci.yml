@@ -5,9 +5,7 @@ on:
     branches: [master, main]
   pull_request:
 
-# 前置：payipa 依赖 jianbing-utils（public 仓）经 git 源解析（tag v0.1.0）。
-# 提交前须：① jianbing_utils 打并推 tag v0.1.0；② 把根 pyproject 的 [tool.uv.sources]
-# 从本地 path 源换成 git 源；③ uv lock 后提交。详见 CLAUDE.md。
+# payipa 依赖 jianbing-utils 的固定 Git tag（见 pyproject.toml / uv.lock）；镜像构建不依赖兄弟目录。
 jobs:
   quality:
     runs-on: ubuntu-latest
@@ -40,6 +38,15 @@ jobs:
         run: uv run ruff format --check
       - name: Import boundaries (import-linter)
         run: uv run lint-imports
+      - name: Compose configuration
+        run: |
+          uv run pypctl init
+          PYP_AGENT_ENROLL_TOKEN=ci-placeholder docker compose -f deploy/compose.yml --env-file deploy/.env.compose config -q
+      - name: Build release images from repository only
+        run: |
+          docker build -f deploy/Dockerfile.server -t payipa-server:ci .
+          docker build -f packages/pyp-agent/Dockerfile -t payipa-agent:ci .
+          docker build -f packages/pyp-agent/Dockerfile.browser -t payipa-agent-browser:ci .
       - name: Create three databases
         run: |
           for db in pyp_sys data_center business; do
@@ -48,6 +55,5 @@ jobs:
       - name: Migrate three databases to head
         run: uv run alembic -c deploy/alembic.ini upgrade heads
       - name: Pytest
-        # test_sandbox_pg 需 PG+Docker+活 uvicorn 三合一（本地已验证）；CI 首轮先不引入其镜像构建
-        # 时间与抖动面，等发布安装冒烟（P0-02/03）一起编排。
-        run: uv run pytest --deselect tests/test_sandbox_pg.py
+        # 包含 PG 三库、Docker 沙箱和主控/Agent 契约测试；任一真实依赖被 skip 都由测试自身显式报告。
+        run: uv run pytest

@@ -49,10 +49,14 @@
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
         <div class="step-label">第 2 步 / 共 2 步</div>
         <h1>创建首个管理员</h1>
-        <div class="sub">这是系统第一次启动。请创建管理员账号——它拥有全部权限，之后可在「用户管理」里添加其他成员。</div>
+        <div class="sub">这是系统第一次启动。请使用部署时生成的安装码创建管理员账号；安装码不会保存到数据库。</div>
+        <div class="field">
+          <label for="bootstrap_token">安装码</label>
+          <input id="bootstrap_token" name="bootstrap_token" type="password" autocomplete="one-time-code" autofocus />
+        </div>
         <div class="field">
           <label for="username">用户名</label>
-          <input id="username" name="username" value="{{ username }}" autocomplete="username" autofocus />
+          <input id="username" name="username" value="{{ username }}" autocomplete="username" />
         </div>
         <div class="field">
           <label for="password">密码（至少 8 个字符）</label>

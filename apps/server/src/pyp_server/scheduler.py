@@ -10,6 +10,7 @@ PG 为权威、内存 hub 仅运行态视图：每 interval 秒 (1) 回收到期
 from __future__ import annotations
 
 import logging
+import time
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
@@ -27,9 +28,11 @@ from payipa.crawl.run import (
     source_rate_limits,
     sweep_canceling_batches,
 )
+from payipa.db.dynamic_schema import reconcile_data_schemas
 from payipa.db.engine import get_engine
 from payipa.db.settings import get_settings as get_db_settings
-from payipa.security.tokens import issue_upload_token
+from payipa.security.tokens import issue_rule_token, issue_upload_token
+from payipa.storage import gc_expired_artifacts, get_storage
 from payipa_contracts import TaskAssign
 
 from pyp_server.settings import get_server_settings
@@ -70,12 +73,26 @@ async def drain_once(hub: AgentHub, pyp: AsyncEngine, secret: str, ack_s: int, l
             if not limiter.take(spec.source, rates.get(spec.source, 0)):
                 continue  # 该源本 tick 令牌用尽 → 留排队，下一 tick 再派（每源限流）
             req_id = int(spec.req_id)
-            # ACK 短租（DB 时钟）；agent 确认后展成执行租约
-            if await mark_assigned(pyp, req_id, conn.agent_id, attempt=spec.attempt, lease_s=ack_s) != 1:
-                continue  # 未抢到（状态已变/代次已推进）——试下一条
-            token = issue_upload_token(secret, spec.source, int(spec.batch_id))
             try:
-                await hub.send_frame(conn.agent_id, TaskAssign(task=spec, upload_token=token))
+                # ACK 短租（DB 时钟）；agent 确认后展成执行租约
+                if await mark_assigned(pyp, req_id, conn.agent_id, attempt=spec.attempt, lease_s=ack_s) != 1:
+                    continue  # 未抢到（状态已变/代次已推进）——试下一条
+                token = (
+                    issue_upload_token(secret, spec.source, int(spec.batch_id), channel=spec.channel.value)
+                    if spec.channel.value == "prod" and spec.archive_raw
+                    else None
+                )
+                rule_token = issue_rule_token(secret, spec.rule_ptr.content_hash, ttl_s=max(300, ack_s + 60))
+            except Exception:  # noqa: BLE001 —— 毒丸请求（如 rule_ptr 数据异常）：隔离本条，不拖垮整轮/全部源派发
+                logger.exception("prepare dispatch for req %s failed; quarantine this request", req_id)
+                # mark_assigned 已置 ASSIGNED 时不回退：ACK 短租到期由 reaper 回收、attempt 累进至 max 后定格
+                # NODE_LOST 自然止损；mark_assigned 前失败则仍 QUEUED，仅本条每 tick 重试、不阻塞他源。
+                continue
+            try:
+                await hub.send_frame(
+                    conn.agent_id,
+                    TaskAssign(task=spec, upload_token=token, rule_token=rule_token),
+                )
             except Exception:  # noqa: BLE001 —— 下发失败（连接坏）：退回 QUEUED，结束本轮
                 logger.warning("send TaskAssign failed for req %s; requeue", req_id, exc_info=True)
                 # requeue 也失败则异常上抛给 dispatch_loop 退避重试；该请求暂留 ASSIGNED，租约 reaper 兜底。
@@ -112,32 +129,73 @@ async def fire_due_schedules(pyp: AsyncEngine, now: datetime) -> int:
     return fired
 
 
+async def _run_stage(name: str, coro):
+    """跑一个后台阶段并**隔离其异常**：单阶段失败只记录、不影响同轮其它阶段。返回 (结果|None, 是否成功)。
+
+    此前整轮多阶段包在同一 try 里，一条毒丸任务/一次某阶段异常会拖垮全部派发并把 readyz 拖成抖动。
+    """
+    try:
+        return await coro, True
+    except Exception:  # noqa: BLE001 —— anyio 取消是 BaseException，不会被这里吞掉
+        logger.exception("dispatch stage %r failed", name)
+        return None, False
+
+
 async def dispatch_loop(app: FastAPI) -> None:
-    """长驻后台环：触发到点 cron → 回收过期租约 → 排空队列。任何业务异常都不能让它退出（仅 cancel 时结束）。"""
+    """长驻后台环：cron 触发 → schema 对账 → raw/artifact GC → 回收过期租约 → 清取消 → 排空队列。
+
+    任何业务异常都不能让它退出（仅 cancel 时结束），且各阶段异常互相隔离——一个阶段失败不跳过其余阶段。
+    """
     settings = get_server_settings()
     hub: AgentHub = app.state.hub
     limiter: SourceRateLimiter = app.state.limiter
     pyp = get_engine("pyp")
+    dc = get_engine("data_center")
+    storage = get_storage()  # 预检已验证后端可构建；此处取一次供 GC 复用
     secret = get_db_settings().upload_secret
     interval, ack_s, max_attempt = settings.dispatch_interval_s, settings.ack_timeout_s, settings.max_attempt
-    logger.info("dispatch loop up (interval=%ss ack=%ss max_attempt=%s)", interval, ack_s, max_attempt)
+    gc_interval = settings.gc_interval_s
+    logger.info(
+        "dispatch loop up (interval=%ss ack=%ss max_attempt=%s gc=%ss)", interval, ack_s, max_attempt, gc_interval
+    )
     health = getattr(app.state, "loop_health", {}).get("dispatch")  # readyz 心跳档案（P0-06）
     fails = 0
+    next_reconcile = 0.0
+    next_gc = 0.0
     while True:
-        try:
-            await fire_due_schedules(pyp, datetime.now(UTC))
-            await requeue_expired_leases(pyp, max_attempt=max_attempt)
-            await sweep_canceling_batches(pyp)
-            await drain_once(hub, pyp, secret, ack_s, limiter)
+        ok = True
+        now = time.monotonic()
+        if now >= next_reconcile:  # 低频：动态 schema 对账
+            report, sok = await _run_stage("reconcile", reconcile_data_schemas(pyp, dc))
+            if sok:
+                if report and report.get("checked"):
+                    logger.info("dynamic schema reconciliation: %s", report)
+                next_reconcile = now + 60.0
+            ok = ok and sok
+        if gc_interval > 0 and now >= next_gc:  # 低频：清理过期 raw/artifact，防磁盘写满型不可自愈宕机
+            removed, sok = await _run_stage("gc", gc_expired_artifacts(dc, storage))
+            if sok:
+                if removed:
+                    logger.info("artifact GC removed %d expired object(s)", removed)
+                next_gc = now + gc_interval
+            ok = ok and sok
+        _, sok = await _run_stage("fire_due_schedules", fire_due_schedules(pyp, datetime.now(UTC)))
+        ok = ok and sok
+        _, sok = await _run_stage("requeue_expired_leases", requeue_expired_leases(pyp, max_attempt=max_attempt))
+        ok = ok and sok
+        _, sok = await _run_stage("sweep_canceling_batches", sweep_canceling_batches(pyp))
+        ok = ok and sok
+        _, sok = await _run_stage("drain_once", drain_once(hub, pyp, secret, ack_s, limiter))
+        ok = ok and sok
+        if ok:
             fails = 0
             if health is not None:
                 health.ok()
-        except Exception as exc:  # noqa: BLE001 —— anyio 取消是 BaseException，不会被这里吞掉
+            await anyio.sleep(interval)  # 取消点：lifespan 关停时在此优雅退出
+        else:
             fails += 1
             if health is not None:
-                health.fail(f"{type(exc).__name__}: {exc}")
+                health.fail(f"{fails} consecutive tick(s) had a failing stage")
             delay = min(30.0, interval * 2 ** min(fails - 1, 5))  # 指数退避，DB 抖动时不忙转拖垮连接池
-            logger.exception("dispatch loop tick failed (x%d); backoff %.1fs", fails, delay)
+            logger.warning("dispatch loop tick had failing stage(s) (x%d); backoff %.1fs", fails, delay)
             await anyio.sleep(delay)  # 取消点
-            continue
-        await anyio.sleep(interval)  # 取消点：lifespan 关停时在此优雅退出

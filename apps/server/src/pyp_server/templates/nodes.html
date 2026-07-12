@@ -14,7 +14,7 @@
 
 <div class="card card-pad" id="add-panel" style="display:none; margin-bottom:14px">
   <div class="card-head" style="padding:0 0 8px">接入一个新采集节点</div>
-  <p class="muted" style="font-size:13px">在要跑采集的机器上任选一种方式启动。首次接入用 join token，之后节点自动换发长期凭证重连。</p>
+  <p class="muted" style="font-size:13px">系统会为本次操作签发一个十分钟有效、只能使用一次的入网码。接入成功后节点改用本机保存的长期凭证。</p>
   <div style="display:flex; gap:8px; align-items:center; margin:8px 0">
     <code class="line" id="cmd-cli" style="flex:1; display:block; padding:8px 10px; background:var(--surface-2,#f5f5f5); border-radius:6px; font-size:12px; overflow-x:auto; white-space:nowrap">加载中…</code>
     <button class="btn ghost sm" data-copy="cmd-cli">复制</button>
@@ -45,11 +45,15 @@
     $("add-panel").style.display = "";
     try {
       const info = await PypViews.fetchJSON("/api/views/join-info");
-      const tok = info.join_token || "<PYP_SERVER_AGENT_JOIN_TOKEN>";
+      const resp = await fetch("/api/agents/enrollments", {
+        method: "POST", headers: { Accept: "application/json", "Content-Type": "application/json" }, body: "{}"
+      });
+      if (!resp.ok) throw new Error((await resp.json().catch(() => ({}))).detail || `HTTP ${resp.status}`);
+      const enrollment = await resp.json();
+      const tok = enrollment.token;
       $("cmd-cli").textContent = `uv run pyp-agent join --server ${info.server_url} --token ${tok} --state-dir ~/.pyp-agent`;
-      $("join-note").innerHTML = info.join_token
-        ? `开发环境 join token 为 <code>${PypViews.esc(info.join_token)}</code>；<code>--server</code> 请改为节点可达的地址。`
-        : `join token 从部署环境变量 <code>PYP_SERVER_AGENT_JOIN_TOKEN</code> 获取；<code>--server</code> 请改为节点可达的地址。`;
+      $("cmd-docker").textContent = `PYP_TOKEN=${tok} docker compose -f deploy/docker-compose.agents.yml up -d`;
+      $("join-note").textContent = `入网码将在 ${new Date(enrollment.expires_at).toLocaleTimeString()} 过期；复制后立即在目标机器执行。`;
     } catch (e) { $("cmd-cli").textContent = "读取接入信息失败：" + e.message; }
     const nodes = await PypViews.fetchJSON("/api/monitor/nodes").catch(() => []);
     baseIds = new Set((nodes || []).filter((n) => n.online).map((n) => n.agent_id));

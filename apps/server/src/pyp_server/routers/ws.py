@@ -13,12 +13,11 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from payipa.crawl.ingest import build_data_table
 from payipa.crawl.run import (
     auth_node,
+    commit_result,
     defer_request_for_retry,
-    enqueue_discovered,
-    fence_ok,
+    enroll_agent,
     finalize_batch_if_done,
     finalize_request_batch,
-    handle_result,
     mark_running,
     pause_source_for_request,
     register_agent,
@@ -39,6 +38,7 @@ from payipa_contracts import (
     RegisterAck,
     RegisterReq,
     RequestState,
+    ResultAck,
     ResultBatch,
     ResultReport,
     StatusReport,
@@ -75,23 +75,23 @@ def _extract_bearer(header: str) -> str:
     return header[7:] if header[:7].lower() == "bearer " else header
 
 
-async def _ingest_result(result: ResultBatch, limiter: SourceRateLimiter, agent_id: str) -> None:
+async def _ingest_result(result: ResultBatch, limiter: SourceRateLimiter, agent_id: str) -> bool:
     """多波续爬 + 入库 + 收尾。顺序：fencing 预检（迟到/越权结果整体丢弃，连发现链接也不入队）
     → 把本页发现链接并入同批入队（新 QUEUED 落库、防跨波提前收尾）
     → 写 data_center（指纹幂等）并置请求成功（事务内权威 fencing 再校验）
     → 尝试收尾批次 → AIMD 成功回升该源速率。"""
     pyp = get_engine("pyp")
     dc = get_engine("data_center")
-    if not await fence_ok(pyp, int(result.req_id), agent_id, int(result.attempt)):
+    uuid, fingerprint_keys, indexed, channel = await resolve_ingest_context(pyp, int(result.req_id))
+    table = build_data_table(uuid, indexed, channel)
+    committed = await commit_result(pyp, dc, table, result, fingerprint_keys=fingerprint_keys, agent_id=agent_id)
+    if not committed.accepted:
         logger.warning("stale result for req %s from %s (attempt=%s); dropped", result.req_id, agent_id, result.attempt)
-        return
-    uuid, fingerprint_keys, indexed = await resolve_ingest_context(pyp, int(result.req_id))
-    table = build_data_table(uuid, indexed)
-    await enqueue_discovered(pyp, int(result.req_id), result.discovered)
-    await handle_result(pyp, dc, table, result, fingerprint_keys=fingerprint_keys, agent_id=agent_id)
+        return False
     if await finalize_batch_if_done(pyp, int(result.batch_id)):  # 唯一那次 running→done
         await on_batch_finalized(int(result.batch_id))  # 链路自动推送 + 收尾通知（best-effort）
     limiter.on_ok(uuid)  # 成功 → AIMD 加性增
+    return True
 
 
 async def _pause_source(
@@ -162,22 +162,6 @@ async def agent_ws(ws: WebSocket) -> None:
     await ws.accept()
     settings = get_server_settings()
     bearer = _extract_bearer(ws.headers.get("authorization", ""))
-    # 认证两条路（P0-07）：先按长期节点凭证 hash 匹配（重连，不轮换凭证）；
-    # 无匹配再比对 join token（首次入网，签发新凭证）。默认 "dev"（开发放行）；
-    # 生产经 PYP_SERVER_AGENT_JOIN_TOKEN 注入真值（preflight 拒绝默认值）。
-    bound_agent: str | None = None
-    if bearer:
-        try:
-            bound_agent = await auth_node(get_engine("pyp"), hash_token(bearer))
-        except Exception:  # noqa: BLE001
-            # DB 抖动时**不可**退到 join token 比对——持有效凭证的 agent 会被 1008 误拒并
-            # 就此销毁本地凭证。回 1013（稍后重试），agent 保留凭证按退避重连。
-            logger.warning("auth_node lookup failed (DB down?); ask agent to retry", exc_info=True)
-            await ws.close(code=_CLOSE_RETRY, reason="credential lookup unavailable, retry later")
-            return
-    if bound_agent is None and not hmac.compare_digest(bearer, settings.agent_join_token):
-        await ws.close(code=_CLOSE_POLICY, reason="invalid join token")
-        return
     hub = ws.app.state.hub
     agent_id: str | None = None
     generation: int | None = None
@@ -198,6 +182,15 @@ async def agent_ws(ws: WebSocket) -> None:
     if not is_compatible(register.contract_version):
         await ws.close(code=_CLOSE_PROTOCOL, reason="contract version incompatible")
         return
+
+    # 先读注册帧才能把长期凭证绑定到 agent_id。认证路径只有两条：已有长期凭证重连，或原子消费
+    # UI 签发的一次性入网码。共享 join token 仅保留给 dev 本地兼容，production 永不接受。
+    try:
+        bound_agent = await auth_node(get_engine("pyp"), hash_token(bearer)) if bearer else None
+    except Exception:  # noqa: BLE001
+        logger.warning("auth_node lookup failed (DB down?); ask agent to retry", exc_info=True)
+        await ws.close(code=_CLOSE_RETRY, reason="credential lookup unavailable, retry later")
+        return
     if bound_agent is not None and register.agent_id != bound_agent:
         # 凭证与自报身份必须一致：凭证只能代表签发时绑定的节点
         await ws.close(code=_CLOSE_POLICY, reason="agent_id does not match node credential")
@@ -208,25 +201,50 @@ async def agent_ws(ws: WebSocket) -> None:
     async with _reg_lock(reg_id):  # 同 id 并发注册串行化：签发→落库→入 hub 是一个原子段
         token, token_hash = new_node_token() if issue_new else ("", None)  # 明文只此一次下发，库存 hash（红线9）
         try:
-            weight, group_name = await register_agent(
-                get_engine("pyp"),
-                reg_id,
-                hostname=register.hostname,
-                slot_n=register.slot_n,
-                capabilities=register.capabilities.model_dump(),
-                node_token_hash=token_hash,
-            )
+            if bound_agent is not None:
+                registered = await register_agent(
+                    get_engine("pyp"),
+                    reg_id,
+                    hostname=register.hostname,
+                    slot_n=register.slot_n,
+                    capabilities=register.capabilities.model_dump(),
+                )
+            else:
+                registered = await enroll_agent(
+                    get_engine("pyp"),
+                    hash_token(bearer),
+                    reg_id,
+                    hostname=register.hostname,
+                    slot_n=register.slot_n,
+                    capabilities=register.capabilities.model_dump(),
+                    node_token_hash=str(token_hash),
+                )
+                if (
+                    registered is None
+                    and settings.environment != "production"
+                    and hmac.compare_digest(bearer, settings.agent_join_token)
+                ):
+                    # 本地开发兼容；register_agent 的凭证覆盖防护仍然生效。
+                    registered = await register_agent(
+                        get_engine("pyp"),
+                        reg_id,
+                        hostname=register.hostname,
+                        slot_n=register.slot_n,
+                        capabilities=register.capabilities.model_dump(),
+                        node_token_hash=token_hash,
+                    )
+                if registered is None:
+                    await ws.close(code=_CLOSE_POLICY, reason="invalid, expired, or already used enrollment token")
+                    return
+            weight, group_name = registered
+        except PermissionError:
+            await ws.close(code=_CLOSE_POLICY, reason="agent_id already has a node credential")
+            return
         except Exception:  # noqa: BLE001
-            if settings.environment == "production":
-                # 生产 fail closed（P0-07）：落库失败即拒接，避免 UI/权重/分组/凭证与派发状态漂移
-                logger.error("register_agent %s failed in production; closing", reg_id, exc_info=True)
-                await ws.close(code=_CLOSE_INTERNAL, reason="registration unavailable")
-                return
-            # dev 容忍 PG 未起：内存 hub + 默认权重/分组，不阻断握手
-            logger.warning(
-                "register_agent %s failed (DB down?); registering in-memory with defaults", reg_id, exc_info=True
-            )
-            weight, group_name = 1, None
+            # 凭证签发必须落库成功；任何环境都 fail closed，不能下发一个主控不认识的长期凭证。
+            logger.error("register_agent %s failed; closing", reg_id, exc_info=True)
+            await ws.close(code=_CLOSE_INTERNAL, reason="registration unavailable")
+            return
         agent_id = reg_id
         generation, superseded = hub.register(
             agent_id,
@@ -268,7 +286,14 @@ async def agent_ws(ws: WebSocket) -> None:
                     logger.warning("mark_running req %s failed", frame.req_id, exc_info=True)
             elif isinstance(frame, ResultReport):
                 try:  # 单帧处理失败（如存量脏短码在入库时抛 ValueError）不得断连殃及全部在途
-                    await _ingest_result(frame.result, ws.app.state.limiter, agent_id)
+                    accepted = await _ingest_result(frame.result, ws.app.state.limiter, agent_id)
+                    await ws.send_text(
+                        ResultAck(
+                            req_id=frame.result.req_id,
+                            attempt=frame.result.attempt,
+                            accepted=accepted,
+                        ).model_dump_json()
+                    )
                 except Exception:  # noqa: BLE001 —— 记日志放行下一帧；该请求由租约 reaper 兜底
                     logger.exception("ingest result for req %s failed", frame.result.req_id)
                 hub.on_finished(agent_id, frame.result.req_id)
@@ -341,3 +366,8 @@ async def agent_ws(ws: WebSocket) -> None:
                 await set_agent_offline(get_engine("pyp"), agent_id)  # 标记离线（保留权重/分组配置）
             except Exception:  # noqa: BLE001
                 logger.warning("set_agent_offline %s failed", agent_id, exc_info=True)
+            # 回收本 agent 的注册锁，避免 _reg_locks 随历史节点数只增不减地缓慢泄漏。
+            # 仅在锁空闲（无并发重连正在注册）时删除：锁被持有 ⟹ 有任务在注册/等待 → 保留，防止删掉在用锁破坏互斥。
+            lock = _reg_locks.get(agent_id)
+            if lock is not None and not lock.locked():
+                _reg_locks.pop(agent_id, None)

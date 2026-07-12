@@ -188,7 +188,6 @@ async def sources_create(request: Request):
     if user is None:
         return _login_redirect()
     form = await request.form()
-    verify_csrf(request, form.get("csrf_token"))
     snap = _form_snapshot(form)  # 一次性快照；任何错误分支都回填它（不丢用户输入）
 
     async def _back(error: str, status: int = 400):
@@ -198,6 +197,11 @@ async def sources_create(request: Request):
             await page_ctx(user, error=error, form=snap, active="sources"),
             status_code=status,
         )
+
+    try:
+        verify_csrf(request, form.get("csrf_token"))
+    except HTTPException as exc:
+        return await _back(str(exc.detail), 403)
 
     if get_server_settings().rbac_enabled:
         perms = await effective_permissions(get_engine("pyp"), int(user["id"]))
@@ -264,7 +268,7 @@ async def sources_create(request: Request):
             timeout=timeout,
             raw_archive=raw_archive,
         )
-    except (LookupError, PermissionError, ValueError) as exc:
+    except (LookupError, PermissionError, RuntimeError, ValueError) as exc:
         return await _back(str(exc))
     await record_audit_best_effort(
         get_engine("pyp"),

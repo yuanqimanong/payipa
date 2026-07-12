@@ -14,6 +14,7 @@ from functools import lru_cache
 import anyio
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
+from payipa.db.dynamic_schema import dynamic_schema_health
 from payipa.db.engine import get_engine
 from payipa.db.revisions import db_revision, script_head
 from payipa.storage import get_storage
@@ -71,6 +72,18 @@ def _check_storage() -> str:
         return f"error: {type(exc).__name__}: {exc}"
 
 
+async def _check_dynamic_schemas() -> str:
+    try:
+        provisioning, failed = await dynamic_schema_health(get_engine("pyp"))
+        if failed:
+            return f"error: {failed} 个数据源 provisioning 失败"
+        if provisioning:
+            return f"error: {provisioning} 个数据源仍在 provisioning"
+        return "ok"
+    except Exception as exc:  # 迁移未到 head 时也必须返回分项错误，不能让 readyz 500
+        return f"error: {type(exc).__name__}"
+
+
 def _check_loop(app, name: str, enabled: bool) -> str:
     if not enabled:
         return "disabled"
@@ -94,6 +107,7 @@ async def readyz(request: Request) -> JSONResponse:
     for key in _DBS:
         checks[f"db.{key}"] = await _ping_db(key)
     checks["migrations"] = await _check_migrations()
+    checks["dynamic_schemas"] = await _check_dynamic_schemas()
     checks["storage"] = _check_storage()
     checks["loop.dispatch"] = _check_loop(request.app, "dispatch", settings.dispatch_enabled)
     checks["loop.consumer"] = _check_loop(request.app, "consumer", settings.push_enabled)

@@ -25,6 +25,11 @@ from payipa.deliver.outbox import Deliverer
 from payipa.deliver.pushexec import run_push_component
 from payipa.security.secrets import decrypt_json
 
+# 整表推送时沿 keyset 翻页的单页行数。
+_DATASET_PAGE_ROWS = 1000
+# 未显式分页的整表推送的安全阀：全表行累积在内存后交子进程投递，超此上限报错而非 OOM/静默截断。
+_MAX_DATASET_PUSH_ROWS = 1_000_000
+
 _COLS = (
     PushComponent.id,
     PushComponent.status,
@@ -151,13 +156,28 @@ async def _resolve_payload(engine_business: AsyncEngine, payload_ref: str | None
         rows = spec.get("rows") or []
         return [r for r in rows if isinstance(r, dict)]
     if kind == "dataset":
-        rows, _ = await read_dataset(
-            engine_business,
-            str(spec["product_code"]),
-            after_id=int(spec.get("after_id", 0)),
-            limit=int(spec.get("limit", 1000)),
-        )
-        return rows
+        product = str(spec["product_code"])
+        # 显式带 after_id/limit（调用方主动分页）→ 尊重其单页语义，保持向后兼容。
+        if "after_id" in spec or "limit" in spec:
+            rows, _ = await read_dataset(
+                engine_business, product, after_id=int(spec.get("after_id", 0)), limit=int(spec.get("limit", 1000))
+            )
+            return rows
+        # 未显式分页（如自动/链路触发的整表推送）→ 沿 keyset 翻页取全量，避免此前只投首页 1000 行、其余静默丢失。
+        all_rows: list[dict] = []
+        after = 0
+        while True:
+            rows, nxt = await read_dataset(engine_business, product, after_id=after, limit=_DATASET_PAGE_ROWS)
+            all_rows.extend(rows)
+            if nxt is None:
+                break
+            after = nxt
+            if len(all_rows) >= _MAX_DATASET_PUSH_ROWS:  # 防失控数据集拖爆内存的安全阀：显式报错而非静默截断
+                raise RuntimeError(
+                    f"dataset {product} 超过单次推送行数上限 {_MAX_DATASET_PUSH_ROWS}；"
+                    "请在 payload_ref 显式分页（after_id/limit）分批推送"
+                )
+        return all_rows
     return []
 
 

@@ -24,6 +24,11 @@ def _col(table: Table, field: str):
     return table.c.fields[field].astext
 
 
+def _like_escape(value: str) -> str:
+    """转义 LIKE 通配符：使用户输入的 % 和 _ 按字面匹配（否则搜索 '50%' 会命中任意串，是可见的过滤不准确）。"""
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
 def _apply_filters(stmt, table: Table, filters: Sequence[dict]):
     for f in filters:
         field = f.get("field")
@@ -33,7 +38,7 @@ def _apply_filters(stmt, table: Table, filters: Sequence[dict]):
             continue
         col = _col(table, field)
         if ftype in ("like", "ilike"):
-            stmt = stmt.where(col.ilike(f"%{value}%"))
+            stmt = stmt.where(col.ilike(f"%{_like_escape(str(value))}%", escape="\\"))
         elif ftype in ("=", "eq"):
             stmt = stmt.where(col == value)
         elif ftype in ("!=", "ne"):

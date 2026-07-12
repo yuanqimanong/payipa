@@ -21,9 +21,12 @@ async def _state(pyp, oid: int) -> tuple[str, int]:
     return r.state, r.attempts
 
 
-async def _force_state(pyp, oid: int, state: str) -> None:
+async def _force_state(pyp, oid: int, state: str, claim_token: str | None = None) -> None:
     async with pyp.begin() as conn:
-        await conn.execute(text("UPDATE push_outbox SET state=:s WHERE id=:i"), {"s": state, "i": oid})
+        await conn.execute(
+            text("UPDATE push_outbox SET state=:s, claim_token=:t WHERE id=:i"),
+            {"s": state, "t": claim_token, "i": oid},
+        )
 
 
 def test_outbox_state_machine(require_pg: None) -> None:
@@ -47,7 +50,7 @@ def test_outbox_state_machine(require_pg: None) -> None:
             async def ok(row: dict) -> None:
                 delivered.append(row["idempotency_key"])
 
-            sent, failed = await outbox.run_outbox_once(pyp, ok)
+            sent, failed = await outbox.run_outbox_once(pyp, ok, component_id=cid)
             assert (sent, failed) == (1, 0) and delivered == ["k1"]
             async with pyp.begin() as conn:
                 oid1 = (
@@ -61,7 +64,7 @@ def test_outbox_state_machine(require_pg: None) -> None:
             async def boom(row: dict) -> None:
                 raise RuntimeError("target down")
 
-            sent, failed = await outbox.run_outbox_once(pyp, boom, max_attempts=3)
+            sent, failed = await outbox.run_outbox_once(pyp, boom, max_attempts=3, component_id=cid)
             assert (sent, failed) == (0, 1)
             async with pyp.begin() as conn:
                 r = (
@@ -84,18 +87,22 @@ def test_outbox_state_machine(require_pg: None) -> None:
                 ).scalar_one()
 
             # 退避后 next_retry_at 在未来 → 本轮不再被领取
-            sent2, failed2 = await outbox.run_outbox_once(pyp, boom, max_attempts=3)
+            sent2, failed2 = await outbox.run_outbox_once(pyp, boom, max_attempts=3, component_id=cid)
             assert (sent2, failed2) == (0, 0)
 
             # 4) 达上限 → 死信。mark_* 有状态守卫（仅 inflight 可终结），先把行置回 inflight 再失败
-            await _force_state(pyp, oid2, "inflight")
-            await outbox.mark_failed(pyp, oid2, error="again", attempts=1, max_attempts=3)  # →2, pending
-            await _force_state(pyp, oid2, "inflight")
-            st = await outbox.mark_failed(pyp, oid2, error="final", attempts=2, max_attempts=3)  # →3 ≥ max → dead
+            await _force_state(pyp, oid2, "inflight", "claim-a")
+            await outbox.mark_failed(
+                pyp, oid2, claim_token="claim-a", error="again", attempts=1, max_attempts=3
+            )  # →2, pending
+            await _force_state(pyp, oid2, "inflight", "claim-b")
+            st = await outbox.mark_failed(
+                pyp, oid2, claim_token="claim-b", error="final", attempts=2, max_attempts=3
+            )  # →3 ≥ max → dead
             assert st == "dead" and (await _state(pyp, oid2))[0] == "dead"
 
             # 4b) 状态守卫：非 inflight 行的迟到终结是 no-op（租约被回收重领后旧 Consumer 不能覆盖）
-            await outbox.mark_sent(pyp, oid2)
+            assert await outbox.mark_sent(pyp, oid2, claim_token="claim-b") is False
             assert (await _state(pyp, oid2))[0] == "dead"
 
             # 5) 租约回收：造一条 inflight + 过期租约 → requeue_expired → pending
@@ -108,12 +115,20 @@ def test_outbox_state_machine(require_pg: None) -> None:
                             state="inflight",
                             attempts=0,
                             lease_until=datetime.now(UTC) - timedelta(seconds=10),
+                            claim_token="expired-claim",
                         )
                         .returning(PushOutbox.id)
                     )
                 ).scalar_one()
-            assert await outbox.requeue_expired(pyp) >= 1
+            assert await outbox.requeue_expired(pyp, component_id=cid) == 1
             assert (await _state(pyp, oid3))[0] == "pending"
+
+            # 6) 回收后重新领取会换 claim_token；旧消费者的迟到成功不能覆盖新领取。
+            claimed = next(row for row in await outbox.claim_due(pyp, component_id=cid) if row["id"] == oid3)
+            assert claimed["claim_token"] != "expired-claim"
+            assert await outbox.mark_sent(pyp, oid3, claim_token="expired-claim") is False
+            assert (await _state(pyp, oid3))[0] == "inflight"
+            assert await outbox.mark_sent(pyp, oid3, claim_token=claimed["claim_token"]) is True
         finally:
             async with pyp.begin() as conn:
                 await conn.execute(
@@ -143,7 +158,10 @@ def test_outbox_claim_no_double(require_pg: None) -> None:
             for i in range(20):
                 await outbox.enqueue_push(pyp_a, component_id=cid, idempotency_key=f"race-{i}")
 
-            got_a, got_b = await asyncio.gather(outbox.claim_due(pyp_a, limit=50), outbox.claim_due(pyp_b, limit=50))
+            got_a, got_b = await asyncio.gather(
+                outbox.claim_due(pyp_a, limit=50, component_id=cid),
+                outbox.claim_due(pyp_b, limit=50, component_id=cid),
+            )
             ids_a = {r["id"] for r in got_a if r["component_id"] == cid}
             ids_b = {r["id"] for r in got_b if r["component_id"] == cid}
             assert not (ids_a & ids_b), f"并发领取出现重复: {ids_a & ids_b}"

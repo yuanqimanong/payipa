@@ -26,8 +26,8 @@ import shutil
 import stat
 import subprocess
 import tempfile
+import time
 import uuid
-from functools import lru_cache
 from pathlib import Path
 
 import anyio
@@ -62,9 +62,22 @@ class SandboxScriptError(RuntimeError):
         self.logs = logs
 
 
-@lru_cache(maxsize=1)
-def sandbox_available(docker: str = "docker") -> bool:
-    """探测 Linux 容器运行时：docker CLI 在且 server OS 为 linux（Docker Desktop/WSL2 与 Linux 宿主同判）。"""
+# 探测结果短缓存（docker 名 → (探测单调时刻, 结果)）。带 TTL，而非进程级永久缓存：
+# fail-closed 下主控启动早于 docker daemon 就绪会首探 False，永久缓存会导致 daemon 可用后仍全量拒绝组装直到重启进程；
+# docker 中途崩溃则缓存 True 会持续走进真正执行再失败。TTL 让「沙箱不可用」成为可自愈状态而非需重启的黑箱。
+_SANDBOX_PROBE_TTL_S = 30.0
+_sandbox_probe_cache: dict[str, tuple[float, bool]] = {}
+
+
+def sandbox_available(docker: str = "docker", *, ttl_s: float = _SANDBOX_PROBE_TTL_S) -> bool:
+    """探测 Linux 容器运行时：docker CLI 在且 server OS 为 linux（Docker Desktop/WSL2 与 Linux 宿主同判）。
+
+    结果按 docker 名缓存 ttl_s 秒（默认 30s）后自动重探，避免一次瞬时探测被固化成进程生命周期内的静态结论。
+    """
+    now = time.monotonic()
+    cached = _sandbox_probe_cache.get(docker)
+    if cached is not None and now - cached[0] < ttl_s:
+        return cached[1]
     try:
         out = subprocess.run(  # noqa: S603 —— 固定参数探测，非用户输入
             [docker, "version", "--format", "{{.Server.Os}}"],
@@ -72,9 +85,11 @@ def sandbox_available(docker: str = "docker") -> bool:
             timeout=10,
             check=False,
         )
+        result = out.returncode == 0 and out.stdout.decode().strip() == "linux"
     except OSError, subprocess.TimeoutExpired:
-        return False
-    return out.returncode == 0 and out.stdout.decode().strip() == "linux"
+        result = False
+    _sandbox_probe_cache[docker] = (now, result)
+    return result
 
 
 def gateway_proxy_conf(gateway_port: int) -> str:

@@ -3,35 +3,64 @@
 from __future__ import annotations
 
 import payipa_contracts as c
+import pytest
 from fastapi.testclient import TestClient
-from pyp_server.main import app
-
-client = TestClient(app)
+from pyp_server.main import create_app
 
 
-def test_healthz_no_db() -> None:
+@pytest.fixture
+def client():
+    with TestClient(create_app()) as value:
+        yield value
+
+
+def test_healthz_no_db(client) -> None:
     r = client.get("/healthz")
     assert r.status_code == 200
     assert r.json()["contract_version"] == c.CONTRACT_VERSION
+    assert r.headers["x-content-type-options"] == "nosniff"
+    assert r.headers["x-frame-options"] == "DENY"
+    assert "frame-ancestors 'none'" in r.headers["content-security-policy"]
+    assert "strict-transport-security" not in r.headers
 
 
-def test_openapi_exposes_contract_schemas() -> None:
+def test_production_security_headers_and_trusted_hosts(monkeypatch) -> None:
+    from pyp_server import main as main_mod
+    from pyp_server.settings import ServerSettings
+
+    settings = ServerSettings(
+        environment="production",
+        rbac_enabled=True,
+        session_secret="s" * 40,
+        bootstrap_token="b" * 32,
+        allowed_hosts="pyp.example.test",
+    )
+    monkeypatch.setattr(main_mod, "get_server_settings", lambda: settings)
+    monkeypatch.setattr(main_mod, "run_preflight", lambda *_args, **_kwargs: None)
+    with TestClient(main_mod.create_app(), base_url="https://pyp.example.test") as production_client:
+        response = production_client.get("/livez")
+        assert response.status_code == 200
+        assert response.headers["strict-transport-security"].startswith("max-age=31536000")
+        assert production_client.get("/livez", headers={"host": "untrusted.test"}).status_code == 400
+
+
+def test_openapi_exposes_contract_schemas(client) -> None:
     r = client.get("/openapi.json")
     assert r.status_code == 200
     schemas = r.json()["components"]["schemas"]
     for name in ("TaskSpec", "NodeSnapshot", "QueueStat", "BatchProgress", "TaskAssign", "RulePointer"):
         assert name in schemas, name
     # 已生效/未生效 标注随 OpenAPI 暴露
-    assert schemas["TaskSpec"]["properties"]["group"]["x-effective"] is False
+    assert schemas["TaskSpec"]["properties"]["group"]["x-effective"] is True
     assert schemas["TaskSpec"]["properties"]["task_id"]["x-effective"] is True
 
 
-def test_docs_and_redoc_served() -> None:
+def test_docs_and_redoc_served(client) -> None:
     assert client.get("/docs").status_code == 200
     assert client.get("/openapi.json").headers["content-type"].startswith("application/json")
 
 
-def test_task_preview_roundtrip() -> None:
+def test_task_preview_roundtrip(client) -> None:
     spec = {
         "task_id": "t1",
         "req_id": "rq1",
@@ -47,31 +76,102 @@ def test_task_preview_roundtrip() -> None:
     assert body["task"]["rule_ptr"]["content_hash"] == "deadbeef"
 
 
-def test_agent_ws_register_handshake() -> None:
+def test_agent_ws_register_handshake(require_pg: None, client) -> None:
+    import asyncio
+    import uuid
+
+    from payipa.db.settings import get_settings
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import create_async_engine
+
+    agent_id = f"ws-{uuid.uuid4().hex}"
     # 默认 join token = "dev"；握手须带 Authorization: Bearer dev
-    with client.websocket_connect("/ws/agent", headers={"authorization": "Bearer dev"}) as conn:
-        conn.send_json({"type": "register", "agent_id": "a1", "hostname": "h1", "slot_n": 4})
-        ack = conn.receive_json()
+    try:
+        with client.websocket_connect("/ws/agent", headers={"authorization": "Bearer dev"}) as conn:
+            conn.send_json({"type": "register", "agent_id": agent_id, "hostname": "h1", "slot_n": 4})
+            ack = conn.receive_json()
+    finally:
+
+        async def cleanup() -> None:
+            engine = create_async_engine(get_settings().async_url("pyp"))
+            try:
+                async with engine.begin() as db:
+                    await db.execute(text("DELETE FROM agents WHERE agent_id=:a"), {"a": agent_id})
+            finally:
+                await engine.dispose()
+
+        asyncio.run(cleanup())
     assert ack["type"] == "register_ack"
     assert ack["node_token"]
     assert ack["contract_version"] == c.CONTRACT_VERSION
 
 
-def test_agent_ws_rejects_bad_join_token() -> None:
+def test_agent_ws_rejects_bad_join_token(client) -> None:
     """错误/缺失 join token → 握手被拒（close 1008），不进入注册。"""
-    import pytest
     from starlette.websockets import WebSocketDisconnect
 
     with (
         pytest.raises(WebSocketDisconnect),
         client.websocket_connect("/ws/agent", headers={"authorization": "Bearer wrong"}) as conn,
     ):
+        conn.send_json({"type": "register", "agent_id": "bad-token", "hostname": "h1", "slot_n": 1})
         conn.receive_json()
 
 
-def test_agent_ws_register_fail_closed_in_production(monkeypatch) -> None:
+def test_agent_enrollment_is_one_time_and_node_token_reconnects(require_pg: None, client) -> None:
+    import asyncio
+    import uuid
+
+    from payipa.crawl.run import issue_agent_enrollment
+    from payipa.db.settings import get_settings
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import create_async_engine
+    from starlette.websockets import WebSocketDisconnect
+
+    agent_id = f"enroll-{uuid.uuid4().hex}"
+
+    async def issue() -> str:
+        engine = create_async_engine(get_settings().async_url("pyp"))
+        try:
+            token, _expires = await issue_agent_enrollment(engine, created_by=None)
+            return token
+        finally:
+            await engine.dispose()
+
+    enrollment = asyncio.run(issue())
+    try:
+        with client.websocket_connect("/ws/agent", headers={"authorization": f"Bearer {enrollment}"}) as conn:
+            conn.send_json({"type": "register", "agent_id": agent_id, "hostname": "h1", "slot_n": 1})
+            first = conn.receive_json()
+        assert first["type"] == "register_ack" and first["node_token"]
+
+        with client.websocket_connect("/ws/agent", headers={"authorization": f"Bearer {first['node_token']}"}) as conn:
+            conn.send_json({"type": "register", "agent_id": agent_id, "hostname": "h2", "slot_n": 1})
+            reconnect = conn.receive_json()
+        assert reconnect["type"] == "register_ack" and reconnect["node_token"] == ""
+
+        with (
+            pytest.raises(WebSocketDisconnect),
+            client.websocket_connect("/ws/agent", headers={"authorization": f"Bearer {enrollment}"}) as conn,
+        ):
+            conn.send_json({"type": "register", "agent_id": f"{agent_id}-replay", "hostname": "h3", "slot_n": 1})
+            conn.receive_json()
+    finally:
+
+        async def cleanup() -> None:
+            engine = create_async_engine(get_settings().async_url("pyp"))
+            try:
+                async with engine.begin() as db:
+                    await db.execute(text("DELETE FROM agent_enrollments WHERE agent_id=:a"), {"a": agent_id})
+                    await db.execute(text("DELETE FROM agents WHERE agent_id=:a"), {"a": agent_id})
+            finally:
+                await engine.dispose()
+
+        asyncio.run(cleanup())
+
+
+def test_agent_ws_register_fail_closed_in_production(monkeypatch, client) -> None:
     """P0-07：生产环境注册落库失败 → 拒接（1011），不得退回内存默认注册。"""
-    import pytest
     from pyp_server.settings import get_server_settings
     from starlette.websockets import WebSocketDisconnect
 
@@ -93,7 +193,7 @@ def test_agent_ws_register_fail_closed_in_production(monkeypatch) -> None:
         get_server_settings.cache_clear()
 
 
-def test_livez_and_version() -> None:
+def test_livez_and_version(client) -> None:
     """P0-06：/livez 零依赖存活；/version 返回版本指纹且永不 500。"""
     r = client.get("/livez")
     assert r.status_code == 200 and r.json()["status"] == "ok"
@@ -105,7 +205,7 @@ def test_livez_and_version() -> None:
     assert "expected_head" in body["schema"]
 
 
-def test_readyz_reports_components() -> None:
+def test_readyz_reports_components(client) -> None:
     """P0-06：/readyz 返回分项结果；测试环境后台环关闭 → 报 disabled 而非失败。"""
     from pyp_server.routers import health as health_mod
 

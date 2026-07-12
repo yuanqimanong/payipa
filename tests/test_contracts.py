@@ -53,6 +53,7 @@ def test_request_state_positive() -> None:
         c.TaskAssign,
         c.Cancel,
         c.RegisterAck,
+        c.ResultAck,
         c.ErrorFrame,
     ],
 )
@@ -65,8 +66,10 @@ def test_fields_carry_effective_annotation() -> None:
     # 契约红线：字段必须诚实标注「已生效/未生效」
     props = c.TaskSpec.model_json_schema()["properties"]
     assert props["task_id"]["x-effective"] is True
-    assert props["group"]["x-effective"] is False
-    assert props["group"]["description"].startswith("[未生效]")
+    assert props["group"]["x-effective"] is True
+    assert props["group"]["description"].startswith("[已生效]")
+    assert props["account"]["x-effective"] is False
+    assert props["account"]["description"].startswith("[未生效]")
     assert props["task_id"]["description"].startswith("[已生效]")
 
 
@@ -108,3 +111,12 @@ def test_task_assign_carries_task_spec() -> None:
     restored = c.TaskAssign.model_validate_json(dumped)
     assert restored.task.rule_ptr.content_hash == "deadbeef"
     assert restored.task.channel == c.Channel.PROD
+
+
+def test_rule_regexes_are_validated_at_publish_time() -> None:
+    with pytest.raises(ValueError):
+        c.LayoutMatch(url_regex="[")
+    with pytest.raises(ValueError):
+        c.FailWhen(body_regex=["("])
+    with pytest.raises(ValueError):
+        c.FailWhen(status_in=[42])

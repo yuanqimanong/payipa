@@ -11,7 +11,7 @@ import hashlib
 import json
 from collections.abc import Iterable, Sequence
 
-from payipa_contracts import Item
+from payipa_contracts import Channel, Item
 from sqlalchemy import (
     BigInteger,
     Column,
@@ -32,17 +32,24 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 from payipa.db.ident import check_code, check_field
 
 
-def data_table_name(source_uuid: str) -> str:
-    return f"data_{check_code(source_uuid)}"  # 短码先过统一校验（P0-13）：所有建表/取数路径都经此拼名
+def data_table_name(source_uuid: str, channel: Channel | str = Channel.PROD) -> str:
+    """返回按任务通道物理隔离的数据表名。"""
+    value = Channel(channel)
+    prefix = "test_data" if value is Channel.TEST else "data"
+    return f"{prefix}_{check_code(source_uuid)}"
 
 
-def build_data_table(source_uuid: str, indexed_fields: Sequence[str] = ()) -> Table:
+def build_data_table(
+    source_uuid: str,
+    indexed_fields: Sequence[str] = (),
+    channel: Channel | str = Channel.PROD,
+) -> Table:
     """构造一个数据源的混合 schema 表对象（用独立 MetaData，不污染 Alembic 元数据）。
 
     勾选索引的字段 -> ``idx_<field>`` STORED 生成列（``fields ->> 'field'``）+ B-tree。
     """
     md = MetaData()  # 每次独立，避免与 alembic 元数据/其它表名冲突
-    name = data_table_name(source_uuid)
+    name = data_table_name(source_uuid, channel)
     columns: list[Column] = [
         Column("id", BigInteger, primary_key=True, autoincrement=True),
         Column("data_fingerprint", String(64), nullable=False, unique=True),  # 表内/源内唯一

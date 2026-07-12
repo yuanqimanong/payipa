@@ -7,13 +7,14 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from payipa.crawl.run import batch_progress as compute_batch_progress
 from payipa.crawl.run import cancel_batch as run_cancel_batch
+from payipa.crawl.run import issue_agent_enrollment, rerun_source, review_source_access, revoke_agent_credential
 from payipa.crawl.run import queue_depth as compute_queue_depth
-from payipa.crawl.run import rerun_source, review_source_access
 from payipa.db.engine import get_engine
 from payipa.db.ident import check_code
 from payipa.db.settings import get_settings as get_db_settings
@@ -38,7 +39,7 @@ from payipa_contracts import (
 )
 from pydantic import BaseModel, Field
 
-from pyp_server.auth import get_current_user, require_perm
+from pyp_server.auth import get_current_user, require_perm, require_user
 from pyp_server.service import dispatch_source_run
 
 router = APIRouter(prefix="/api", tags=["api"])
@@ -90,6 +91,67 @@ class CancelResponse(BaseModel):
 )
 async def list_agents(request: Request) -> list[NodeSnapshot]:
     return request.app.state.hub.snapshots()
+
+
+class AgentEnrollmentRequest(BaseModel):
+    ttl_s: int = Field(600, ge=60, le=3600, description="一次性入网码有效期（秒）")
+
+
+class AgentEnrollmentResponse(BaseModel):
+    token: str = Field(..., description="一次性入网码；仅本次响应返回")
+    expires_at: datetime
+
+
+@router.post(
+    "/agents/enrollments",
+    response_model=AgentEnrollmentResponse,
+    summary="签发一次性 Agent 入网码",
+    dependencies=[Depends(require_perm("nodes.manage"))],
+)
+async def create_agent_enrollment(
+    request: Request,
+    body: AgentEnrollmentRequest | None = None,
+) -> AgentEnrollmentResponse:
+    user = await require_user(request)
+    body = body or AgentEnrollmentRequest()
+    token, expires_at = await issue_agent_enrollment(get_engine("pyp"), created_by=int(user["id"]), ttl_s=body.ttl_s)
+    await record_audit_best_effort(
+        get_engine("pyp"),
+        action="agent.enrollment_created",
+        actor_id=int(user["id"]),
+        object_type="agent_enrollment",
+        after={"expires_at": expires_at.isoformat()},
+        source="api",
+    )
+    return AgentEnrollmentResponse(token=token, expires_at=expires_at)
+
+
+@router.delete(
+    "/agents/{agent_id}/credential",
+    summary="撤销 Agent 长期凭证并断开在线连接",
+    dependencies=[Depends(require_perm("nodes.manage"))],
+)
+async def revoke_agent(
+    agent_id: str,
+    request: Request,
+) -> dict:
+    user = await require_user(request)
+    if not 1 <= len(agent_id) <= 64:
+        raise HTTPException(status_code=400, detail="invalid agent_id")
+    if not await revoke_agent_credential(get_engine("pyp"), agent_id):
+        raise HTTPException(status_code=404, detail="agent not found")
+    conn = request.app.state.hub.get(agent_id)
+    if conn is not None:
+        await conn.ws.close(code=1008, reason="node credential revoked")
+    await record_audit_best_effort(
+        get_engine("pyp"),
+        action="agent.credential_revoked",
+        actor_id=int(user["id"]),
+        object_type="agent",
+        object_id=agent_id,
+        source="api",
+    )
+    return {"agent_id": agent_id, "revoked": True}
 
 
 @router.get(
@@ -174,7 +236,7 @@ async def run_source(uuid: str, body: RunRequest) -> RunResponse:
         )
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except (PermissionError, ValueError) as exc:
+    except (PermissionError, RuntimeError, ValueError) as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return RunResponse(**result)
 

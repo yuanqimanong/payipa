@@ -1,0 +1,16 @@
+{
+  "release": "0.1.0",
+  "contract_version": 4,
+  "minimum_contract_version": 4,
+  "schema_head": "f6a7b8c9d0e1",
+  "python": ">=3.14",
+  "topology": {
+    "server_instances": 1,
+    "server_workers": 1,
+    "databases": ["pyp_sys", "data_center", "business"],
+    "storage": ["local"]
+  },
+  "images": ["payipa-server", "payipa-agent", "payipa-agent-browser"],
+  "license": "proprietary",
+  "supported_platforms": ["linux/amd64"]
+}

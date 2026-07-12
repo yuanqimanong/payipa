@@ -16,12 +16,18 @@ class RuleCache:
         self.server_base = server_base.rstrip("/")
         self._cache: dict[str, RulePack] = {}
 
-    async def get(self, ptr: RulePointer) -> RulePack:
+    async def get(self, ptr: RulePointer, token: str | None = None) -> RulePack:
         cached = self._cache.get(ptr.content_hash)
         if cached is not None:
             return cached
+        if not token:
+            raise PermissionError("task did not include a rule read token")
         async with niquests.AsyncSession() as session:
-            resp = await session.get(f"{self.server_base}/internal/rules/{ptr.content_hash}", timeout=30)
+            resp = await session.get(
+                f"{self.server_base}/internal/rules/{ptr.content_hash}",
+                headers={"x-rule-token": token},
+                timeout=30,
+            )
         resp.raise_for_status()
         pack = RulePack.model_validate(resp.json())
         self._cache[ptr.content_hash] = pack  # 内容寻址不可变 → 永久缓存

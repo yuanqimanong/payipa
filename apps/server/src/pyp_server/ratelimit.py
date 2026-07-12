@@ -21,11 +21,27 @@ class _Bucket:
 
 
 class SourceRateLimiter:
-    def __init__(self, *, min_rate: float = 0.5, decrease: float = 0.5, increase: float = 1.0) -> None:
+    def __init__(
+        self, *, min_rate: float = 0.5, decrease: float = 0.5, increase: float = 1.0, max_buckets: int = 4096
+    ) -> None:
         self._b: dict[str, _Bucket] = {}
         self.min_rate = min_rate
         self.decrease = decrease
         self.increase = increase
+        # 桶按需创建、原先只增不删（源删除后仍驻留）→ 进程内缓慢泄漏。设容量上界 + LRU 淘汰：
+        # 超限时逐出最久未使用且当前未处于冷却窗的桶（被逐出的桶下次使用时按额定速率重建，AIMD 状态归零无害）。
+        self.max_buckets = max_buckets
+
+    def _evict_if_needed(self, now: float) -> None:
+        overflow = len(self._b) - self.max_buckets
+        if overflow <= 0:
+            return
+        idle = sorted(
+            (s for s, b in self._b.items() if b.blocked_until <= now),
+            key=lambda s: self._b[s].updated,
+        )
+        for s in idle[:overflow]:
+            del self._b[s]
 
     def take(self, source: str, base_rate: float, *, now: float | None = None) -> bool:
         """尝试为 source 取一个令牌；成功返回 True 并扣减。base_rate≤0 = 不限。"""
@@ -34,6 +50,7 @@ class SourceRateLimiter:
         now = time.monotonic() if now is None else now
         b = self._b.get(source)
         if b is None:
+            self._evict_if_needed(now)
             b = self._b[source] = _Bucket(base=base_rate, eff=base_rate, tokens=base_rate, updated=now)
         b.base = base_rate  # 配置可能被改，跟随
         b.eff = min(b.eff, b.base)  # eff 不超过额定

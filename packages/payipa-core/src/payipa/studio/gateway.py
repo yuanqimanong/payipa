@@ -26,6 +26,11 @@ def _column(table, name: str):
     return table.c["fields"][name].astext
 
 
+def _like_escape(value: str) -> str:
+    """转义 LIKE 通配符：CONTAINS 里用户输入的 % 和 _ 按字面匹配，不改变匹配语义。"""
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
 def _apply(col, f: ColumnFilter):
     op = f.op
     if op == FilterOp.EQ:
@@ -43,7 +48,7 @@ def _apply(col, f: ColumnFilter):
     if op == FilterOp.IN:
         return col.in_(f.value if isinstance(f.value, list | tuple) else [f.value])
     if op == FilterOp.CONTAINS:
-        return col.like(f"%{f.value}%")
+        return col.like(f"%{_like_escape(str(f.value))}%", escape="\\")
     raise ValueError(f"不支持的过滤算子: {op}")
 
 

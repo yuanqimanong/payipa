@@ -18,10 +18,12 @@ import anyio.abc
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from payipa.db.engine import get_engine
+from payipa.db.engine import get_engine, get_sessionmaker
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from pyp_server.consumer import consumer_loop
 from pyp_server.hub import AgentHub
+from pyp_server.login_guard import LoginThrottle
 from pyp_server.preflight import run_preflight
 from pyp_server.ratelimit import SourceRateLimiter
 from pyp_server.routers import (
@@ -93,33 +95,40 @@ async def _guarded_loops(app: FastAPI, tg: anyio.abc.TaskGroup) -> None:
 @asynccontextmanager
 async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     """服务生命周期：在 anyio 结构化并发下拉起后台派发环 + 推送 Consumer，关停时整树取消。"""
-    settings = get_server_settings()
-    app.state.loop_health = {}  # readyz 据此判断后台环心跳（P0-06）
-    app.state.lock_conn = None
-    if not (settings.dispatch_enabled or settings.push_enabled):
-        yield  # 测试/特殊部署：不启后台环
-        return
-    if settings.dispatch_enabled:
-        app.state.loop_health["dispatch"] = LoopHealth("dispatch", settings.dispatch_interval_s)
-    if settings.push_enabled:
-        app.state.loop_health["consumer"] = LoopHealth("consumer", settings.push_interval_s)
-    async with anyio.create_task_group() as tg:
-        if settings.single_worker_guard:
-            tg.start_soon(_guarded_loops, app, tg)
-        else:
-            if settings.dispatch_enabled:
-                tg.start_soon(dispatch_loop, app)
-            if settings.push_enabled:
-                tg.start_soon(consumer_loop, app)
-        try:
-            yield
-        finally:
-            tg.cancel_scope.cancel()
-            if app.state.lock_conn is not None:
-                try:
-                    await unlock(app.state.lock_conn)  # close 只还池不断会话，须显式释放锁
-                finally:
-                    await app.state.lock_conn.aclose()
+    try:
+        settings = get_server_settings()
+        app.state.loop_health = {}  # readyz 据此判断后台环心跳（P0-06）
+        app.state.lock_conn = None
+        if not (settings.dispatch_enabled or settings.push_enabled):
+            yield  # 测试/特殊部署：不启后台环
+            return
+        if settings.dispatch_enabled:
+            app.state.loop_health["dispatch"] = LoopHealth("dispatch", settings.dispatch_interval_s)
+        if settings.push_enabled:
+            app.state.loop_health["consumer"] = LoopHealth("consumer", settings.push_interval_s)
+        async with anyio.create_task_group() as tg:
+            if settings.single_worker_guard:
+                tg.start_soon(_guarded_loops, app, tg)
+            else:
+                if settings.dispatch_enabled:
+                    tg.start_soon(dispatch_loop, app)
+                if settings.push_enabled:
+                    tg.start_soon(consumer_loop, app)
+            try:
+                yield
+            finally:
+                tg.cancel_scope.cancel()
+                if app.state.lock_conn is not None:
+                    try:
+                        await unlock(app.state.lock_conn)  # close 只还池不断会话，须显式释放锁
+                    finally:
+                        await app.state.lock_conn.aclose()
+    finally:
+        # 在承载这些 asyncpg 连接的事件循环关闭前释放连接池；测试重建 app 和生产 SIGTERM 都走这里。
+        for key in ("pyp", "data_center", "business"):
+            await get_engine(key).dispose()
+        get_sessionmaker.cache_clear()
+        get_engine.cache_clear()
 
 
 def create_app() -> FastAPI:
@@ -132,8 +141,31 @@ def create_app() -> FastAPI:
         debug=settings.debug,
         lifespan=_lifespan,
     )
+    allowed_hosts = [value.strip() for value in settings.allowed_hosts.split(",") if value.strip()]
+    if allowed_hosts and allowed_hosts != ["*"]:
+        app.add_middleware(TrustedHostMiddleware, allowed_hosts=allowed_hosts)
+
+    @app.middleware("http")
+    async def security_headers(request, call_next):
+        response = await call_next(request)
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("X-Frame-Options", "DENY")
+        response.headers.setdefault("Referrer-Policy", "same-origin")
+        response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+        response.headers.setdefault(
+            "Content-Security-Policy",
+            "default-src 'self'; img-src 'self' data: https://fastapi.tiangolo.com; "
+            "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+            "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; connect-src 'self' ws: wss:; "
+            "frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
+        )
+        if settings.environment == "production":
+            response.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+        return response
+
     app.state.hub = AgentHub()  # 在线 agent 连接注册表（进程内单例）
     app.state.limiter = SourceRateLimiter()  # 每源令牌桶 + AIMD（派发环限流、结果回报调频）
+    app.state.login_throttle = LoginThrottle()  # 登录失败节流：抵御在线暴力破解（进程内、按 IP+用户名）
     app.include_router(health.router)
     app.include_router(auth_routes.router)
     app.include_router(setup.router)

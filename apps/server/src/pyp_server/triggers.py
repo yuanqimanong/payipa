@@ -31,6 +31,9 @@ async def on_batch_finalized(batch_id: int) -> None:
         return
     if ctx is None:
         return
+    if ctx["channel"] == "test":
+        logger.info("batch %s is test-only; production triggers skipped", batch_id)
+        return
     params = ctx["params"]
 
     # ① 链路自动推送：入 outbox（幂等键 = batch-<id>，同批只入一次）

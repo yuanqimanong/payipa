@@ -9,6 +9,7 @@ from __future__ import annotations
 from functools import lru_cache
 
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async_engine
+from sqlalchemy.pool import NullPool
 
 from payipa.db.settings import DbKey, get_settings
 
@@ -17,7 +18,8 @@ from payipa.db.settings import DbKey, get_settings
 def get_engine(db: DbKey) -> AsyncEngine:
     """返回指定库的 async 引擎（进程内缓存，懒建）。"""
     settings = get_settings()
-    return create_async_engine(settings.async_url(db), pool_pre_ping=True, future=True)
+    pool_kw = {"poolclass": NullPool} if settings.db_null_pool else {"pool_pre_ping": True}
+    return create_async_engine(settings.async_url(db), future=True, **pool_kw)
 
 
 @lru_cache

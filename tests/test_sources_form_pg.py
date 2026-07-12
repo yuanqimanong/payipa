@@ -76,6 +76,29 @@ def test_create_error_refills_input(require_pg: None) -> None:
             assert "books.toscrape.com" in r.text
             assert "h3 a@title" in r.text
 
+            # 表单停留过久导致 CSRF cookie 过期时，也应回填全部输入并签发新 token。
+            client.cookies.delete("pyp_csrf")
+            expired = client.post(
+                "/sources/create",
+                data={
+                    "name": "令牌过期仍回填",
+                    "uuid": _UUID,
+                    "seed_urls": "https://books.toscrape.com/",
+                    "access_basis": "public_policy",
+                    "access_reference": "公开练习站",
+                    "access_confirmed": "on",
+                    "field_name": "title",
+                    "field_css": "h3 a@title",
+                    "field_type": "store",
+                    "csrf_token": token,
+                },
+                follow_redirects=False,
+            )
+            assert expired.status_code == 403
+            assert "令牌过期仍回填" in expired.text
+            assert "h3 a@title" in expired.text
+            assert client.cookies.get("pyp_csrf")
+
         # 未建行
         async def _exists() -> bool:
             pyp = create_async_engine(get_settings().async_url("pyp"))

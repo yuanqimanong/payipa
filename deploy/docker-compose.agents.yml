@@ -1,27 +1,29 @@
-# 多 agent 容器（每容器 = 一个采集节点，agent-id 默认取容器主机名，天然唯一）。
+# 单机 Agent 部署。每台机器使用自己的 PYP_AGENT_STATE_DIR；不要用 --scale 共享身份目录。
 # 主控（uvicorn）在宿主机 :8000 运行；agent 出站连 host.docker.internal。
-# 构建上下文 = project/ 根（含 payipa 与 jianbing_utils 兄弟目录），故 context 指向 ../..。
+# 构建上下文 = payipa 仓库根，jianbing-utils 由 uv.lock 的固定 Git tag 解析。
 #
-#   在 payipa/ 目录起 N 个 agent：
-#     docker compose -f deploy/docker-compose.agents.yml up --build --scale agent=3
+#   在节点机的 payipa/ 目录启动：
+#     PYP_SERVER=https://pyp.example.com PYP_TOKEN=<UI签发的一次性入网码> docker compose -f deploy/docker-compose.agents.yml up --build -d
 #   停：
 #     docker compose -f deploy/docker-compose.agents.yml down
-#   自定义主控地址/令牌：
-#     PYP_SERVER=http://host.docker.internal:8000 PYP_TOKEN=dev docker compose ... up --scale agent=5
 name: payipa-agents
 
 services:
   agent:
     build:
-      context: ../..
-      dockerfile: payipa/packages/pyp-agent/Dockerfile
+      context: ..
+      dockerfile: ${PYP_AGENT_DOCKERFILE:-packages/pyp-agent/Dockerfile}
     image: payipa-agent:local
     command:
       - join
       - --server
       - ${PYP_SERVER:-http://host.docker.internal:8000}
       - --token
-      - ${PYP_TOKEN:-dev}
+      - ${PYP_TOKEN:-missing-enrollment-token}
+      - --state-dir
+      - /state
+    volumes:
+      - ${PYP_AGENT_STATE_DIR:-./.pyp-agent-state}:/state
     extra_hosts:
       - "host.docker.internal:host-gateway" # Linux 下解析到宿主机；Docker Desktop 原生支持
     restart: unless-stopped

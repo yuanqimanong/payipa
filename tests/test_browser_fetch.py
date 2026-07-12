@@ -15,6 +15,14 @@ from payipa_contracts import EngineHint
 from pyp_agent import fetch as fetch_mod
 
 
+@pytest.fixture(autouse=True)
+def _public_test_dns(monkeypatch):
+    async def public_dns(_host: str, _port: int) -> set[str]:
+        return {"93.184.216.34"}
+
+    monkeypatch.setattr("pyp_agent.url_policy.resolve_host", public_dns)
+
+
 def _install_fake_playwright(html: str, status: int, final_url: str) -> types.ModuleType:
     """构造假 playwright.async_api，goto→content 返回给定 HTML；返回装好的模块（供清理）。"""
     calls: dict = {}
@@ -40,6 +48,9 @@ def _install_fake_playwright(html: str, status: int, final_url: str) -> types.Mo
         async def new_page(self):
             return _Page()
 
+        async def route(self, pattern, handler):
+            calls["route"] = {"pattern": pattern, "handler": handler}
+
     class _Browser:
         async def new_context(self, **kw):
             return _Context(**kw)
@@ -48,8 +59,9 @@ def _install_fake_playwright(html: str, status: int, final_url: str) -> types.Mo
             calls["closed"] = True
 
     class _Chromium:
-        async def launch(self, headless=True):
+        async def launch(self, headless=True, **kwargs):
             calls["headless"] = headless
+            calls["launch_kwargs"] = kwargs
             return _Browser()
 
     class _PW:
@@ -105,10 +117,27 @@ def test_browser_fetch_renders_html() -> None:
         # 接线断言：headless 起、DOM 就绪等待、超时换算 ms、UA header 注入 context、浏览器关闭
         calls = fetch_mod._fake_calls
         assert calls["headless"] is True
+        assert "MAP x 93.184.216.34" in calls["launch_kwargs"]["args"][0]
         assert calls["goto"]["wait_until"] == "domcontentloaded"
         assert calls["goto"]["timeout"] == 5000
         assert calls["context_kwargs"]["extra_http_headers"] == {"user-agent": "pyp"}
         assert calls["closed"] is True
+
+        class _Request:
+            url = "http://sub.x/asset.js"
+
+        class _Route:
+            request = _Request()
+
+            async def abort(self, reason):
+                calls["aborted"] = reason
+
+            async def continue_(self):
+                calls["continued"] = True
+
+        asyncio.run(calls["route"]["handler"](_Route()))
+        assert calls["aborted"] == "blockedbyclient"
+        assert "continued" not in calls
     finally:
         _uninstall_fake()
 
@@ -118,7 +147,11 @@ def test_http_engine_unaffected(monkeypatch) -> None:
     _uninstall_fake()
 
     async def fake_http(
-        url: str, timeout: float, headers: dict[str, str] | None, max_bytes: int
+        url: str,
+        timeout: float,
+        headers: dict[str, str] | None,
+        max_bytes: int,
+        allowed_domains: list[str],
     ) -> fetch_mod.FetchResult:
         return fetch_mod.FetchResult(status=200, url=url, body=b"ok", content_type="text/plain")
 

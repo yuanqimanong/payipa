@@ -83,6 +83,7 @@ def test_upload_token_roundtrip() -> None:
     assert claims is not None
     assert claims["s"] == "src1"
     assert claims["b"] == "5"
+    assert claims["c"] == "prod"
     assert verify_upload_token("wrong-secret", token) is None  # 签名不符
     assert verify_upload_token("secret", token, now=99_999_999_999) is None  # 过期
     assert verify_upload_token("secret", token + "x") is None  # 篡改

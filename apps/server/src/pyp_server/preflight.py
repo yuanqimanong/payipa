@@ -1,10 +1,10 @@
 """启动前安全校验：production 模式拒绝不安全配置（dev 默认密钥 / RBAC 关闭）。
 
 dev 模式（默认）宽松：仅在 API 免登录时打一条醒目告警。production 模式（PYP_SERVER_ENVIRONMENT=production）
-严格：session_secret / upload_secret / cred_kek / agent_join_token 仍为 dev 默认或过短、或 RBAC 未开，
+严格：session_secret / bootstrap_token / upload_secret / cred_kek 仍为 dev 默认或过短、或 RBAC 未开，
 一律 RuntimeError 拒绝启动——把"忘了配密钥就上线"从隐患变成开机即失败。
 
-配置诚实（P0-16，两种模式都查）：配了未实现的存储后端（S3_*）开机即失败；REDIS_URL 无消费方，配置只告警。
+配置诚实（P0-16，两种模式都查）：配了未实现的 S3_* 或 REDIS_URL 都会开机即失败。
 """
 
 from __future__ import annotations
@@ -16,14 +16,22 @@ from payipa.db.settings import Settings as DbSettings
 from payipa.db.settings import get_settings as get_db_settings
 from payipa.storage import build_storage
 
-from pyp_server.settings import DEV_SESSION_SECRET, MIN_SESSION_SECRET_BYTES, ServerSettings, get_server_settings
+from pyp_server.settings import (
+    DEV_BOOTSTRAP_TOKEN,
+    DEV_SESSION_SECRET,
+    MIN_SESSION_SECRET_BYTES,
+    ServerSettings,
+    get_server_settings,
+)
 
 logger = logging.getLogger("pyp_server.preflight")
 
 # 各 dev 默认密钥（与 settings 默认值对齐；production 模式拒绝）。
-_DEV_UPLOAD_SECRET = "dev-insecure-change-me"
+_DEV_UPLOAD_SECRET = "dev-insecure-upload-secret-change-me"
 _DEV_CRED_KEK = "dev-insecure-kek-change-me"
-_DEV_JOIN_TOKEN = "dev"
+# 凭证信封主密钥最小长度：KEK 保护所有下游凭证，且经单轮 SHA256 派生，弱/短口令型 KEK 抗离线暴力成本极低。
+# 与 session_secret 同规格设长度门禁，避免「非默认但仍很弱」的 KEK 混进生产（推荐 32B 随机值）。
+MIN_CRED_KEK_BYTES = 32
 
 
 def _production_problems(s: ServerSettings, db: DbSettings) -> list[str]:
@@ -35,12 +43,18 @@ def _production_problems(s: ServerSettings, db: DbSettings) -> list[str]:
         problems.append("PYP_SERVER_SESSION_SECRET 仍为 dev 默认值，会话可被伪造")
     if len(s.session_secret.encode()) < MIN_SESSION_SECRET_BYTES:
         problems.append(f"PYP_SERVER_SESSION_SECRET 少于 {MIN_SESSION_SECRET_BYTES} 字节（HS256 强度不足）")
-    if s.agent_join_token == _DEV_JOIN_TOKEN:
-        problems.append("PYP_SERVER_AGENT_JOIN_TOKEN 仍为 dev 默认值，任意 agent 可接入")
+    if s.bootstrap_token == DEV_BOOTSTRAP_TOKEN:
+        problems.append("PYP_SERVER_BOOTSTRAP_TOKEN 仍为 dev 默认值，首个管理员可被抢注")
+    if len(s.bootstrap_token.encode()) < 24:
+        problems.append("PYP_SERVER_BOOTSTRAP_TOKEN 少于 24 字节")
+    if not s.allowed_hosts.strip() or s.allowed_hosts.strip() == "*":
+        problems.append("PYP_SERVER_ALLOWED_HOSTS 必须填写生产域名或 IP，不能使用 *")
     if db.upload_secret == _DEV_UPLOAD_SECRET:
         problems.append("UPLOAD_SECRET 仍为 dev 默认值，内部上传/作业令牌可被伪造")
     if db.cred_kek == _DEV_CRED_KEK:
         problems.append("CRED_KEK 仍为 dev 默认值，凭证信封主密钥不安全")
+    elif len(db.cred_kek.encode()) < MIN_CRED_KEK_BYTES:
+        problems.append(f"CRED_KEK 少于 {MIN_CRED_KEK_BYTES} 字节（凭证信封主密钥抗离线暴力强度不足，建议 32B 随机值）")
     return problems
 
 
@@ -69,7 +83,7 @@ def run_preflight(server_settings: ServerSettings | None = None, db_settings: Db
     build_storage(db)  # 配置诚实：配了未实现的存储后端（S3_*）→ 开机即失败，而非首次上传才炸
     _reject_multi_worker(s)  # P0-09：v1 单实例单 worker 是硬约束，多 worker 环境变量开机即拒
     if db.redis_url:
-        logger.warning("REDIS_URL 已配置但未接线（队列走 PG，无组件消费 Redis），该配置不会生效")
+        raise RuntimeError("REDIS_URL 尚未接线：当前队列以 PostgreSQL 为权威，拒绝接受不会生效的配置")
     if s.environment == "production":
         problems = _production_problems(s, db)
         if problems:

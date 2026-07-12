@@ -65,7 +65,13 @@ def test_setup_creates_first_admin(require_pg: None) -> None:
             # 密码不一致 → 回显错误、不建号
             r = client.post(
                 "/setup",
-                data={"username": _NAME, "password": "abcd1234", "password2": "X", "csrf_token": token},
+                data={
+                    "username": _NAME,
+                    "password": "abcd1234",
+                    "password2": "X",
+                    "bootstrap_token": "dev",
+                    "csrf_token": token,
+                },
                 follow_redirects=False,
             )
             assert r.status_code == 400 and "不一致" in r.text
@@ -73,7 +79,13 @@ def test_setup_creates_first_admin(require_pg: None) -> None:
             # 正确提交 → 建号 + 管理员角色 → 跳登录；建号后本页关闭
             r = client.post(
                 "/setup",
-                data={"username": _NAME, "password": "abcd1234", "password2": "abcd1234", "csrf_token": token},
+                data={
+                    "username": _NAME,
+                    "password": "abcd1234",
+                    "password2": "abcd1234",
+                    "bootstrap_token": "dev",
+                    "csrf_token": token,
+                },
                 follow_redirects=False,
             )
             assert r.status_code == 303 and r.headers["location"] == "/login"

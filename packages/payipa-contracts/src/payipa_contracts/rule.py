@@ -6,9 +6,10 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 from payipa_contracts._annotate import active, reserved
 from payipa_contracts.enums import CrawlStrategy, FieldType, LocatorType, RuleStatus
@@ -44,6 +45,16 @@ class LayoutMatch(BaseModel):
     url_regex: str = active("URL 匹配正则")
     body_regex: str | None = active("正文特殊值正则（可选）", default=None)
 
+    @field_validator("url_regex", "body_regex")
+    @classmethod
+    def _valid_regex(cls, value: str | None) -> str | None:
+        if value is not None:
+            try:
+                re.compile(value)
+            except re.error as exc:
+                raise ValueError(f"invalid regular expression: {exc}") from exc
+        return value
+
 
 class FailWhen(BaseModel):
     """软失败判定（状态码 + 内容特征）。数据源级为主、版型级可覆盖。"""
@@ -51,6 +62,30 @@ class FailWhen(BaseModel):
     status_in: list[int] = active("命中即失败的状态码集合", default_factory=list, since="M2")
     body_contains: list[str] = active("命中即软失败的字符串", default_factory=list, since="M2")
     body_regex: list[str] = active("命中即软失败的正则", default_factory=list, since="M2")
+
+    @field_validator("status_in")
+    @classmethod
+    def _valid_statuses(cls, values: list[int]) -> list[int]:
+        if any(value < 100 or value > 599 for value in values):
+            raise ValueError("fail_when.status_in must contain HTTP status codes from 100 to 599")
+        return values
+
+    @field_validator("body_contains")
+    @classmethod
+    def _nonempty_markers(cls, values: list[str]) -> list[str]:
+        if any(not value for value in values):
+            raise ValueError("fail_when.body_contains cannot contain an empty marker")
+        return values
+
+    @field_validator("body_regex")
+    @classmethod
+    def _valid_regexes(cls, values: list[str]) -> list[str]:
+        for value in values:
+            try:
+                re.compile(value)
+            except re.error as exc:
+                raise ValueError(f"invalid regular expression: {exc}") from exc
+        return values
 
 
 class CrawlRules(BaseModel):

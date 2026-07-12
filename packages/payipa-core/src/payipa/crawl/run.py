@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import math
 from collections.abc import Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from urllib.parse import urlsplit
 
 from jianbing_utils import crypto
 from payipa_contracts import (
@@ -27,8 +29,10 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
 from payipa.crawl.ingest import Ingestor, build_data_table, create_data_table
+from payipa.db.dynamic_schema import provision_data_schema
 from payipa.db.ident import check_code
-from payipa.db.pyp import Agent, Batch, Request, Rule, Schedule, Source, Task, TaskEvent
+from payipa.db.pyp import Agent, AgentEnrollment, Batch, Request, Rule, Schedule, Source, Task, TaskEvent
+from payipa.security.tokens import new_enrollment_token
 
 ACCESS_BASES = frozenset({"owned", "contracted", "public_policy"})
 
@@ -51,6 +55,21 @@ def url_fingerprint(url: str) -> str:
     """
     normalized = url.split("#", 1)[0].strip()
     return crypto.sha256(normalized)
+
+
+def _allowed_domains(params: dict, target: str) -> list[str]:
+    """任务出网边界：显式白名单优先，否则固定为该数据源已存档种子域名。"""
+    explicit = params.get("allowed_domains")
+    candidates = explicit if isinstance(explicit, list) and explicit else params.get("seed_urls") or [target]
+    domains: list[str] = []
+    for value in candidates:
+        if not isinstance(value, str):
+            continue
+        host = urlsplit(value if "://" in value else f"//{value}").hostname
+        host = (host or "").strip().rstrip(".").lower()
+        if host and host not in domains:
+            domains.append(host)
+    return domains
 
 
 async def setup_source(
@@ -174,12 +193,12 @@ async def review_source_access(
     return bool(result.rowcount)
 
 
-async def resolve_ingest_context(engine_pyp: AsyncEngine, req_id: int) -> tuple[str, list[str], list[str]]:
-    """由 req_id 反解入库上下文：(source_uuid, fingerprint_keys, indexed_fields)。"""
+async def resolve_ingest_context(engine_pyp: AsyncEngine, req_id: int) -> tuple[str, list[str], list[str], Channel]:
+    """由 req_id 反解入库上下文：(source_uuid, fingerprint_keys, indexed_fields, channel)。"""
     async with engine_pyp.begin() as conn:
         row = (
             await conn.execute(
-                select(Source.uuid, Rule.spec)
+                select(Source.uuid, Rule.spec, Batch.channel)
                 .select_from(Request.__table__)
                 .join(Batch.__table__, Request.batch_id == Batch.id)
                 .join(Task.__table__, Batch.task_id == Task.id)
@@ -190,15 +209,30 @@ async def resolve_ingest_context(engine_pyp: AsyncEngine, req_id: int) -> tuple[
         ).first()
     if row is None:
         raise LookupError(f"无法反解 req_id={req_id} 的入库上下文")
-    uuid, spec = row
+    uuid, spec, channel = row
     pack = RulePack.model_validate(spec)
     indexed = [f.name for f in pack.fields if f.index]
-    return uuid, list(pack.fingerprint), indexed
+    return uuid, list(pack.fingerprint), indexed, Channel(channel)
 
 
-async def ensure_data_table(engine_dc: AsyncEngine, source_uuid: str, indexed_fields: Sequence[str] = ()) -> Table:
+async def ensure_data_table(
+    engine_dc: AsyncEngine,
+    source_uuid: str,
+    indexed_fields: Sequence[str] = (),
+    *,
+    engine_pyp: AsyncEngine | None = None,
+    channel: Channel | str = Channel.PROD,
+) -> Table:
     """建源时程序化建 data_{uuid} 表（幂等）。"""
-    table = build_data_table(source_uuid, indexed_fields)
+    if engine_pyp is not None:
+        return await provision_data_schema(
+            engine_pyp,
+            engine_dc,
+            source_uuid,
+            indexed_fields,
+            channel=channel,
+        )
+    table = build_data_table(source_uuid, indexed_fields, channel)
     await create_data_table(engine_dc, table)
     return table
 
@@ -213,11 +247,18 @@ async def create_batch_with_requests(
     channel: Channel = Channel.PROD,
 ) -> tuple[int, list[TaskSpec]]:
     """为已批准且未暂停的数据源建批次；返回 ``(batch_id, TaskSpec 列表)``。"""
+    channel = Channel(channel)
     specs: list[TaskSpec] = []
     async with engine_pyp.begin() as conn:
         source = (
             await conn.execute(
-                select(Source.access_confirmed_at, Source.paused_at)
+                select(
+                    Source.id,
+                    Source.access_confirmed_at,
+                    Source.paused_at,
+                    Source.provisioning_state,
+                    Source.raw_archive,
+                )
                 .select_from(Task.__table__)
                 .join(Source.__table__, Task.source_id == Source.id)
                 .where(Task.id == task_id, Source.uuid == source_uuid)
@@ -229,6 +270,23 @@ async def create_batch_with_requests(
             raise PermissionError("数据源尚未完成人工访问授权复核")
         if source.paused_at is not None:
             raise PermissionError("数据源已暂停，不能创建新批次")
+        if source.provisioning_state != "ready":
+            raise RuntimeError(f"数据源动态表尚未就绪（{source.provisioning_state}）")
+        rule_row = (
+            await conn.execute(
+                select(Rule.source_id, Rule.version, Rule.content_hash, Rule.status).where(
+                    Rule.id == int(rule_ptr.rule_id)
+                )
+            )
+        ).first()
+        if rule_row is None:
+            raise LookupError(f"规则 {rule_ptr.rule_id} 不存在")
+        if int(rule_row.source_id) != int(source.id):
+            raise PermissionError("规则不属于当前数据源")
+        if int(rule_row.version) != rule_ptr.version or rule_row.content_hash != rule_ptr.content_hash:
+            raise ValueError("规则指针的版本或内容哈希与权威记录不一致")
+        if channel is Channel.PROD and rule_row.status != "active":
+            raise PermissionError("生产批次只能引用 active 规则；draft/testing 仅可用于 test 通道")
         batch_id = (
             await conn.execute(
                 pg_insert(Batch.__table__)
@@ -260,8 +318,10 @@ async def create_batch_with_requests(
                     batch_id=str(batch_id),
                     source=source_uuid,
                     target=target,
+                    allowed_domains=_allowed_domains({"seed_urls": list(targets)}, target),
                     rule_ptr=rule_ptr,
                     channel=channel,
+                    archive_raw=bool(source.raw_archive) and channel is Channel.PROD,
                 )
             )
     return batch_id, specs
@@ -302,7 +362,14 @@ async def fence_ok(engine_pyp: AsyncEngine, req_id: int, agent_id: str | None, a
     return False
 
 
-async def handle_result(
+@dataclass(frozen=True, slots=True)
+class ResultCommit:
+    accepted: bool
+    written: int = 0
+    discovered: int = 0
+
+
+async def commit_result(
     engine_pyp: AsyncEngine,
     engine_dc: AsyncEngine,
     table: Table,
@@ -310,24 +377,38 @@ async def handle_result(
     *,
     fingerprint_keys: Sequence[str] = (),
     agent_id: str | None = None,
-) -> int:
-    """收到 ResultBatch：fencing 校验 → 入库 data_center（指纹幂等）→ 置 request 成功。返回入库行数。
+) -> ResultCommit:
+    """原子提交结果的控制面副作用，并返回是否通过 fencing。
 
     fencing（P0-10）：在 pyp 事务内先锁行校验（状态在途 + agent 归属 + attempt 代次），迟到/重派后的
-    旧结果既不写数据也不改状态，返回 0。锁行在 data_center 写之前取得，保持「状态=成功 ⟹ 数据已落」。
+    旧结果既不写数据、不派生链接，也不改状态。锁行在 data_center 写之前取得，保持「状态=成功 ⟹ 数据已落」。
     同时把 agent 回报的执行摘要计数落到 request 行，供 core.monitor 聚合数据质量与时延（M5）。
     """
     s = result.summary
     async with engine_pyp.begin() as conn:
         row = (
             await conn.execute(
-                select(Request.state, Request.agent_id, Request.attempt)
+                select(Request.state, Request.agent_id, Request.attempt, Request.batch_id)
                 .where(Request.id == int(result.req_id))
                 .with_for_update()
             )
         ).first()
         if _is_stale(row, agent_id, int(result.attempt)):
-            return 0
+            if row is not None:
+                await conn.execute(
+                    TaskEvent.__table__.insert().values(
+                        batch_id=row.batch_id,
+                        type="request.stale_result",
+                        payload={
+                            "req_id": int(result.req_id),
+                            "agent_id": agent_id,
+                            "attempt": int(result.attempt),
+                            "state": int(row.state),
+                        },
+                    )
+                )
+            return ResultCommit(accepted=False)
+        discovered = await _enqueue_discovered_conn(conn, int(result.req_id), result.discovered)
         # 持有 pyp 行锁跨库写数据：先数据后状态的顺序不变（SDD §4.4）
         written = await Ingestor(engine_dc).upsert(
             table, result.items, batch_id=int(result.batch_id), fingerprint_keys=fingerprint_keys
@@ -371,7 +452,28 @@ async def handle_result(
                     cooldown_reason=case((Source.cooldown_until <= func.now(), None), else_=Source.cooldown_reason),
                 )
             )
-    return written
+    return ResultCommit(accepted=True, written=written, discovered=discovered)
+
+
+async def handle_result(
+    engine_pyp: AsyncEngine,
+    engine_dc: AsyncEngine,
+    table: Table,
+    result: ResultBatch,
+    *,
+    fingerprint_keys: Sequence[str] = (),
+    agent_id: str | None = None,
+) -> int:
+    """兼容调用：提交结果并返回写入行数；需要区分 stale 时请调用 :func:`commit_result`。"""
+    committed = await commit_result(
+        engine_pyp,
+        engine_dc,
+        table,
+        result,
+        fingerprint_keys=fingerprint_keys,
+        agent_id=agent_id,
+    )
+    return committed.written
 
 
 async def set_request_state(
@@ -563,13 +665,13 @@ async def finalize_request_batch(engine_pyp: AsyncEngine, req_id: int) -> int | 
 async def batch_trigger_context(engine_pyp: AsyncEngine, batch_id: int) -> dict | None:
     """批次收尾自动触发所需上下文：所属任务的 params（含通知/推送绑定）+ 批次状态 + 成功计数。
 
-    返回 ``{task_id, status, params, ok, total}``；批次不存在返回 None。params 里约定键（可选）：
+    返回 ``{task_id, status, channel, params, ok, total}``；批次不存在返回 None。params 里约定键（可选）：
     ``notify_bot_id``（收尾通知机器人）/ ``push_component_id`` + ``product_code``（链路自动推送）。
     """
     async with engine_pyp.begin() as conn:
         row = (
             await conn.execute(
-                select(Batch.task_id, Batch.status, Task.params)
+                select(Batch.task_id, Batch.status, Batch.channel, Task.params)
                 .join(Task, Task.id == Batch.task_id)
                 .where(Batch.id == batch_id)
             )
@@ -589,6 +691,7 @@ async def batch_trigger_context(engine_pyp: AsyncEngine, batch_id: int) -> dict 
     return {
         "task_id": int(row.task_id),
         "status": row.status,
+        "channel": row.channel,
         "params": row.params or {},
         "ok": int(ok),
         "total": int(total),
@@ -596,6 +699,60 @@ async def batch_trigger_context(engine_pyp: AsyncEngine, batch_id: int) -> dict 
 
 
 # ── M2 节点注册表（agents 表落库；hub 是运行态视图，此为权威）────────────────────
+async def issue_agent_enrollment(
+    engine_pyp: AsyncEngine, *, created_by: int | None, ttl_s: int = 600
+) -> tuple[str, datetime]:
+    """创建一次性入网码，返回（明文、过期时间）；明文不会写库。"""
+    if not 60 <= ttl_s <= 3600:
+        raise ValueError("入网码有效期须在 60–3600 秒之间")
+    plain, token_hash = new_enrollment_token()
+    expires_at = datetime.now(UTC) + timedelta(seconds=ttl_s)
+    async with engine_pyp.begin() as conn:
+        await conn.execute(
+            AgentEnrollment.__table__.insert().values(
+                token_hash=token_hash,
+                expires_at=expires_at,
+                created_by=created_by,
+            )
+        )
+    return plain, expires_at
+
+
+async def _register_agent_conn(
+    conn: AsyncConnection,
+    agent_id: str,
+    *,
+    hostname: str,
+    slot_n: int,
+    capabilities: dict,
+    node_token_hash: str | None,
+) -> tuple[int, str | None]:
+    """在调用方事务内注册；已有长期凭证绝不允许被新注册覆盖。"""
+    existing = (
+        await conn.execute(select(Agent.node_token_hash).where(Agent.agent_id == agent_id).with_for_update())
+    ).first()
+    if existing is not None and node_token_hash is not None and existing.node_token_hash not in (None, node_token_hash):
+        raise PermissionError("agent_id 已绑定其他节点凭证；请先在主控撤销该节点")
+
+    values: dict = {
+        "agent_id": agent_id,
+        "hostname": hostname,
+        "slot_n": slot_n,
+        "capabilities": capabilities,
+        "status": "online",
+        "last_heartbeat": func.now(),
+    }
+    updates = {k: v for k, v in values.items() if k != "agent_id"}
+    if node_token_hash is not None:
+        values["node_token_hash"] = node_token_hash
+        updates["node_token_hash"] = node_token_hash
+    await conn.execute(
+        pg_insert(Agent.__table__).values(**values).on_conflict_do_update(index_elements=["agent_id"], set_=updates)
+    )
+    row = (await conn.execute(select(Agent.weight, Agent.group_name).where(Agent.agent_id == agent_id))).first()
+    return (row[0] if row else 1), (row[1] if row else None)
+
+
 async def register_agent(
     engine_pyp: AsyncEngine,
     agent_id: str,
@@ -611,24 +768,68 @@ async def register_agent(
     不得清掉既有凭证 hash（P0-07：凭证生命周期闭环）。
     返回 (weight, group_name)——由管理员在库中预置，回灌 hub 用于加权/分组派发；新节点默认 weight=1。
     """
-    values: dict = {
-        "agent_id": agent_id,
-        "hostname": hostname,
-        "slot_n": slot_n,
-        "capabilities": capabilities,
-        "status": "online",
-        "last_heartbeat": func.now(),
-    }
-    updates = {k: v for k, v in values.items() if k != "agent_id"}
-    if node_token_hash is not None:
-        values["node_token_hash"] = node_token_hash
-        updates["node_token_hash"] = node_token_hash
     async with engine_pyp.begin() as conn:
-        await conn.execute(
-            pg_insert(Agent.__table__).values(**values).on_conflict_do_update(index_elements=["agent_id"], set_=updates)
+        return await _register_agent_conn(
+            conn,
+            agent_id,
+            hostname=hostname,
+            slot_n=slot_n,
+            capabilities=capabilities,
+            node_token_hash=node_token_hash,
         )
-        row = (await conn.execute(select(Agent.weight, Agent.group_name).where(Agent.agent_id == agent_id))).first()
-    return (row[0] if row else 1), (row[1] if row else None)
+
+
+async def enroll_agent(
+    engine_pyp: AsyncEngine,
+    enrollment_hash: str,
+    agent_id: str,
+    *,
+    hostname: str,
+    slot_n: int,
+    capabilities: dict,
+    node_token_hash: str,
+) -> tuple[int, str | None] | None:
+    """原子消费一次性入网码并绑定节点；过期、已用或同名凭证冲突均返回 None。"""
+    async with engine_pyp.begin() as conn:
+        enrollment = (
+            await conn.execute(
+                select(AgentEnrollment.id)
+                .where(
+                    AgentEnrollment.token_hash == enrollment_hash,
+                    AgentEnrollment.used_at.is_(None),
+                    AgentEnrollment.expires_at > func.now(),
+                )
+                .with_for_update()
+            )
+        ).first()
+        if enrollment is None:
+            return None
+        try:
+            registered = await _register_agent_conn(
+                conn,
+                agent_id,
+                hostname=hostname,
+                slot_n=slot_n,
+                capabilities=capabilities,
+                node_token_hash=node_token_hash,
+            )
+        except PermissionError:
+            return None
+        await conn.execute(
+            update(AgentEnrollment.__table__)
+            .where(AgentEnrollment.id == enrollment.id)
+            .values(used_at=func.now(), agent_id=agent_id)
+        )
+        return registered
+
+
+async def revoke_agent_credential(engine_pyp: AsyncEngine, agent_id: str) -> bool:
+    """撤销长期节点凭证并标离线；节点须用新的单次入网码重新接入。"""
+    async with engine_pyp.begin() as conn:
+        res = await conn.execute(
+            update(Agent.__table__).where(Agent.agent_id == agent_id).values(node_token_hash=None, status="offline")
+        )
+    return bool(res.rowcount)
 
 
 async def auth_node(engine_pyp: AsyncEngine, token_hash: str) -> str | None:
@@ -791,6 +992,8 @@ _INFLIGHT = (int(RequestState.ASSIGNED), int(RequestState.RUNNING))  # 「在途
 
 
 _PRIORITY_RANK = case((Task.priority == "high", 0), (Task.priority == "mid", 1), else_=2)  # 高优先插队
+_CRAWL_STRATEGY = Rule.spec["crawl"]["strategy"].astext
+_DEPTH_RANK = case((_CRAWL_STRATEGY == "dfs", -Request.depth), else_=Request.depth)
 
 
 def _authorized_running_batch_ids():
@@ -846,13 +1049,14 @@ async def claim_queued_for_dispatch(
 
     **不改状态**——真正占用由 :func:`mark_assigned` 的乐观锁完成，避免读到即算派发。
     排序：先按源轮转（row_number 分源取第 N 条，单源积压不能霸占窗口），
-    同轮内仍按三元 score（07 定案）：(优先级档, 深度升序=BFS, 入队序)。
+    同轮内仍按三元 score（07 定案）：(优先级档, BFS 深度升序/DFS 深度降序, 入队序)。
     caps 非 None 时按在线能力过滤（见 :func:`_cap_filter`），队头缺能力的请求不占窗口。
     """
     if caps is not None and not caps:
         return []  # 无空闲节点，无需扫描
     rr = func.row_number().over(  # 每源内的名次：跨源轮转用
-        partition_by=Source.uuid, order_by=(_PRIORITY_RANK, Request.depth, Request.created_at, Request.id)
+        partition_by=Source.uuid,
+        order_by=(_PRIORITY_RANK, _DEPTH_RANK, Request.created_at, Request.id),
     )
     async with engine_pyp.connect() as conn:
         stmt = (
@@ -887,7 +1091,7 @@ async def claim_queued_for_dispatch(
                 Source.paused_at.is_(None),
                 (Source.cooldown_until.is_(None)) | (Source.cooldown_until <= func.now()),
             )
-            .order_by(rr, _PRIORITY_RANK, Request.depth, Request.created_at, Request.id)
+            .order_by(rr, _PRIORITY_RANK, _DEPTH_RANK, Request.created_at, Request.id)
             .limit(limit)
         )
         if caps is not None:
@@ -920,9 +1124,6 @@ async def claim_queued_for_dispatch(
             engine_hint = EngineHint(params.get("engine_hint", EngineHint.HTTP))
         except TypeError, ValueError:
             engine_hint = EngineHint.HTTP
-        account = params.get("account")
-        if not isinstance(account, str):
-            account = None
         specs.append(
             TaskSpec(
                 task_id=str(task_id),
@@ -930,6 +1131,7 @@ async def claim_queued_for_dispatch(
                 batch_id=str(batch_id),
                 source=source_uuid,
                 target=target,
+                allowed_domains=_allowed_domains(params, target),
                 rule_ptr=RulePointer(rule_id=str(rid), version=int(rule_version or 0), content_hash=rule_hash),
                 channel=Channel(channel),
                 priority=Priority(priority or "mid"),
@@ -937,8 +1139,7 @@ async def claim_queued_for_dispatch(
                 attempt=int(attempt or 0),
                 engine_hint=engine_hint,
                 group=task_group or source_group,
-                account=account,
-                archive_raw=bool(raw_archive),
+                archive_raw=bool(raw_archive) and Channel(channel) is Channel.PROD,
             )
         )
     return specs
@@ -1117,6 +1318,65 @@ async def requeue_agent_inflight(engine_pyp: AsyncEngine, agent_id: str, *, max_
         return await _requeue_or_giveup(conn, [Request.agent_id == agent_id], max_attempt)
 
 
+async def _enqueue_discovered_conn(conn: AsyncConnection, parent_req_id: int, urls: Sequence[str]) -> int:
+    """在现有 pyp 事务内派生续爬请求；结果提交会在持有父请求行锁时调用。"""
+    if not urls:
+        return 0
+    parent = (
+        await conn.execute(
+            select(
+                Request.batch_id,
+                Request.depth,
+                Request.rule_id,
+                Request.rule_hash,
+                Request.rule_version,
+                Batch.status,
+                Source.access_confirmed_at,
+                Source.paused_at,
+            )
+            .select_from(Request.__table__)
+            .join(Batch.__table__, Request.batch_id == Batch.id)
+            .join(Task.__table__, Batch.task_id == Task.id)
+            .join(Source.__table__, Task.source_id == Source.id)
+            .where(Request.id == parent_req_id)
+        )
+    ).first()
+    if parent is None:
+        return 0
+    batch_id, parent_depth, rule_id, rule_hash, rule_version, batch_status, confirmed_at, paused_at = parent
+    if batch_status != "running" or confirmed_at is None or paused_at is not None:
+        return 0
+    child_depth = (parent_depth or 0) + 1
+    spec = (await conn.execute(select(Rule.spec).where(Rule.id == rule_id))).scalar() if rule_id else None
+    pack = RulePack.model_validate(spec) if spec else None
+    max_depth = pack.crawl.max_depth if (pack and pack.crawl) else 0
+    if child_depth > max_depth:
+        return 0
+    inserted = 0
+    seen: set[str] = set()
+    for url in urls:
+        uh = url_fingerprint(url)
+        if uh in seen:
+            continue
+        seen.add(uh)
+        res = await conn.execute(
+            pg_insert(Request.__table__)
+            .values(
+                batch_id=batch_id,
+                target=url,
+                rule_id=rule_id,
+                rule_hash=rule_hash,
+                rule_version=rule_version,
+                state=int(RequestState.QUEUED),
+                depth=child_depth,
+                url_hash=uh,
+            )
+            .on_conflict_do_nothing(index_elements=["batch_id", "url_hash"])
+        )
+        inserted += res.rowcount or 0
+    return inserted
+
+
 async def enqueue_discovered(engine_pyp: AsyncEngine, parent_req_id: int, urls: Sequence[str]) -> int:
     """多波爬行：把父请求本页发现的链接并入**同一批次**入队。
 
@@ -1124,66 +1384,8 @@ async def enqueue_discovered(engine_pyp: AsyncEngine, parent_req_id: int, urls: 
     仅当 depth ≤ rule.crawl.max_depth 才入队（无 crawl 规则 ⇒ max_depth=0 ⇒ 不跟进，退化为单页）。
     返回实际新入队条数。**须在批次收尾判定前调用**，新 QUEUED 落库以防跨波提前 finalize。
     """
-    if not urls:
-        return 0
     async with engine_pyp.begin() as conn:
-        parent = (
-            await conn.execute(
-                select(
-                    Request.batch_id,
-                    Request.depth,
-                    Request.rule_id,
-                    Request.rule_hash,
-                    Request.rule_version,
-                    Batch.status,
-                    Source.access_confirmed_at,
-                    Source.paused_at,
-                )
-                .select_from(Request.__table__)
-                .join(Batch.__table__, Request.batch_id == Batch.id)
-                .join(Task.__table__, Batch.task_id == Task.id)
-                .join(Source.__table__, Task.source_id == Source.id)
-                .where(Request.id == parent_req_id)
-            )
-        ).first()
-        if parent is None:
-            return 0
-        batch_id, parent_depth, rule_id, rule_hash, rule_version, batch_status, confirmed_at, paused_at = parent
-        if batch_status != "running":
-            return 0  # 批次已取消/收尾：续爬子请求不得再入队（否则 canceling 批次永远收不了口）
-        if confirmed_at is None or paused_at is not None:
-            return 0
-        child_depth = (parent_depth or 0) + 1
-        spec = None
-        if rule_id:
-            spec = (await conn.execute(select(Rule.spec).where(Rule.id == rule_id))).scalar()
-        pack = RulePack.model_validate(spec) if spec else None
-        max_depth = pack.crawl.max_depth if (pack and pack.crawl) else 0
-        if child_depth > max_depth:
-            return 0
-        inserted = 0
-        seen: set[str] = set()
-        for url in urls:
-            uh = url_fingerprint(url)
-            if uh in seen:  # 先去同页内重复，减少无谓 INSERT
-                continue
-            seen.add(uh)
-            res = await conn.execute(
-                pg_insert(Request.__table__)
-                .values(
-                    batch_id=batch_id,
-                    target=url,
-                    rule_id=rule_id,
-                    rule_hash=rule_hash,
-                    rule_version=rule_version,
-                    state=int(RequestState.QUEUED),
-                    depth=child_depth,
-                    url_hash=uh,
-                )
-                .on_conflict_do_nothing(index_elements=["batch_id", "url_hash"])
-            )
-            inserted += res.rowcount or 0
-    return inserted
+        return await _enqueue_discovered_conn(conn, parent_req_id, urls)
 
 
 # ── M2 监控聚合（供 /api/monitor 端点；仅读）──────────────────────────────────
@@ -1347,15 +1549,14 @@ async def create_batch_for_task(
 ) -> tuple[int, list[TaskSpec]]:
     """按已存在的 task + 其数据源当前 active 规则建一个新批次（供 cron/API 重跑，无需重新提交规则）。"""
     async with engine_pyp.connect() as conn:
-        row = (
-            await conn.execute(
-                select(Rule.id, Rule.version, Rule.content_hash)
-                .join(Task.__table__, Task.source_id == Rule.source_id)
-                .where(Task.id == task_id)
-                .order_by(Rule.version.desc())
-                .limit(1)
-            )
-        ).first()
+        query = (
+            select(Rule.id, Rule.version, Rule.content_hash)
+            .join(Task.__table__, Task.source_id == Rule.source_id)
+            .where(Task.id == task_id)
+        )
+        if Channel(channel) is Channel.PROD:
+            query = query.where(Rule.status == "active")
+        row = (await conn.execute(query.order_by(Rule.version.desc()).limit(1))).first()
     if row is None:
         raise LookupError(f"task {task_id} 无可用规则，无法建批次")
     ptr = RulePointer(rule_id=str(row[0]), version=row[1], content_hash=row[2])

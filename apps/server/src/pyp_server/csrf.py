@@ -12,6 +12,8 @@ import secrets
 
 from fastapi import HTTPException, Request, Response
 
+from pyp_server.settings import get_server_settings
+
 CSRF_COOKIE = "pyp_csrf"
 CSRF_FIELD = "csrf_token"
 _MAX_AGE = 12 * 3600
@@ -19,7 +21,14 @@ _MAX_AGE = 12 * 3600
 
 def _set_cookie(request: Request, resp: Response, token: str) -> None:
     if request.cookies.get(CSRF_COOKIE) != token:
-        resp.set_cookie(CSRF_COOKIE, token, httponly=True, samesite="lax", max_age=_MAX_AGE)
+        resp.set_cookie(
+            CSRF_COOKIE,
+            token,
+            httponly=True,
+            samesite="lax",
+            secure=get_server_settings().environment == "production",
+            max_age=_MAX_AGE,
+        )
 
 
 def render_with_csrf(request: Request, template: str, context: dict, *, status_code: int = 200) -> Response:

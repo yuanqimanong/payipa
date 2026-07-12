@@ -29,8 +29,8 @@ services:
   migrate:
     image: payipa-server:local
     build:
-      context: ../.. # project/ 根（含 payipa 与 jianbing_utils 兄弟目录，同 agent 镜像约定）
-      dockerfile: payipa/deploy/Dockerfile.server
+      context: .. # payipa 仓库根；依赖由 uv.lock 自包含解析
+      dockerfile: deploy/Dockerfile.server
     env_file: .env.compose
     command: ["alembic", "-c", "deploy/alembic.ini", "upgrade", "heads"]
     depends_on:
@@ -41,8 +41,8 @@ services:
   server:
     image: payipa-server:local
     build:
-      context: ../..
-      dockerfile: payipa/deploy/Dockerfile.server
+      context: ..
+      dockerfile: deploy/Dockerfile.server
     env_file: .env.compose
     ports:
       - "8100:8000"
@@ -67,19 +67,19 @@ services:
       start_period: 10s
     restart: unless-stopped
 
-  # 可选采集节点（profile: agents）：--profile agents up -d [--scale agent=N]。
+  # 可选单采集节点：先启动主控、创建管理员，再从节点页签发一次性入网码并执行 `pypctl agent --token ...`。
   agent:
     profiles: ["agents"]
     image: payipa-agent:local
     build:
-      context: ../..
-      dockerfile: payipa/packages/pyp-agent/Dockerfile
+      context: ..
+      dockerfile: packages/pyp-agent/Dockerfile
     command:
       - join
       - --server
       - http://server:8000 # 服务间内网直连，不经宿主端口
       - --token
-      - ${PYP_SERVER_AGENT_JOIN_TOKEN:-dev}
+      - ${PYP_AGENT_ENROLL_TOKEN:-missing-enrollment-token}
       - --state-dir
       - /state # 身份持久卷：容器重建节点身份不变（P0-08）
     volumes:

@@ -10,6 +10,7 @@ import pytest
 # 测试默认关闭后台派发环 + 推送 Consumer（避免它与用例抢 QUEUED/outbox / 无 PG 时刷错误日志）。
 os.environ.setdefault("PYP_SERVER_DISPATCH_ENABLED", "0")
 os.environ.setdefault("PYP_SERVER_PUSH_ENABLED", "0")
+os.environ.setdefault("DB_NULL_POOL", "1")
 
 
 def _pg_reachable() -> bool:
@@ -57,6 +58,14 @@ def _reset_caches():
         from payipa.storage import get_storage
 
         get_storage.cache_clear()
+    except Exception:
+        pass
+    try:  # 清空登录失败节流的进程内状态，避免跨用例（TestClient 客户端 IP 恒定）累积到锁定
+        from pyp_server.main import app as _srv_app
+
+        lt = getattr(_srv_app.state, "login_throttle", None)
+        if lt is not None:
+            lt.reset()
     except Exception:
         pass
     yield

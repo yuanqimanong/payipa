@@ -104,6 +104,7 @@ class Source(MutableTimestampMixin, OwnedMixin, PypBase):
         CheckConstraint("retry >= 0", name="retry_nonneg"),
         CheckConstraint("timeout > 0", name="timeout_positive"),
         CheckConstraint("rate_limit > 0", name="rate_limit_positive"),
+        CheckConstraint("provisioning_state IN ('ready', 'provisioning', 'error')", name="provisioning_valid"),
     )
 
     id: Mapped[int] = _pk()
@@ -129,6 +130,32 @@ class Source(MutableTimestampMixin, OwnedMixin, PypBase):
     retry: Mapped[int] = mapped_column(Integer, default=3)
     timeout: Mapped[int] = mapped_column(Integer, default=30)
     raw_archive: Mapped[bool] = mapped_column(Boolean, default=False)  # 是否开启 raw 存档
+    provisioning_state: Mapped[str] = mapped_column(String(16), default="ready")
+    provisioning_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class DynamicSchema(MutableTimestampMixin, PypBase):
+    """跨库动态表台账；记录 data_*/asm_* 的预期结构与最近一次 provisioning 状态。"""
+
+    __tablename__ = "dynamic_schemas"
+    __table_args__ = (
+        UniqueConstraint("kind", "object_code", "channel", name="uq_dynamic_schemas_kind_code_channel"),
+        CheckConstraint("kind IN ('data', 'assembly')", name="kind_valid"),
+        CheckConstraint("channel IN ('test', 'prod')", name="channel_valid"),
+        CheckConstraint("status IN ('ready', 'provisioning', 'error')", name="status_valid"),
+        CheckConstraint("schema_version >= 1", name="schema_version_min"),
+    )
+
+    id: Mapped[int] = _pk()
+    kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    object_code: Mapped[str] = mapped_column(String(32), nullable=False)
+    channel: Mapped[str] = mapped_column(String(8), default="prod")
+    database_name: Mapped[str] = mapped_column(String(32), nullable=False)
+    table_name: Mapped[str] = mapped_column(String(64), nullable=False)
+    schema_version: Mapped[int] = mapped_column(Integer, default=1)
+    indexed_fields: Mapped[list] = mapped_column(JSONB, default=list)
+    status: Mapped[str] = mapped_column(String(16), default="provisioning")
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class Rule(MutableTimestampMixin, PypBase):
@@ -255,6 +282,19 @@ class Agent(MutableTimestampMixin, PypBase):
     last_heartbeat: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+class AgentEnrollment(TimestampMixin, PypBase):
+    """一次性 Agent 入网凭证；明文只返回给创建者，数据库仅保存 hash。"""
+
+    __tablename__ = "agent_enrollments"
+
+    id: Mapped[int] = _pk()
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    agent_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    created_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+
+
 class Credential(MutableTimestampMixin, PypBase):
     __tablename__ = "credentials"
 
@@ -323,6 +363,7 @@ class PushOutbox(TimestampMixin, OwnedMixin, PypBase):
     attempts: Mapped[int] = mapped_column(Integer, default=0)
     next_retry_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    claim_token: Mapped[str | None] = mapped_column(String(64), nullable=True)
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     idempotency_key: Mapped[str | None] = mapped_column(String(128), nullable=True)
 

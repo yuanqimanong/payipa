@@ -31,6 +31,7 @@ class Settings(BaseSettings):
     pg_db_pyp: str = "pyp_sys"  # 平台库（.env 默认名 pyp_sys）
     pg_db_data_center: str = "data_center"  # 采集数据库
     pg_db_business: str = "business"  # 组装产物库
+    db_null_pool: bool = False  # 测试/短命进程可关闭连接复用，避免跨事件循环持有 asyncpg 连接
 
     # 可选组件占位（均未实现）：redis_url 无任何消费方（队列走 PG）；s3_* 配置即拒绝启动
     # （storage.build_storage 报错，preflight 开机即失败）——绝不静默回退 local。
@@ -42,7 +43,7 @@ class Settings(BaseSettings):
 
     # 存储兜底（local 后端）+ 内部上传
     data_root: str = "var/storage"  # 本地对象存储根目录
-    upload_secret: str = "dev-insecure-change-me"  # 内部上传 HMAC 密钥（生产走 env 注入）
+    upload_secret: str = "dev-insecure-upload-secret-change-me"  # 内部上传 HMAC 密钥（生产走 env 注入）
     cred_kek: str = "dev-insecure-kek-change-me"  # 凭证信封主密钥（KEK，红线9）；生产走 env 注入，脚本永不接触
     min_free_mb: int = 500  # 磁盘水位下限（MB）：低于则拒绝新上传并告警
     raw_retention_days: int = 7  # raw 归档默认保留期（按源可覆盖，02 定案）；GC 清理过期

@@ -121,6 +121,10 @@ class AgentHub:
     def find_by_req(self, req_id: str) -> AgentConn | None:
         return next((c for c in self._agents.values() if req_id in c.inflight), None)
 
+    def get(self, agent_id: str) -> AgentConn | None:
+        """按节点 id 取当前连接（管理端撤销凭证时用于主动断开）。"""
+        return self._agents.get(agent_id)
+
     def snapshots(self) -> list[NodeSnapshot]:
         return [
             NodeSnapshot(

@@ -19,6 +19,11 @@ class TaskSpec(BaseModel):
     batch_id: str = active("本次执行轮（批次）id")
     source: str = active("数据源 id/短码")
     target: str = active("抓取目标（URL / API endpoint）")
+    allowed_domains: list[str] = active(
+        "本任务允许访问的域名边界；HTTP 允许其子域，Browser 仅连接显式列出的 Host（所需子域须单列）并固定已校验地址",
+        default_factory=list,
+        since="M8",
+    )
     rule_ptr: RulePointer = active("规则指针 (rule_id, version, content_hash)")
     channel: Channel = active("通道 test/prod（test 产出隔离、不入正式库）", default=Channel.PROD)
     priority: Priority = active("优先级（高插队）", default=Priority.MID)
@@ -29,6 +34,6 @@ class TaskSpec(BaseModel):
     params: dict[str, Any] = active("运行参数（能力参数化：页数/范围等）", default_factory=dict)
     engine_hint: EngineHint = active("采集引擎提示；当前使用 http，browser 为可选能力", default=EngineHint.HTTP)
     archive_raw: bool = active("成功响应是否归档 raw；拒绝/挑战响应始终不归档", default=False, since="M6")
+    group: str | None = active("分发分组（任务只派给同组且具备所需引擎的节点）", default=None, since="M2")
     # 以下为后续里程碑接线的预留位
-    group: str | None = reserved("分发分组（test/prod 集群、自动化能力集群）", default=None, since="M2")
     account: str | None = reserved("采集账号/凭证维度（按账号限流）", default=None, since="M5")

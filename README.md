@@ -19,20 +19,22 @@ tests/                 跨包集成/冒烟测试
 ## 快速开始
 
 ```bash
-# 1) 本地开发：让 jianbing_utils（兄弟目录）以 editable 引入（jb 改码即时生效）
-#    根 pyproject 的 [tool.uv.sources] 已用 path 源，直接 sync 即可
-uv sync --all-packages
+# 1) 安装锁定依赖并生成部署配置
+uv sync --all-packages --locked
+uv run pypctl init
 
-# 2) 起主控
-uv run uvicorn pyp_server.main:app --reload
-#    OpenAPI:  http://127.0.0.1:8000/openapi.json   Swagger: /docs   健康: /healthz
+# 2) 构建并启动三库与主控
+docker compose -f deploy/compose.yml --env-file deploy/.env.compose up -d --build db server
+uv run pypctl smoke
 
-# 3) 质量闸
+# 3) 本地质量闸
 uv run ruff check && uv run ruff format --check
 uv run lint-imports          # 模块边界
 uv run pytest
 ```
 
-三库连接从 `../project/.env`（或环境变量）读：`PG_HOST/PG_PORT/PG_USER/PG_PASSWORD` + `PG_DB_PYP`/`PG_DB_DATA_CENTER`/`PG_DB_BUSINESS`。迁移：`uv run alembic -c deploy/alembic.ini upgrade heads`。
+完整安装顺序、首个管理员和 Agent 接入见 [QUICKSTART.md](QUICKSTART.md)。健康端点为 `/livez`、`/readyz` 和 `/version`。
 
-> 开发约定、双仓纪律、里程碑见 [CLAUDE.md](CLAUDE.md)。权威设计见 [docs/](docs/README.md)（实现方案；SDD + 决策记录为准）。
+当前 `0.1.x` 支持 Linux 单主控、单 worker、PostgreSQL 三库和本地持久卷。S3、Redis 和多主控尚未接线，配置后会在启动阶段明确拒绝。许可证见 [LICENSE](LICENSE)，漏洞请按 [SECURITY.md](SECURITY.md) 私密报告。
+
+> 开发约定见 [CLAUDE.md](CLAUDE.md)。权威设计见 [docs/](docs/README.md)（实现方案；SDD + 决策记录为准）。

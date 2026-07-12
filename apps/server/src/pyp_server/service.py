@@ -31,6 +31,7 @@ async def dispatch_source_run(
     返回 {batch_id, requests, dispatched}；``dispatched`` 恒为 0——派发不再在此同步发生，
     避免「空闲槽不够就丢请求」的一次性派发缺陷（M1 遗留）。
     """
+    channel = Channel(channel)
     # 全部标识符**先**校验再动库：短码/索引字段名非法时一行都不写，不留半成品源（P0-13/DB-007）
     check_code(uuid)
     fields_indexed = indexed_fields or [f.name for f in rule.fields if f.index]
@@ -53,7 +54,10 @@ async def dispatch_source_run(
         raw_archive=raw_archive,
     )
     ptr = await RuleStore(pyp).put(source_id, rule)
-    await ensure_data_table(dc, uuid, fields_indexed)
+    # 正式表是源的长期数据面基线；test 运行另建物理隔离表，但不能让未来 cron/prod 重跑缺表。
+    await ensure_data_table(dc, uuid, fields_indexed, engine_pyp=pyp, channel=Channel.PROD)
+    if channel is Channel.TEST:
+        await ensure_data_table(dc, uuid, fields_indexed, engine_pyp=pyp, channel=Channel.TEST)
     batch_id, specs = await create_batch_with_requests(
         pyp, task_id=task_id, source_uuid=uuid, targets=seed_urls, rule_ptr=ptr, channel=channel
     )

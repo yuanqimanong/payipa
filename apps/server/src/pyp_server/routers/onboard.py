@@ -18,7 +18,6 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from pyp_server.auth import get_current_user, require_user
 from pyp_server.service import dispatch_source_run
-from pyp_server.settings import get_server_settings
 
 router = APIRouter(tags=["onboard"])
 logger = logging.getLogger("pyp_server.onboard")
@@ -49,7 +48,6 @@ async def welcome_page(request: Request):
     user = await get_current_user(request)
     if user is None:
         return RedirectResponse("/login", status_code=303)
-    settings = get_server_settings()
     host = request.headers.get("host") or "127.0.0.1:8000"
     return request.app.state.templates.TemplateResponse(
         request,
@@ -58,8 +56,6 @@ async def welcome_page(request: Request):
             "user": user,
             "active": "",
             "server_url": f"{request.url.scheme}://{host}",
-            # join token 只在 dev 默认值时直接展示；生产提示从部署环境变量取（不回显真值）
-            "join_token": settings.agent_join_token if settings.agent_join_token == "dev" else None,
             "demo_code": DEMO_CODE,
         },
     )

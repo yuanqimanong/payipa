@@ -8,13 +8,17 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+import os
 import secrets
+import shutil
 import socket
 import subprocess
 import sys
 import urllib.error
 import urllib.request
+from datetime import UTC, datetime
 from pathlib import Path
 
 COMPOSE = Path("deploy/compose.yml")
@@ -38,9 +42,9 @@ def gen_env() -> str:
         "PG_DB_DATA_CENTER=data_center\n"
         "PG_DB_BUSINESS=business\n"
         f"PYP_SERVER_SESSION_SECRET={tok(48)}\n"
+        f"PYP_SERVER_BOOTSTRAP_TOKEN={tok(32)}\n"
         f"UPLOAD_SECRET={tok(48)}\n"
         f"CRED_KEK={tok(48)}\n"
-        f"PYP_SERVER_AGENT_JOIN_TOKEN={tok(32)}\n"
         "DATA_ROOT=/data\n"
         "PYP_SERVER_ENVIRONMENT=dev\n"
     )
@@ -88,6 +92,41 @@ def _port_free(port: int) -> bool:
         return s.connect_ex(("127.0.0.1", port)) != 0
 
 
+def _env_values() -> dict[str, str]:
+    values: dict[str, str] = {}
+    if not ENV_FILE.exists():
+        return values
+    for raw in ENV_FILE.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        values[key.strip()] = value.strip()
+    return values
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _run_binary(cmd: list[str], path: Path, *, stdin_path: Path | None = None) -> tuple[int, str]:
+    """执行二进制备份/恢复命令；数据只进文件/stdin，stderr 才作为诊断文本。"""
+    source = stdin_path.open("rb") if stdin_path else None
+    target = path.open("wb") if stdin_path is None else subprocess.DEVNULL
+    try:
+        proc = subprocess.run(cmd, stdin=source, stdout=target, stderr=subprocess.PIPE, check=False)
+    finally:
+        if source is not None:
+            source.close()
+        if target is not subprocess.DEVNULL:
+            target.close()
+    return proc.returncode, proc.stderr.decode(errors="replace").strip()
+
+
 # ── 子命令 ─────────────────────────────────────────────────────────────
 
 
@@ -132,13 +171,196 @@ def up(build: bool = False, agents: bool = False) -> int:
     if not ENV_FILE.exists():
         print(f"缺 {ENV_FILE}：先 uv run pypctl init")
         return 1
-    profile = ["--profile", "agents"] if agents else []
-    cmd = _compose(*profile, "up", "-d", "--wait", *(["--build"] if build else []))
+    if agents:
+        print("首次部署不能同时接入 Agent：先执行 pypctl up，创建管理员后在节点页生成一次性入网码，")
+        print("再执行：pypctl agent --token <一次性入网码>")
+        return 2
+    cmd = _compose("up", "-d", "--wait", *(["--build"] if build else []))
     print("$", " ".join(cmd))
     code = subprocess.run(cmd, check=False).returncode  # 输出直通终端，便于看拉镜像/构建进度
     if code == 0:
         print(f"已就绪。看状态：uv run pypctl status；冒烟：uv run pypctl smoke；页面：{BASE_URL}/setup")
     return code
+
+
+def start_agent(token: str, build: bool = False) -> int:
+    """用 UI 签发的一次性入网码启动 compose 中的单 Agent，并持久化独立身份。"""
+    if not ENV_FILE.exists():
+        print(f"缺 {ENV_FILE}：先 uv run pypctl init")
+        return 1
+    env = os.environ.copy()
+    env["PYP_AGENT_ENROLL_TOKEN"] = token
+    cmd = _compose("--profile", "agents", "up", "-d", *(["--build"] if build else []), "agent")
+    print("$", " ".join(cmd), "(PYP_AGENT_ENROLL_TOKEN=<redacted>)")
+    return subprocess.run(cmd, check=False, env=env).returncode
+
+
+def backup(output: str | None = None, *, manage_server: bool = True) -> tuple[int, Path | None]:
+    """冷备三库 + 本地对象卷 + 部署配置，并生成带 SHA-256 的 manifest。"""
+    if not ENV_FILE.exists():
+        print(f"缺 {ENV_FILE}：先 uv run pypctl init")
+        return 1, None
+    target = Path(output) if output else Path("backups") / datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    target = target.resolve()
+    if target.exists() and any(target.iterdir()):
+        print(f"备份目录非空，拒绝覆盖：{target}")
+        return 1, None
+    target.mkdir(parents=True, exist_ok=True)
+
+    _version_status, version = probe("/version")
+    code, running = _run(_compose("ps", "--status", "running", "--services"))
+    server_was_running = code == 0 and "server" in running.splitlines()
+    if manage_server and server_was_running:
+        code = subprocess.run(_compose("stop", "server"), check=False).returncode
+        if code:
+            return code, None
+
+    env = _env_values()
+    user = env.get("PG_USER", "postgres")
+    dbs = [
+        env.get("PG_DB_PYP", "pyp_sys"),
+        env.get("PG_DB_DATA_CENTER", "data_center"),
+        env.get("PG_DB_BUSINESS", "business"),
+    ]
+    files: list[Path] = []
+    try:
+        for db in dbs:
+            path = target / f"{db}.dump"
+            code, error = _run_binary(_compose("exec", "-T", "db", "pg_dump", "-U", user, "--format=custom", db), path)
+            if code:
+                print(f"数据库 {db} 备份失败：{error}")
+                return code, None
+            files.append(path)
+
+        storage = target / "pyp_data.tar.gz"
+        archive_code = (
+            "import sys,tarfile; "
+            "t=tarfile.open(fileobj=sys.stdout.buffer,mode='w|gz'); t.add('/data',arcname='data'); t.close()"
+        )
+        code, error = _run_binary(
+            _compose("run", "--rm", "--no-deps", "-T", "server", "python", "-c", archive_code), storage
+        )
+        if code:
+            print(f"对象存储卷备份失败：{error}")
+            return code, None
+        files.append(storage)
+
+        config_copy = target / "env.compose"
+        shutil.copy2(ENV_FILE, config_copy)
+        files.append(config_copy)
+        manifest = {
+            "created_at": datetime.now(UTC).isoformat(),
+            "databases": dbs,
+            "version": version,
+            "files": {path.name: {"size": path.stat().st_size, "sha256": _sha256(path)} for path in files},
+        }
+        (target / "manifest.json").write_text(
+            json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8", newline="\n"
+        )
+        print(f"[OK] 冷备完成：{target}")
+        print("备份包含部署密钥，请按最高敏感级别加密保管，并定期在隔离环境执行 restore 演练。")
+        return 0, target
+    finally:
+        if manage_server and server_was_running:
+            subprocess.run(_compose("up", "-d", "--wait", "server"), check=False)
+
+
+def restore(backup_dir: str, confirmation: str) -> int:
+    """从 pypctl 备份恢复三库与对象卷；必须显式确认，失败时保持主控停止。"""
+    if confirmation != "RESTORE":
+        print("恢复会覆盖当前三库和对象卷；请追加 --confirm RESTORE")
+        return 2
+    root = Path(backup_dir).resolve()
+    manifest_path = root / "manifest.json"
+    if not manifest_path.is_file():
+        print(f"缺备份清单：{manifest_path}")
+        return 1
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    for name, meta in manifest.get("files", {}).items():
+        path = root / name
+        if not path.is_file() or _sha256(path) != meta.get("sha256"):
+            print(f"备份校验失败：{name}")
+            return 1
+    current = _env_values()
+    backed_up = {}
+    for line in (root / "env.compose").read_text(encoding="utf-8").splitlines():
+        if "=" in line and not line.lstrip().startswith("#"):
+            key, value = line.split("=", 1)
+            backed_up[key] = value
+    if current.get("CRED_KEK") != backed_up.get("CRED_KEK"):
+        print("当前 CRED_KEK 与备份不一致，拒绝恢复：否则库中信封密文将不可解密。")
+        return 1
+
+    subprocess.run(_compose("stop", "server", "agent"), check=False)
+    user = current.get("PG_USER", "postgres")
+    for db in manifest.get("databases", []):
+        path = root / f"{db}.dump"
+        code, error = _run_binary(
+            _compose(
+                "exec",
+                "-T",
+                "db",
+                "pg_restore",
+                "-U",
+                user,
+                "--clean",
+                "--if-exists",
+                "--no-owner",
+                "--no-privileges",
+                "--dbname",
+                db,
+            ),
+            Path(os.devnull),
+            stdin_path=path,
+        )
+        if code:
+            print(f"数据库 {db} 恢复失败：{error}")
+            return code
+
+    extract_code = (
+        "import pathlib,shutil,sys,tarfile; p=pathlib.Path('/data'); "
+        "[(shutil.rmtree(x) if x.is_dir() else x.unlink()) for x in p.iterdir()]; "
+        "tarfile.open(fileobj=sys.stdin.buffer,mode='r|gz').extractall('/',filter='data')"
+    )
+    code, error = _run_binary(
+        _compose("run", "--rm", "--no-deps", "-T", "server", "python", "-c", extract_code),
+        Path(os.devnull),
+        stdin_path=root / "pyp_data.tar.gz",
+    )
+    if code:
+        print(f"对象卷恢复失败：{error}")
+        return code
+    code = subprocess.run(_compose("run", "--rm", "migrate"), check=False).returncode
+    if code:
+        print("恢复后的迁移失败，主控保持停止，请检查日志。")
+        return code
+    code = subprocess.run(_compose("up", "-d", "--wait", "server"), check=False).returncode
+    if code == 0:
+        print("[OK] 恢复完成；请立即执行 pypctl smoke，并重新签发 Agent 入网码。")
+    return code
+
+
+def upgrade(build: bool = False) -> int:
+    """短停机升级：停止主控 → 冷备 → 构建/拉起 → 迁移门 → smoke。"""
+    subprocess.run(_compose("stop", "server"), check=False)
+    code, backup_path = backup(manage_server=False)
+    if code:
+        print("升级在迁移前终止；当前数据未改变。")
+        return code
+    if build:
+        code = subprocess.run(_compose("build", "server", "migrate"), check=False).returncode
+        if code:
+            print(f"升级镜像构建失败；备份位于 {backup_path}。")
+            return code
+    code = subprocess.run(_compose("up", "-d", "--wait", "db"), check=False).returncode
+    if code == 0:
+        code = subprocess.run(_compose("run", "--rm", "migrate"), check=False).returncode
+    if code == 0:
+        code = subprocess.run(_compose("up", "-d", "--wait", "--no-deps", "server"), check=False).returncode
+    if code:
+        print(f"升级启动失败；备份位于 {backup_path}，不要自动执行 Alembic downgrade。")
+        return code
+    return smoke(BASE_URL)
 
 
 def down(volumes: bool = False) -> int:
@@ -199,7 +421,17 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("doctor", help="环境体检：docker/compose/语法/端口/readyz")
     p_up = sub.add_parser("up", help="启动编排（db → migrate → server；--wait 等健康）")
     p_up.add_argument("--build", action="store_true", help="启动前（重新）构建镜像")
-    p_up.add_argument("--agents", action="store_true", help="连带 1 个采集节点（profile: agents）")
+    p_up.add_argument("--agents", action="store_true", help="已弃用：Agent 须在管理员建成后用 pypctl agent 接入")
+    p_agent = sub.add_parser("agent", help="用节点页签发的一次性入网码启动本机 Agent")
+    p_agent.add_argument("--token", required=True, help="一次性入网码（命令输出会脱敏）")
+    p_agent.add_argument("--build", action="store_true", help="启动前构建 Agent 镜像")
+    p_backup = sub.add_parser("backup", help="冷备三库、对象卷和部署配置")
+    p_backup.add_argument("--output", default=None, help="备份目录（默认 backups/<UTC时间>）")
+    p_restore = sub.add_parser("restore", help="从 pypctl 备份恢复（覆盖当前数据）")
+    p_restore.add_argument("backup_dir", help="含 manifest.json 的备份目录")
+    p_restore.add_argument("--confirm", default="", help="危险操作确认词：RESTORE")
+    p_upgrade = sub.add_parser("upgrade", help="短停机冷备、迁移并冒烟")
+    p_upgrade.add_argument("--build", action="store_true", help="升级时重新构建镜像")
     p_down = sub.add_parser("down", help="停止编排")
     p_down.add_argument("-v", "--volumes", action="store_true", help="连数据卷一起删（清库重来）")
     sub.add_parser("status", help="汇总 /livez /readyz /version")
@@ -211,6 +443,14 @@ def main(argv: list[str] | None = None) -> int:
         return doctor(args.url)
     if args.cmd == "up":
         return up(build=args.build, agents=args.agents)
+    if args.cmd == "agent":
+        return start_agent(args.token, build=args.build)
+    if args.cmd == "backup":
+        return backup(args.output)[0]
+    if args.cmd == "restore":
+        return restore(args.backup_dir, args.confirm)
+    if args.cmd == "upgrade":
+        return upgrade(build=args.build)
     if args.cmd == "down":
         return down(volumes=args.volumes)
     if args.cmd == "status":

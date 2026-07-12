@@ -20,8 +20,8 @@ from payipa_contracts.version import CONTRACT_VERSION
 class Capabilities(BaseModel):
     """agent 注册上报的能力标记。"""
 
-    automation: bool = reserved("是否支持自动化（动态页/交互采集）", default=False, since="M5")
-    engines: list[str] = reserved("支持的抓取引擎清单", default_factory=list, since="M5")
+    automation: bool = active("真实启动浏览器探测通过后上报自动化能力", default=False, since="M5")
+    engines: list[str] = active("支持的抓取引擎清单；主控据此过滤派发候选", default_factory=list, since="M5")
 
 
 # ── 客户端（agent）→ 主控 ──────────────────────────────────────────────────
@@ -113,6 +113,16 @@ class TaskAssign(BaseModel):
     upload_token: str | None = active(
         "本任务的内部上传 token（local 兜底回传 raw 用；绑定 source+batch）", default=None, since="M1"
     )
+    rule_token: str | None = active("读取本任务规则内容的短期 token（绑定 content_hash）", default=None, since="M8")
+
+
+class ResultAck(BaseModel):
+    """主控对 ResultReport 的持久化确认；Agent 收到后才删除本地 spool。"""
+
+    type: Literal["result_ack"] = "result_ack"
+    req_id: str = active("请求任务 id", since="M8")
+    attempt: int = active("结果执行代次", ge=0, since="M8")
+    accepted: bool = active("是否为当前权威代次；False 表示迟到结果已被安全丢弃", since="M8")
 
 
 class Cancel(BaseModel):
@@ -129,6 +139,6 @@ ClientFrame = Annotated[
     Field(discriminator="type"),
 ]
 ServerFrame = Annotated[
-    RegisterAck | TaskAssign | Cancel,
+    RegisterAck | TaskAssign | ResultAck | Cancel,
     Field(discriminator="type"),
 ]

@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 
 from jianbing_utils import crypto
-from payipa_contracts import RulePack, RulePointer
+from payipa_contracts import RulePack, RulePointer, RuleStatus
 from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncEngine
@@ -31,6 +31,7 @@ class RuleStore:
         跨源相同 spec 各自成行（DB-001）：归属、版本、派发互不串。并发重复 put 依赖
         唯一约束 uq_rules_source_id_content_hash 兜底，冲突后重查返回已有行。
         """
+        status = RuleStatus(status).value
         digest = content_hash(pack)
         async with self.engine.begin() as conn:
             existing = await self._find(conn, source_id, digest)

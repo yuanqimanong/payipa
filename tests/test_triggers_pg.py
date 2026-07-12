@@ -8,12 +8,14 @@ import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import payipa_contracts as c
+import pytest
 from fastapi.testclient import TestClient
 from payipa.crawl import run
 from payipa.db.engine import get_engine
 from payipa.db.pyp import Batch, PushComponent, Request, Source, Task
 from payipa.db.settings import get_settings
 from payipa.deliver.notify import NotifyBotStore
+from pyp_server import triggers as trigger_module
 from pyp_server.main import app
 from pyp_server.triggers import on_batch_finalized
 from sqlalchemy import func, text
@@ -21,6 +23,29 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import create_async_engine
 
 _UUID = "m4trig"
+
+
+def test_test_batch_skips_production_triggers(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[str] = []
+
+    async def context(_engine, _batch_id):
+        return {
+            "task_id": 1,
+            "status": "done",
+            "channel": "test",
+            "params": {"push_component_id": 1, "product_code": "must-not-push", "notify_bot_id": 1},
+            "ok": 1,
+            "total": 1,
+        }
+
+    async def forbidden(*_args, **_kwargs):
+        calls.append("called")
+
+    monkeypatch.setattr(trigger_module, "batch_trigger_context", context)
+    monkeypatch.setattr(trigger_module, "enqueue_push", forbidden)
+    monkeypatch.setattr(trigger_module, "notify", forbidden)
+    asyncio.run(trigger_module.on_batch_finalized(123))
+    assert calls == []
 
 
 class _Sink(BaseHTTPRequestHandler):

@@ -29,6 +29,15 @@ async def login_submit(
     request: Request, username: str = Form(...), password: str = Form(...), csrf_token: str = Form(None)
 ):
     verify_csrf(request, csrf_token)
+    throttle = getattr(request.app.state, "login_throttle", None)
+    tkey = None
+    if throttle is not None:
+        tkey = throttle.key(request.client.host if request.client else None, username)
+        wait = throttle.retry_after(tkey)
+        if wait > 0:  # 在线暴力破解节流：锁定窗内直接拒绝，连库都不查
+            return render_with_csrf(
+                request, "login.html", {"error": f"登录尝试过于频繁，请约 {int(wait) + 1} 秒后重试"}, status_code=429
+            )
     async with get_engine("pyp").connect() as conn:
         row = (
             await conn.execute(
@@ -36,15 +45,20 @@ async def login_submit(
             )
         ).first()
     if row is None or row[3] != "active" or not verify_password(row[2], password):
+        if throttle is not None and tkey is not None:
+            throttle.record_failure(tkey)
         return render_with_csrf(request, "login.html", {"error": "用户名或密码错误"}, status_code=401)
+    if throttle is not None and tkey is not None:
+        throttle.clear(tkey)  # 成功即清零，避免正常用户偶发输错累积到锁定
     resp = RedirectResponse("/sources", status_code=303)
     resp.set_cookie(
         COOKIE_NAME,
         create_session(row[0], row[1]),
         httponly=True,
         samesite="lax",
+        secure=get_server_settings().environment == "production",
         max_age=get_server_settings().session_ttl_s,
-    )  # 生产加 secure=True（HTTPS）
+    )
     return resp
 
 

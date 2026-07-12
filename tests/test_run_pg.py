@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 
 import payipa_contracts as c
+import pytest
 from payipa.crawl import run
 from payipa.crawl.ingest import build_data_table, drop_data_table
 from payipa.crawl.rules import RuleStore, content_hash
@@ -20,6 +21,7 @@ _UUID = "m1run"
 def _rule() -> c.RulePack:
     return c.RulePack(
         fields=[c.FieldRule(name="title", locator=c.Locator(type=c.LocatorType.CSS, expr="h1"))],
+        crawl=c.CrawlRules(max_depth=1),
         fingerprint=["title"],
     )
 
@@ -46,6 +48,18 @@ def test_run_end_to_end_logic(require_pg: None) -> None:
         try:
             await drop_data_table(dc, table)
             await run.ensure_data_table(dc, _UUID, ["title"])
+
+            # 上次测试若在清理前中断，先按 FK 顺序清残留，保证本用例可重复执行。
+            async with pyp.begin() as conn:
+                for sql in (
+                    "DELETE FROM task_events WHERE batch_id IN (SELECT b.id FROM batches b JOIN tasks t ON b.task_id=t.id JOIN sources s ON t.source_id=s.id WHERE s.uuid=:u)",  # noqa: E501
+                    "DELETE FROM requests WHERE batch_id IN (SELECT b.id FROM batches b JOIN tasks t ON b.task_id=t.id JOIN sources s ON t.source_id=s.id WHERE s.uuid=:u)",  # noqa: E501
+                    "DELETE FROM batches WHERE task_id IN (SELECT t.id FROM tasks t JOIN sources s ON t.source_id=s.id WHERE s.uuid=:u)",  # noqa: E501
+                    "DELETE FROM rules WHERE source_id IN (SELECT id FROM sources WHERE uuid=:u)",
+                    "DELETE FROM tasks WHERE source_id IN (SELECT id FROM sources WHERE uuid=:u)",
+                    "DELETE FROM sources WHERE uuid=:u",
+                ):
+                    await conn.execute(text(sql), {"u": _UUID})
 
             async with pyp.begin() as conn:
                 src_id = (
@@ -86,8 +100,30 @@ def test_run_end_to_end_logic(require_pg: None) -> None:
             # 请求未完成 → 批次不收尾
             assert await run.finalize_batch_if_done(pyp, batch_id) is False
 
-            # 结果入库（先数据后状态）
-            written = await run.handle_result(pyp, dc, table, _result(batch_id, req_id), fingerprint_keys=["title"])
+            # 结果提交的 fencing 是唯一权威门：错 attempt 的迟到结果连 discovered 子请求也不能留下。
+            assert await run.mark_assigned(pyp, req_id, "agent-a", attempt=0, lease_s=60) == 1
+            assert await run.mark_running(pyp, req_id, "agent-a", 0, lease_s=60) == 1
+            stale = _result(batch_id, req_id).model_copy(
+                update={"attempt": 1, "discovered": ["https://x.com/must-not-be-enqueued"]}
+            )
+            rejected = await run.commit_result(pyp, dc, table, stale, fingerprint_keys=["title"], agent_id="agent-a")
+            assert rejected.accepted is False
+            async with pyp.begin() as conn:
+                assert (
+                    await conn.execute(
+                        select(func.count()).select_from(Request.__table__).where(Request.batch_id == batch_id)
+                    )
+                ).scalar() == 1
+
+            # 正确代次结果入库（先数据后状态）
+            written = await run.handle_result(
+                pyp,
+                dc,
+                table,
+                _result(batch_id, req_id),
+                fingerprint_keys=["title"],
+                agent_id="agent-a",
+            )
             assert written == 1
 
             async with pyp.begin() as conn:  # request 状态在 pyp 库
@@ -105,6 +141,7 @@ def test_run_end_to_end_logic(require_pg: None) -> None:
         finally:
             async with pyp.begin() as conn:
                 for sql in (
+                    "DELETE FROM task_events WHERE batch_id IN (SELECT b.id FROM batches b JOIN tasks t ON b.task_id=t.id JOIN sources s ON t.source_id=s.id WHERE s.uuid=:u)",  # noqa: E501
                     "DELETE FROM requests WHERE batch_id IN (SELECT b.id FROM batches b JOIN tasks t ON b.task_id=t.id JOIN sources s ON t.source_id=s.id WHERE s.uuid=:u)",  # noqa: E501
                     "DELETE FROM batches WHERE task_id IN (SELECT t.id FROM tasks t JOIN sources s ON t.source_id=s.id WHERE s.uuid=:u)",  # noqa: E501
                     "DELETE FROM rules WHERE source_id IN (SELECT id FROM sources WHERE uuid=:u)",
@@ -164,6 +201,38 @@ def test_rule_dedup_scoped_to_source(require_pg: None) -> None:
             again = await store.put(src_ids[0], _rule())
             assert again.rule_id == ptr_a.rule_id
             assert again.version == ptr_a.version
+
+            # 跨源规则指针必须在建批事务内拒绝，不能只依赖调用方自觉。
+            with pytest.raises(PermissionError, match="不属于"):
+                await run.create_batch_with_requests(
+                    pyp,
+                    task_id=task_ids[0],
+                    source_uuid=uuids[0],
+                    targets=["https://x.com/cross-source"],
+                    rule_ptr=ptr_b,
+                )
+
+            draft_pack = c.RulePack(
+                fields=[c.FieldRule(name="title", locator=c.Locator(type=c.LocatorType.CSS, expr="h2"))]
+            )
+            draft_ptr = await store.put(src_ids[0], draft_pack, status="draft")
+            with pytest.raises(PermissionError, match="active"):
+                await run.create_batch_with_requests(
+                    pyp,
+                    task_id=task_ids[0],
+                    source_uuid=uuids[0],
+                    targets=["https://x.com/draft-prod"],
+                    rule_ptr=draft_ptr,
+                )
+            _, draft_specs = await run.create_batch_with_requests(
+                pyp,
+                task_id=task_ids[0],
+                source_uuid=uuids[0],
+                targets=["https://x.com/draft-test"],
+                rule_ptr=draft_ptr,
+                channel=c.Channel.TEST,
+            )
+            assert draft_specs[0].channel is c.Channel.TEST
 
             # 请求写入权威 rule_id，且指向本源的规则行
             for tid, u, ptr in ((task_ids[0], uuids[0], ptr_a), (task_ids[1], uuids[1], ptr_b)):

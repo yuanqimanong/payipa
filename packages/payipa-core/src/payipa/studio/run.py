@@ -12,12 +12,57 @@ from collections.abc import Sequence
 
 from sqlalchemy.ext.asyncio import AsyncEngine
 
+from payipa.db.dynamic_schema import record_dynamic_schema
 from payipa.studio.asm import AsmLoader, build_asm_table
 from payipa.studio.evolve import evolve_asm_table
 from payipa.studio.executor import AssembleContext, AssembleFn, CodeExecutor, LocalExecutor
 from payipa.studio.gateway import QueryGateway
 from payipa.studio.sandbox import SandboxExecutor, SandboxPool
 from payipa.studio.watermark import advance_watermarks, get_watermarks
+
+
+async def _ensure_assembly_schema(
+    engine_business: AsyncEngine,
+    table,
+    product_code: str,
+    indexed_fields: Sequence[str],
+    engine_pyp: AsyncEngine | None,
+) -> None:
+    if engine_pyp is not None:
+        await record_dynamic_schema(
+            engine_pyp,
+            kind="assembly",
+            object_code=product_code,
+            database_name="business",
+            table_name=table.name,
+            indexed_fields=indexed_fields,
+            status="provisioning",
+        )
+    try:
+        await evolve_asm_table(engine_business, table)
+    except Exception as exc:
+        if engine_pyp is not None:
+            await record_dynamic_schema(
+                engine_pyp,
+                kind="assembly",
+                object_code=product_code,
+                database_name="business",
+                table_name=table.name,
+                indexed_fields=indexed_fields,
+                status="error",
+                error=f"{type(exc).__name__}: {exc}"[:2000],
+            )
+        raise
+    if engine_pyp is not None:
+        await record_dynamic_schema(
+            engine_pyp,
+            kind="assembly",
+            object_code=product_code,
+            database_name="business",
+            table_name=table.name,
+            indexed_fields=indexed_fields,
+            status="ready",
+        )
 
 
 async def run_assembly(
@@ -39,7 +84,7 @@ async def run_assembly(
     upsert 成功后推进水位。水位前进只发生在组装成功之后，故中途失败下次会重读（读腿可重算 + 写腿幂等）。
     """
     table = build_asm_table(product_code, indexed_fields)
-    await evolve_asm_table(engine_business, table)  # 建表或加法演进（新增索引字段自动加列；破坏性变更会拦截）
+    await _ensure_assembly_schema(engine_business, table, product_code, indexed_fields, engine_pyp)
     watermarks: dict[str, int] = {}
     if incremental and engine_pyp is not None and assembly_id is not None:
         watermarks = await get_watermarks(engine_pyp, assembly_id)
@@ -75,7 +120,7 @@ async def run_assembly_sandboxed(
     （只在装载成功后推进，读腿可重算 + 写腿幂等）。
     """
     table = build_asm_table(product_code, indexed_fields)
-    await evolve_asm_table(engine_business, table)
+    await _ensure_assembly_schema(engine_business, table, product_code, indexed_fields, engine_pyp)
     watermarks: dict[str, int] | None = None
     if incremental and engine_pyp is not None and assembly_id is not None:
         watermarks = await get_watermarks(engine_pyp, assembly_id)

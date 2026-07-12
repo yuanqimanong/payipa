@@ -185,6 +185,60 @@ def test_claim_fairness(require_pg: None) -> None:
     asyncio.run(main())
 
 
+def test_dfs_claims_deepest_request_first(require_pg: None) -> None:
+    """P0-23: DFS is an execution policy, not a decorative contract value."""
+    uuid = "m2dfs"
+    group = "m2dfs-only"
+
+    async def main() -> None:
+        pyp = create_async_engine(get_settings().async_url("pyp"))
+        try:
+            source_id, task_id = await run.setup_source(
+                pyp,
+                uuid,
+                "DFS ordering",
+                access_basis="owned",
+                access_reference="test fixture",
+                access_confirmed=True,
+            )
+            async with pyp.begin() as conn:
+                await conn.execute(text("UPDATE sources SET agent_group=:g WHERE uuid=:u"), {"g": group, "u": uuid})
+            ptr = await RuleStore(pyp).put(
+                source_id,
+                c.RulePack(
+                    fields=[c.FieldRule(name="title", locator=c.Locator(type=c.LocatorType.CSS, expr="h1"))],
+                    crawl=c.CrawlRules(strategy=c.CrawlStrategy.DFS, max_depth=3),
+                ),
+            )
+            _, specs = await run.create_batch_with_requests(
+                pyp,
+                task_id=task_id,
+                source_uuid=uuid,
+                targets=[f"https://x.com/{depth}" for depth in range(3)],
+                rule_ptr=ptr,
+            )
+            async with pyp.begin() as conn:
+                for depth, spec in enumerate(specs):
+                    await conn.execute(
+                        update(Request.__table__).where(Request.id == int(spec.req_id)).values(depth=depth)
+                    )
+            claimed = await run.claim_queued_for_dispatch(pyp, limit=3, caps={group: {"http"}})
+            assert [spec.target for spec in claimed] == ["https://x.com/2", "https://x.com/1", "https://x.com/0"]
+        finally:
+            async with pyp.begin() as conn:
+                for sql in (
+                    "DELETE FROM requests WHERE batch_id IN (SELECT b.id FROM batches b JOIN tasks t ON b.task_id=t.id JOIN sources s ON t.source_id=s.id WHERE s.uuid=:u)",  # noqa: E501
+                    "DELETE FROM batches WHERE task_id IN (SELECT t.id FROM tasks t JOIN sources s ON t.source_id=s.id WHERE s.uuid=:u)",  # noqa: E501
+                    "DELETE FROM rules WHERE source_id IN (SELECT id FROM sources WHERE uuid=:u)",
+                    "DELETE FROM tasks WHERE source_id IN (SELECT id FROM sources WHERE uuid=:u)",
+                    "DELETE FROM sources WHERE uuid=:u",
+                ):
+                    await conn.execute(text(sql), {"u": uuid})
+            await pyp.dispose()
+
+    asyncio.run(main())
+
+
 def test_ack_and_attempt_fencing(require_pg: None) -> None:
     """P0-10 验收：mark_assigned 代次守卫、mark_running ACK 展租约、迟到结果/状态不覆盖当前状态。"""
     uuid = "m2fence"

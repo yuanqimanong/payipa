@@ -11,23 +11,17 @@ from payipa import views
 from payipa.db.engine import get_engine
 
 from pyp_server.auth import require_perm, require_user
-from pyp_server.settings import get_server_settings
 
 # 路由级强制登录：即便 RBAC 关闭（require_perm 直通），这些数据端点也必须已登录——它们回显
 # 用户清单/审计日志等敏感数据，与其背后受登录保护的页面外壳（ui.py）保持一致，杜绝匿名直连读取。
 router = APIRouter(prefix="/api/views", tags=["views"], dependencies=[Depends(require_user)])
 
 
-@router.get("/join-info", summary="节点接入信息", dependencies=[Depends(require_perm("agents.read"))])
+@router.get("/join-info", summary="节点接入信息", dependencies=[Depends(require_perm("nodes.read"))])
 async def view_join_info(request: Request) -> dict:
-    """节点接入引导用：主控地址推断 + join token 展示策略（dev 明示，生产不回显真值）。"""
-    settings = get_server_settings()
+    """节点接入引导只返回地址；凭证由受保护的 enrollment API 单次签发。"""
     host = request.headers.get("host") or "127.0.0.1:8000"
-    token = settings.agent_join_token
-    return {
-        "server_url": f"{request.url.scheme}://{host}",
-        "join_token": token if token == "dev" else None,  # 生产不回显真 token（前端显占位）
-    }
+    return {"server_url": f"{request.url.scheme}://{host}"}
 
 
 @router.get("/tasks", summary="任务清单", dependencies=[Depends(require_perm("tasks.read"))])

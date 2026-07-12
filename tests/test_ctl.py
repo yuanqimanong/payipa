@@ -9,9 +9,15 @@ from __future__ import annotations
 from pyp_server import ctl
 from pyp_server.settings import DEV_SESSION_SECRET
 
-_SECRET_KEYS = ("PG_PASSWORD", "PYP_SERVER_SESSION_SECRET", "UPLOAD_SECRET", "CRED_KEK", "PYP_SERVER_AGENT_JOIN_TOKEN")
+_SECRET_KEYS = ("PG_PASSWORD", "PYP_SERVER_SESSION_SECRET", "PYP_SERVER_BOOTSTRAP_TOKEN", "UPLOAD_SECRET", "CRED_KEK")
 # 各 dev 默认值（settings/preflight 同源）：生成的密钥绝不允许撞上
-_DEV_VALUES = {"dev", "postgres", "dev-insecure-change-me", "dev-insecure-kek-change-me", DEV_SESSION_SECRET}
+_DEV_VALUES = {
+    "dev",
+    "postgres",
+    "dev-insecure-upload-secret-change-me",
+    "dev-insecure-kek-change-me",
+    DEV_SESSION_SECRET,
+}
 
 
 def _parse_env(text: str) -> dict[str, str]:

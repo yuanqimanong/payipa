@@ -1,43 +1,27 @@
-# pyp-server 主控部署镜像（P0-02；多阶段：双仓源码打 wheel → slim runtime，无 git/apt 依赖）。
-# 构建上下文 = project/ 根（含 payipa 与 jianbing_utils 兄弟目录）——同 agent 镜像约定，见根 .dockerignore。
-#   在 project/ 根执行：
-#     docker build -f payipa/deploy/Dockerfile.server -t payipa-server:local .
-# 运行推荐经 deploy/compose.yml 编排（db → migrate one-shot → server），或 pypctl 一键（P0-03）。
-# 生产建议：把两处基础镜像 tag 换成 digest 固定（`docker buildx imagetools inspect python:3.14-slim`
-# 取 sha256 后写 python:3.14-slim@sha256:...），杜绝基础镜像漂移（03 §3.4-7）。
-
-# ── build：uv 从源码打四个 wheel（contracts / jianbing_utils / payipa-core / pyp-server）──
+# pyp-server self-contained image. Build context is the payipa repository root.
 FROM python:3.14-slim AS build
 COPY --from=ghcr.io/astral-sh/uv:0.11.26 /uv /bin/uv
-WORKDIR /w
-COPY payipa/packages/payipa-contracts ./payipa-contracts
-COPY payipa/packages/payipa-core ./payipa-core
-COPY payipa/apps/server ./pyp-server
-COPY jianbing_utils ./jianbing_utils
-RUN uv build --no-sources --out-dir /dist ./payipa-contracts \
- && uv build --no-sources --out-dir /dist ./jianbing_utils \
- && uv build --no-sources --out-dir /dist ./payipa-core \
- && uv build --no-sources --out-dir /dist ./pyp-server
-
-# ── runtime：装四个本地 wheel（其余运行时依赖自 PyPI 解析）；非 root、无 git/apt ─────────
-FROM python:3.14-slim
-COPY --from=ghcr.io/astral-sh/uv:0.11.26 /uv /bin/uv
-COPY --from=build /dist /dist
-RUN uv pip install --system --no-cache /dist/*.whl && rm -rf /dist
-# readyz 的迁移核验按 CWD 相对路径读 deploy/alembic.ini（payipa.db.revisions.script_head），
-# 故镜像必须携带 deploy/ 且 WORKDIR 固定为含 deploy/ 的 /app；migrate one-shot 也复用这份配置。
 WORKDIR /app
-COPY payipa/deploy/alembic.ini ./deploy/alembic.ini
-COPY payipa/deploy/alembic ./deploy/alembic
-# 非 root 运行（03 §3.4-4）；/data 为本地对象存储根（compose 挂 pyp_data 卷，首挂继承镜像属主）
+
+# The lockfile resolves jianbing-utils from its pinned Git tag; no sibling checkout is required.
+COPY pyproject.toml uv.lock ./
+COPY apps ./apps
+COPY packages ./packages
+RUN uv sync --frozen --no-dev --package pyp-server --no-editable
+
+FROM python:3.14-slim
+WORKDIR /app
+COPY --from=build /app/.venv /app/.venv
+COPY deploy/alembic.ini ./deploy/alembic.ini
+COPY deploy/alembic ./deploy/alembic
 RUN useradd --system --create-home --uid 10001 payipa \
- && mkdir -p /data && chown -R payipa:payipa /data /app
+ && mkdir -p /data \
+ && chown -R payipa:payipa /data /app
 USER payipa
-ENV PYTHONUNBUFFERED=1 \
+ENV PATH="/app/.venv/bin:$PATH" \
+    PYTHONUNBUFFERED=1 \
     DATA_ROOT=/data
-# 构建指纹（/version 的 commit 字段；正式构建 --build-arg BUILD_COMMIT=$(git rev-parse --short HEAD)）
 ARG BUILD_COMMIT=""
 ENV PYP_SERVER_BUILD_COMMIT=${BUILD_COMMIT}
 EXPOSE 8000
-# v1 硬约束（P0-09）：单实例单 worker——绝不加 --workers；多进程会分裂 Hub/限流并竞争调度。
 CMD ["uvicorn", "pyp_server.main:app", "--host", "0.0.0.0", "--port", "8000"]

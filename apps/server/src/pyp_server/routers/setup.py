@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import hmac
 import logging
 
 from fastapi import APIRouter, Form, Request
@@ -20,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 from pyp_server.auth import hash_password
 from pyp_server.csrf import render_with_csrf, verify_csrf
 from pyp_server.routers.health import readyz
+from pyp_server.settings import get_server_settings
 
 router = APIRouter(tags=["setup"])
 logger = logging.getLogger("pyp_server.setup")
@@ -68,6 +70,7 @@ async def setup_submit(
     username: str = Form(...),
     password: str = Form(...),
     password2: str = Form(...),
+    bootstrap_token: str = Form(...),
     csrf_token: str = Form(None),
 ):
     verify_csrf(request, csrf_token)
@@ -82,6 +85,9 @@ async def setup_submit(
         )
 
     username = username.strip()
+    if not hmac.compare_digest(bootstrap_token, get_server_settings().bootstrap_token):
+        logger.warning("rejected first-admin setup attempt with invalid bootstrap token")
+        return await back("安装码无效，请使用部署时生成的 PYP_SERVER_BOOTSTRAP_TOKEN", status=403)
     if not 3 <= len(username) <= 64:
         return await back("用户名长度须在 3–64 个字符之间")
     if len(password) < 8:

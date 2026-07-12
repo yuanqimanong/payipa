@@ -6,6 +6,7 @@ M1：websockets 出站 + anyio task group；处理 task_assign → 拉规则 →
 
 from __future__ import annotations
 
+import os
 import time
 
 import anyio
@@ -21,6 +22,7 @@ from payipa_contracts import (
     RegisterAck,
     RegisterReq,
     RequestState,
+    ResultAck,
     ResultBatch,
     ResultReport,
     ServerFrame,
@@ -31,14 +33,28 @@ from payipa_contracts import (
 )
 from pydantic import TypeAdapter
 
-from pyp_agent.fetch import FetchNetworkError, FetchTimeout, FetchTooLarge, browser_available, fetch
-from pyp_agent.interpret import interpret_page
+from pyp_agent.fetch import FetchNetworkError, FetchTimeout, FetchTooLarge, fetch, probe_browser_runtime
+from pyp_agent.interpret import fail_when_reason, interpret_page, layout_mismatch_reason
 from pyp_agent.response_policy import assess_response
 from pyp_agent.rules import RuleCache
+from pyp_agent.spool import ack as ack_spooled_result
+from pyp_agent.spool import pending as pending_results
+from pyp_agent.spool import put as spool_result
 from pyp_agent.state import load_state, save_state
 from pyp_agent.upload import upload_raw_via_server
+from pyp_agent.url_policy import URLPolicyError
 
 _server_frame = TypeAdapter(ServerFrame)
+_DEFAULT_MAX_RESULT_BYTES = 8 * 1024 * 1024
+
+
+def max_result_bytes() -> int:
+    """Bound one WebSocket result frame; oversized output must use a future chunk protocol."""
+    try:
+        mb = int(os.environ.get("PYP_AGENT_MAX_RESULT_MB", "8"))
+    except ValueError:
+        return _DEFAULT_MAX_RESULT_BYTES
+    return mb * 1024 * 1024 if mb > 0 else _DEFAULT_MAX_RESULT_BYTES
 
 
 def _ws_url(server_base: str) -> str:
@@ -54,15 +70,29 @@ async def process_task(
     task: TaskSpec,
     *,
     upload_token: str | None,
+    rule_token: str | None = None,
     server_base: str,
     rule_cache: RuleCache,
     agent_id: str,
 ) -> ResultReport | StatusReport:
     """执行一个请求；访问被明确拒绝时不解析、不归档并请求主控暂停整源。"""
     started = time.monotonic()
-    rule = await rule_cache.get(task.rule_ptr)
+    rule = await rule_cache.get(task.rule_ptr, token=rule_token)
     try:
-        fetched = await fetch(task.target, engine_hint=task.engine_hint, timeout=task.timeout_s)
+        fetched = await fetch(
+            task.target,
+            engine_hint=task.engine_hint,
+            timeout=task.timeout_s,
+            allowed_domains=task.allowed_domains,
+        )
+    except URLPolicyError as exc:
+        return StatusReport(
+            req_id=task.req_id,
+            state=int(ErrorCode.SOFT_FAIL),
+            message=str(exc),
+            reason_code="target_policy_denied",
+            attempt=task.attempt,
+        )
     except FetchTimeout:
         return StatusReport(
             req_id=task.req_id,
@@ -102,14 +132,35 @@ async def process_task(
             attempt=task.attempt,
         )
 
+    rule_failure = fail_when_reason(rule, fetched.status, fetched.body)
+    if rule_failure is not None:
+        return StatusReport(
+            req_id=task.req_id,
+            state=int(ErrorCode.SOFT_FAIL),
+            message=rule_failure,
+            response_status=fetched.status or None,
+            reason_code="rule_fail_when",
+            attempt=task.attempt,
+        )
+    layout_failure = layout_mismatch_reason(rule, fetched.body, fetched.url)
+    if layout_failure is not None:
+        return StatusReport(
+            req_id=task.req_id,
+            state=int(ErrorCode.PARSE_FAIL),
+            message=layout_failure,
+            response_status=fetched.status or None,
+            reason_code="layout_mismatch",
+            attempt=task.attempt,
+        )
+
     artifacts = []
-    if upload_token and task.archive_raw:  # local 兜底：raw 经主控回传（S3 直传走 M5）
+    if upload_token and task.archive_raw and task.channel.value == "prod":
         ref = await upload_raw_via_server(
             server_base,
             upload_token,
             source_uuid=task.source,
             batch_id=task.batch_id,
-            url=task.target,
+            url=fetched.url,
             data=fetched.body,
             content_type=fetched.content_type,
             task_id=task.task_id,
@@ -117,7 +168,17 @@ async def process_task(
         )
         artifacts.append(ref)
 
-    parsed = interpret_page(rule, fetched.body, task.target, fetched.content_type)
+    try:
+        parsed = interpret_page(rule, fetched.body, fetched.url, fetched.content_type)
+    except Exception as exc:  # noqa: BLE001 - parser details are reduced to a stable task error
+        return StatusReport(
+            req_id=task.req_id,
+            state=int(ErrorCode.PARSE_FAIL),
+            message=f"parser failed ({type(exc).__name__})",
+            response_status=fetched.status or None,
+            reason_code="parse_error",
+            attempt=task.attempt,
+        )
     # 数据质量原始计数（主控 core.monitor 聚合）：有非空字段=ok，全空=blank；
     # 解析失败在请求级以 PARSE_FAIL 状态体现，不在此计 count_fail。
     blank = sum(1 for it in parsed.items if not any(v not in (None, "", [], {}) for v in it.fields.values()))
@@ -130,7 +191,7 @@ async def process_task(
         response_bytes=len(fetched.body),
         engine=task.engine_hint.value,
     )
-    return ResultReport(
+    report = ResultReport(
         result=ResultBatch(
             batch_id=task.batch_id,
             req_id=task.req_id,
@@ -141,6 +202,16 @@ async def process_task(
             summary=summary,
         )
     )
+    if len(report.model_dump_json().encode("utf-8")) > max_result_bytes():
+        return StatusReport(
+            req_id=task.req_id,
+            state=int(ErrorCode.SOFT_FAIL),
+            message="serialized result exceeds the agent result budget",
+            response_status=fetched.status or None,
+            reason_code="result_too_large",
+            attempt=task.attempt,
+        )
+    return report
 
 
 class AgentConnection:
@@ -167,6 +238,8 @@ class AgentConnection:
         # 长期节点凭证（P0-07）：入网后由 RegisterAck 下发并持久化，重连凭它认证（空串=已作废）
         self.node_token: str | None = (load_state(state_dir).get("node_token") or None) if state_dir else None
         self.rule_cache = RuleCache(server)
+        self._slots = anyio.Semaphore(max(1, slot_n))  # 主控误超发时本地仍绝不突破并发上限
+        self._browser_ready: bool | None = None
         self._scopes: dict[str, anyio.CancelScope] = {}  # req_id → 取消域（收 Cancel 帧就地取消该任务）
 
     async def run_once(self) -> None:
@@ -175,7 +248,9 @@ class AgentConnection:
         async with websockets.connect(
             _ws_url(self.server), additional_headers={"authorization": f"Bearer {bearer}"}
         ) as ws:
-            has_browser = browser_available()  # 装了 playwright extra 才上报 automation 能力（分组派发据此）
+            if self._browser_ready is None:
+                self._browser_ready = await probe_browser_runtime()
+            has_browser = self._browser_ready
             await ws.send(
                 RegisterReq(
                     agent_id=self.agent_id,
@@ -195,12 +270,17 @@ class AgentConnection:
                     self.node_token = ack.node_token
                     if self.state_dir:
                         save_state(self.state_dir, node_token=ack.node_token)
+            if self.state_dir:
+                for report in pending_results(self.state_dir):
+                    await ws.send(report.model_dump_json())
             async with anyio.create_task_group() as tg:
                 tg.start_soon(self._heartbeat_loop, ws)
                 async for message in ws:
                     frame = _server_frame.validate_json(message)
                     if isinstance(frame, TaskAssign):
                         tg.start_soon(self._handle_task, ws, frame)
+                    elif isinstance(frame, ResultAck) and self.state_dir:
+                        ack_spooled_result(self.state_dir, frame.req_id, frame.attempt)
                     elif isinstance(frame, Cancel) and frame.req_id:
                         scope = self._scopes.get(frame.req_id)  # 取消对应任务协程；回报由 _handle_task 发
                         if scope is not None:
@@ -218,27 +298,31 @@ class AgentConnection:
     async def _handle_task(self, ws, assign: TaskAssign) -> None:
         req_id = assign.task.req_id
         attempt = assign.task.attempt
-        # 先 ACK（P0-10）：主控收到才把请求 ASSIGNED→RUNNING 并展成执行租约；丢失则被快速回收重派
-        await ws.send(TaskAck(req_id=req_id, attempt=attempt).model_dump_json())
         scope = anyio.CancelScope()
         self._scopes[req_id] = scope
         try:
             with scope:  # 独立取消域：收 Cancel(req_id) 帧只取消本任务，不影响其它/连接
-                try:
-                    report = await process_task(
-                        assign.task,
-                        upload_token=assign.upload_token,
-                        server_base=self.server,
-                        rule_cache=self.rule_cache,
-                        agent_id=self.agent_id,
-                    )
-                    await ws.send(report.model_dump_json())
-                except Exception as exc:  # noqa: BLE001  单任务失败回错误帧，不拖垮连接
-                    await ws.send(
-                        ErrorFrame(
-                            code=int(ErrorCode.SOFT_FAIL), message=str(exc), req_id=req_id, attempt=attempt
-                        ).model_dump_json()
-                    )
+                async with self._slots:
+                    # 真正拿到本地槽后再 ACK；主控误超发的任务留在 ACK 短租，不会虚报已开始执行。
+                    await ws.send(TaskAck(req_id=req_id, attempt=attempt).model_dump_json())
+                    try:
+                        report = await process_task(
+                            assign.task,
+                            upload_token=assign.upload_token,
+                            rule_token=assign.rule_token,
+                            server_base=self.server,
+                            rule_cache=self.rule_cache,
+                            agent_id=self.agent_id,
+                        )
+                        if isinstance(report, ResultReport) and self.state_dir:
+                            spool_result(self.state_dir, report)
+                        await ws.send(report.model_dump_json())
+                    except Exception as exc:  # noqa: BLE001  单任务失败回错误帧，不拖垮连接
+                        await ws.send(
+                            ErrorFrame(
+                                code=int(ErrorCode.SOFT_FAIL), message=str(exc), req_id=req_id, attempt=attempt
+                            ).model_dump_json()
+                        )
         finally:
             self._scopes.pop(req_id, None)
         if scope.cancel_called:  # 被取消：域外回报 CANCELED（域内 send 会被取消掉）
@@ -259,10 +343,13 @@ class AgentConnection:
                 await self.run_once()
                 attempt = 0
             except websockets.exceptions.ConnectionClosedError as exc:
-                if self.node_token and exc.rcvd is not None and exc.rcvd.code == 1008:
-                    self.node_token = None  # 凭证已失效：下次用 join token 重新换发
+                if exc.rcvd is not None and exc.rcvd.code == 1008:
+                    self.node_token = None
                     if self.state_dir:
                         save_state(self.state_dir, node_token="")
+                    raise PermissionError(
+                        "agent credential or enrollment token was rejected; create a new one-time enrollment token"
+                    ) from exc
                 if max_retries is not None and attempt >= max_retries:
                     raise
                 attempt += 1
