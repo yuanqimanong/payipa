@@ -7,6 +7,7 @@ requires-python = ">=3.14"
 dependencies = [
     "payipa-core",
     "payipa-contracts",
+    "jianbing-utils",        # 后台循环与 Agent/Outbox 共用退避策略
     "fastapi>=0.128",
     "uvicorn[standard]>=0.30",
     "pydantic-settings>=2.4",

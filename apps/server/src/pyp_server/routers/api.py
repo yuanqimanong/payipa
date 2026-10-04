@@ -11,10 +11,12 @@ from datetime import datetime
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from payipa.crawl.run import batch_progress as compute_batch_progress
-from payipa.crawl.run import cancel_batch as run_cancel_batch
-from payipa.crawl.run import issue_agent_enrollment, rerun_source, review_source_access, revoke_agent_credential
-from payipa.crawl.run import queue_depth as compute_queue_depth
+from payipa.crawl.batches import batch_progress as compute_batch_progress
+from payipa.crawl.batches import cancel_batch as run_cancel_batch
+from payipa.crawl.batches import rerun_source
+from payipa.crawl.dispatch import queue_depth as compute_queue_depth
+from payipa.crawl.nodes import issue_agent_enrollment, revoke_agent_credential
+from payipa.crawl.sources import review_source_access
 from payipa.db.engine import get_engine
 from payipa.db.ident import check_code
 from payipa.db.settings import get_settings as get_db_settings
@@ -40,7 +42,7 @@ from payipa_contracts import (
 from pydantic import BaseModel, Field
 
 from pyp_server.auth import get_current_user, require_perm, require_user
-from pyp_server.service import dispatch_source_run
+from pyp_server.service import CrawlServiceDependency, dispatch_source_run
 
 router = APIRouter(prefix="/api", tags=["api"])
 
@@ -223,7 +225,7 @@ async def preview_task(spec: TaskSpec) -> TaskAssign:
     summary="触发单源一次采集",
     dependencies=[Depends(require_perm("sources.run"))],
 )
-async def run_source(uuid: str, body: RunRequest) -> RunResponse:
+async def run_source(uuid: str, body: RunRequest, service: CrawlServiceDependency) -> RunResponse:
     _code_or_400(uuid)
     try:
         result = await dispatch_source_run(
@@ -233,6 +235,7 @@ async def run_source(uuid: str, body: RunRequest) -> RunResponse:
             rule=body.rule,
             indexed_fields=body.indexed_fields,
             channel=body.channel,
+            service=service,
         )
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc

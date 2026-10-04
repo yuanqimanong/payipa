@@ -7,7 +7,8 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
-from payipa.crawl.run import batch_progress, review_source_access
+from payipa.crawl.batches import batch_progress
+from payipa.crawl.sources import review_source_access
 from payipa.db.engine import get_engine
 from payipa.db.pyp import Batch, Rule, Source, Task
 from payipa.security.audit import record_audit_best_effort
@@ -18,7 +19,7 @@ from sqlalchemy import select
 from pyp_server.auth import get_current_user
 from pyp_server.csrf import render_with_csrf, verify_csrf
 from pyp_server.routers.ui import page_ctx
-from pyp_server.service import dispatch_source_run
+from pyp_server.service import CrawlServiceDependency, dispatch_source_run
 from pyp_server.settings import get_server_settings
 
 router = APIRouter(tags=["sources-ui"])
@@ -183,7 +184,7 @@ async def source_access_review_submit(uuid: str, request: Request):
 
 
 @router.post("/sources/create", summary="建源提交 → 运行 → 跳查看页")
-async def sources_create(request: Request):
+async def sources_create(request: Request, service: CrawlServiceDependency):
     user = await get_current_user(request)
     if user is None:
         return _login_redirect()
@@ -267,6 +268,7 @@ async def sources_create(request: Request):
             retry=retry,
             timeout=timeout,
             raw_archive=raw_archive,
+            service=service,
         )
     except (LookupError, PermissionError, RuntimeError, ValueError) as exc:
         return await _back(str(exc))
