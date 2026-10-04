@@ -577,8 +577,8 @@ wheels = [
 
 [[package]]
 name = "jianbing-utils"
-version = "0.1.3"
-source = { git = "https://github.com/yuanqimanong/jianbing_utils.git?tag=v0.1.3#250e600feaadf8bae473d7f538ef9be347bc686f" }
+version = "0.1.4"
+source = { git = "https://github.com/yuanqimanong/jianbing_utils.git?tag=v0.1.4#480dda3908e81a56e93706bd49fd11e79c771c21" }
 
 [[package]]
 name = "jinja2"
@@ -864,7 +864,7 @@ requires-dist = [
     { name = "asyncpg", specifier = ">=0.31" },
     { name = "cryptography", specifier = ">=43" },
     { name = "httpx", specifier = ">=0.27" },
-    { name = "jianbing-utils", git = "https://github.com/yuanqimanong/jianbing_utils.git?tag=v0.1.3" },
+    { name = "jianbing-utils", git = "https://github.com/yuanqimanong/jianbing_utils.git?tag=v0.1.4" },
     { name = "payipa-contracts", editable = "packages/payipa-contracts" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.2" },
     { name = "pydantic", specifier = ">=2.12" },
@@ -1069,7 +1069,7 @@ browser = [
 requires-dist = [
     { name = "anyio", specifier = ">=4.14" },
     { name = "dateparser", specifier = ">=1.2" },
-    { name = "jianbing-utils", git = "https://github.com/yuanqimanong/jianbing_utils.git?tag=v0.1.3" },
+    { name = "jianbing-utils", git = "https://github.com/yuanqimanong/jianbing_utils.git?tag=v0.1.4" },
     { name = "jsonpath-ng", specifier = ">=1.6" },
     { name = "niquests", specifier = ">=3.20" },
     { name = "parsel", specifier = ">=1.9" },
@@ -1102,7 +1102,7 @@ requires-dist = [
     { name = "argon2-cffi", specifier = ">=23.1" },
     { name = "cronsim", specifier = ">=2.7" },
     { name = "fastapi", specifier = ">=0.128" },
-    { name = "jianbing-utils", git = "https://github.com/yuanqimanong/jianbing_utils.git?tag=v0.1.3" },
+    { name = "jianbing-utils", git = "https://github.com/yuanqimanong/jianbing_utils.git?tag=v0.1.4" },
     { name = "jinja2", specifier = ">=3.1" },
     { name = "payipa-contracts", editable = "packages/payipa-contracts" },
     { name = "payipa-core", editable = "packages/payipa-core" },
