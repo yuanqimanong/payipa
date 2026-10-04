@@ -16,6 +16,10 @@ tests/                 跨包集成/冒烟测试
 
 依赖方向（import-linter CI 强制）：`server → core → contracts`，`agent → contracts`（**agent 禁止 → core**）。
 
+采集模块按数据源、批次、节点、派发、结果、续爬与调度拆分；业务入口为显式注入数据库的 `CrawlService`。
+后台阶段调度、重试与资源关停分别由 `background`、`lifecycle` 管理。
+边界、验证和回滚见 [架构重构与边界](docs/15-架构重构与边界.md)。
+
 ## 快速开始
 
 ```bash

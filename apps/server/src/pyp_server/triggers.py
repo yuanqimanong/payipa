@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 import logging
 
-from payipa.crawl.run import batch_trigger_context
+from payipa.crawl.batches import batch_trigger_context
 from payipa.db.engine import get_engine
 from payipa.db.settings import get_settings as get_db_settings
 from payipa.deliver.notify import NotifyError, notify

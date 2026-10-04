@@ -27,7 +27,6 @@ router = APIRouter(tags=["system"])
 
 _DBS = ("pyp", "data_center", "business")
 _CACHE_TTL_S = 2.0  # readyz 结果短缓存：编排器高频探针不放大三库压力
-_ready_cache: dict = {"at": 0.0, "resp": None}
 
 
 class Health(BaseModel):
@@ -100,8 +99,9 @@ def _check_loop(app, name: str, enabled: bool) -> str:
 @router.get("/readyz", summary="可服务探针（三库/迁移/存储/后台环全绿才 200）")
 async def readyz(request: Request) -> JSONResponse:
     now = time.monotonic()
-    if _ready_cache["resp"] is not None and now - _ready_cache["at"] < _CACHE_TTL_S:
-        return _ready_cache["resp"]
+    cache = request.app.state.readiness_cache
+    if cache["resp"] is not None and now - cache["at"] < _CACHE_TTL_S:
+        return cache["resp"]
     settings = get_server_settings()
     checks: dict[str, str] = {"config": "ok"}  # preflight 在启动时已把关；能跑到这就是过了
     for key in _DBS:
@@ -116,7 +116,7 @@ async def readyz(request: Request) -> JSONResponse:
         status_code=200 if ready else 503,
         content={"status": "ready" if ready else "unavailable", "checks": checks},
     )
-    _ready_cache.update(at=now, resp=resp)
+    cache.update(at=now, resp=resp)
     return resp
 
 

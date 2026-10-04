@@ -7,7 +7,7 @@ import re
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from payipa.crawl.ingest import build_data_table
-from payipa.crawl.run import source_field_names
+from payipa.crawl.sources import source_field_names
 from payipa.db.engine import get_engine
 from payipa.db.ident import check_code
 from payipa.explore.export import stream_csv, stream_jsonl

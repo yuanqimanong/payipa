@@ -17,7 +17,7 @@ from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from pyp_server.auth import get_current_user, require_user
-from pyp_server.service import dispatch_source_run
+from pyp_server.service import CrawlServiceDependency, dispatch_source_run
 
 router = APIRouter(tags=["onboard"])
 logger = logging.getLogger("pyp_server.onboard")
@@ -75,7 +75,7 @@ async def state() -> dict:
 
 
 @router.post("/api/onboard/demo", summary="创建示例数据源并试跑一次", dependencies=[Depends(require_user)])
-async def run_demo() -> dict:
+async def run_demo(service: CrawlServiceDependency) -> dict:
     """幂等：源已存在则复用（dispatch_source_run 对既有源只更新参数并新建批次）。"""
     result = await dispatch_source_run(
         uuid=DEMO_CODE,
@@ -86,6 +86,7 @@ async def run_demo() -> dict:
         access_reference="Zyte 提供的公开爬虫练习站点（toscrape.com），明确允许抓取练习",
         access_confirmed=True,
         rate_limit=2,  # 演示站，保守限速
+        service=service,
     )
     logger.info("onboarding demo source dispatched: batch=%s", result["batch_id"])
     return {"source": DEMO_CODE, "batch_id": result["batch_id"], "requests": result["requests"]}

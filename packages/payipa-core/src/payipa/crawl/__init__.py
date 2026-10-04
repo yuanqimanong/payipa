@@ -1,1 +1,4 @@
-"""crawl —— 采集：任务/规则/版型库、调度分发、限流调频、连接器 registry、分流入库（01/02/07）。M0 占位。"""
+"""采集领域：service 编排，sources/batches/nodes/dispatch/results 等模块负责各自生命周期。
+
+run 仅保留旧导入路径兼容。模块依赖边界由仓库的 import-linter 配置验证。
+"""

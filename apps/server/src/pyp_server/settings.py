@@ -5,6 +5,7 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import Literal
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # dev 默认密钥（production 模式下 preflight 校验拒绝这些值）。
@@ -53,18 +54,18 @@ class ServerSettings(BaseSettings):
 
     # ── M2 派发环（后台调度）─────────────────────────────────────────────
     dispatch_enabled: bool = True  # 后台派发环开关（测试关闭，避免与用例抢 QUEUED 请求）
-    dispatch_interval_s: float = 1.0  # 派发/回收扫描间隔（秒）
+    dispatch_interval_s: float = Field(default=1.0, gt=0, allow_inf_nan=False)  # 扫描间隔（秒）
     task_lease_s: int = 1800  # 执行租约（秒）：agent ACK 后展成此值；在途无终结超此即视为失联回收
     ack_timeout_s: int = 60  # ACK 短租（秒）：下发后 agent 未确认即被 reaper 快速回收重派（P0-10）。
     # 取 60 而非 30：结果帧与 ack 在同一 WS 上串行处理，重负载下 ack 可能排队，过短会误回收健康节点的任务。
     max_attempt: int = 3  # 请求最大尝试次数（含首次）；超过定格 NODE_LOST(-6)
     # raw/artifact 保留期回收（GC）在后台环内低频执行。此前 gc_expired_artifacts 已实现却从未被调度，
     # 配合「磁盘低水位即拒上传 + readyz 转 503」会演化成不可自愈的磁盘写满宕机（本值 ≤0 关闭 GC tick）。
-    gc_interval_s: float = 300.0
+    gc_interval_s: float = Field(default=300.0, allow_inf_nan=False)
 
     # ── M4 推送 Consumer（outbox 排空环）──────────────────────────────────
     push_enabled: bool = True  # 后台推送 Consumer 开关（测试关闭）
-    push_interval_s: float = 2.0  # outbox 排空扫描间隔（秒）
+    push_interval_s: float = Field(default=2.0, gt=0, allow_inf_nan=False)  # 排空扫描间隔（秒）
     push_lease_s: int = 300  # 消费租约（秒）：inflight 超此视为消费者失联，回收重投
     push_max_attempts: int = 5  # 单条推送最大尝试次数；超过转 dead + 告警
     push_batch: int = 32  # 单轮最多领取/投递条数

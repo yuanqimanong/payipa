@@ -1,12 +1,21 @@
-"""server 侧编排：建源→存规则→建表→建批次（派发交给后台派发环 scheduler.dispatch_loop）。"""
+"""Web 装配适配器：绑定数据库依赖，兼容原有 dispatch_source_run 调用。"""
 
 from __future__ import annotations
 
-from payipa.crawl.rules import RuleStore
-from payipa.crawl.run import create_batch_with_requests, ensure_data_table, setup_source
+from typing import Annotated
+
+from fastapi import Depends
+from payipa.crawl.service import CrawlService
 from payipa.db.engine import get_engine
-from payipa.db.ident import check_code, check_field
 from payipa_contracts import Channel, EngineHint, RulePack
+
+
+def get_crawl_service() -> CrawlService:
+    """可用于 FastAPI Depends 的服务工厂；引擎懒建，构造过程不连库。"""
+    return CrawlService(pyp=get_engine("pyp"), data_center=get_engine("data_center"))
+
+
+CrawlServiceDependency = Annotated[CrawlService, Depends(get_crawl_service)]
 
 
 async def dispatch_source_run(
@@ -25,25 +34,20 @@ async def dispatch_source_run(
     retry: int | None = None,
     timeout: int | None = None,
     raw_archive: bool | None = None,
+    service: CrawlService | None = None,
 ) -> dict:
     """建源+存规则+建表+建批次；请求以 QUEUED 落库，实际下发由后台派发环负责。
 
     返回 {batch_id, requests, dispatched}；``dispatched`` 恒为 0——派发不再在此同步发生，
     避免「空闲槽不够就丢请求」的一次性派发缺陷（M1 遗留）。
     """
-    channel = Channel(channel)
-    # 全部标识符**先**校验再动库：短码/索引字段名非法时一行都不写，不留半成品源（P0-13/DB-007）
-    check_code(uuid)
-    fields_indexed = indexed_fields or [f.name for f in rule.fields if f.index]
-    for f in fields_indexed:
-        check_field(f)
-    pyp = get_engine("pyp")
-    dc = get_engine("data_center")
-    source_id, task_id = await setup_source(
-        pyp,
-        uuid,
-        name,
+    result = await (service if service is not None else get_crawl_service()).run_source(
+        uuid=uuid,
+        name=name,
         seed_urls=seed_urls,
+        rule=rule,
+        indexed_fields=indexed_fields,
+        channel=channel,
         access_basis=access_basis,
         access_reference=access_reference,
         access_confirmed=access_confirmed,
@@ -53,12 +57,4 @@ async def dispatch_source_run(
         timeout=timeout,
         raw_archive=raw_archive,
     )
-    ptr = await RuleStore(pyp).put(source_id, rule)
-    # 正式表是源的长期数据面基线；test 运行另建物理隔离表，但不能让未来 cron/prod 重跑缺表。
-    await ensure_data_table(dc, uuid, fields_indexed, engine_pyp=pyp, channel=Channel.PROD)
-    if channel is Channel.TEST:
-        await ensure_data_table(dc, uuid, fields_indexed, engine_pyp=pyp, channel=Channel.TEST)
-    batch_id, specs = await create_batch_with_requests(
-        pyp, task_id=task_id, source_uuid=uuid, targets=seed_urls, rule_ptr=ptr, channel=channel
-    )
-    return {"batch_id": batch_id, "requests": len(specs), "dispatched": 0}
+    return result.as_dict()

@@ -36,3 +36,65 @@ forbidden_modules =
     payipa
     pyp_server
     pyp_agent
+
+# Runtime callers must not regain a dependency on the legacy crawl facade.
+[importlinter:contract:crawl-facade]
+name = production code bypasses the crawl compatibility facade
+type = forbidden
+source_modules =
+    pyp_server
+    payipa.crawl.service
+    payipa.crawl.sources
+    payipa.crawl.batches
+    payipa.crawl.nodes
+    payipa.crawl.results
+    payipa.crawl.resilience
+    payipa.crawl.dispatch
+    payipa.crawl.frontier
+    payipa.crawl.schedules
+forbidden_modules =
+    payipa.crawl.run
+
+# Each persistence responsibility is independently usable. Coordination belongs in service.
+[importlinter:contract:crawl-responsibilities]
+name = crawl persistence responsibilities remain independent
+type = independence
+modules =
+    payipa.crawl.sources
+    payipa.crawl.batches
+    payipa.crawl.nodes
+    payipa.crawl.dispatch
+    payipa.crawl.resilience
+    payipa.crawl.schedules
+
+[importlinter:contract:crawl-policy]
+name = crawl policy does not depend on persistence or application services
+type = forbidden
+source_modules =
+    payipa.crawl._policy
+forbidden_modules =
+    payipa.db
+    payipa.storage
+    payipa.crawl.service
+    payipa.crawl.ingest
+    payipa.crawl.sources
+    payipa.crawl.batches
+    payipa.crawl.nodes
+    payipa.crawl.results
+    payipa.crawl.resilience
+    payipa.crawl.dispatch
+    payipa.crawl.frontier
+    payipa.crawl.schedules
+
+[importlinter:contract:background-transport]
+name = background workers do not depend on HTTP composition
+type = forbidden
+source_modules =
+    pyp_server.background
+    pyp_server.scheduler
+    pyp_server.consumer
+forbidden_modules =
+    pyp_server.main
+    pyp_server.http
+    pyp_server.lifecycle
+    pyp_server.routers

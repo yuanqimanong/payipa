@@ -22,9 +22,6 @@ jobs:
           --health-interval=5s
           --health-timeout=5s
           --health-retries=10
-    env:
-      PG_USER: postgres
-      PG_PASSWORD: postgres123
     steps:
       - uses: actions/checkout@v4
       # 钉 uv 版本（不用浮动 action tag）
@@ -62,7 +59,14 @@ jobs:
             PGPASSWORD=postgres123 psql -h localhost -U postgres -c "CREATE DATABASE $db"
           done
       - name: Migrate three databases to head
+        # 测试凭证只注入测试三库，避免覆盖 Compose db 而与 pypctl 生成的迁移配置不一致。
+        env:
+          PG_USER: postgres
+          PG_PASSWORD: postgres123
         run: uv run alembic -c deploy/alembic.ini upgrade heads
       - name: Pytest
         # 包含 PG 三库、Docker 沙箱和主控/Agent 契约测试；任一真实依赖被 skip 都由测试自身显式报告。
+        env:
+          PG_USER: postgres
+          PG_PASSWORD: postgres123
         run: uv run pytest

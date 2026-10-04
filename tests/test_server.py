@@ -207,9 +207,7 @@ def test_livez_and_version(client) -> None:
 
 def test_readyz_reports_components(client) -> None:
     """P0-06：/readyz 返回分项结果；测试环境后台环关闭 → 报 disabled 而非失败。"""
-    from pyp_server.routers import health as health_mod
-
-    health_mod._ready_cache["resp"] = None  # 清短缓存，避免拿到上个用例的结果
+    client.app.state.readiness_cache["resp"] = None
     r = client.get("/readyz")
     body = r.json()
     checks = body["checks"]
