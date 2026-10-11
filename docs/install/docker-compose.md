@@ -80,6 +80,8 @@ curl -fsS https://pyp.example.com/readyz
 
 `deploy/.env.compose` 包含数据库密码、会话密钥、安装码和凭证 KEK。Linux 上 `pypctl init` 会将其设为仅属主可读；仍应将其纳入密钥管理和备份访问控制，不能提交到 Git。
 
+`pypctl` 执行 Compose 时以这个文件为部署配置来源，隔离终端中同名的开发环境变量，避免数据库和迁移容器收到不同的密码或库名；PATH、Docker 上下文和代理等运行时设置会保留，`pypctl agent` 输入的入网码会显式传入。直接执行 `docker compose` 不经过这层隔离，因此应先清除终端里用于开发的 `PG_*`、`PYP_DEPLOY_BIND_ADDRESS` 等部署变量，再显式传入 `--env-file deploy/.env.compose`。
+
 ## 创建首个管理员
 
 在空库首次启动后打开以下页面：

@@ -36,8 +36,9 @@ class LoopHealth:
 
     def fresh(self) -> bool:
         """最近成功 tick 是否在容忍窗内。窗口 > 30s 错误退避上限，单次 DB 抖动不打翻 readiness。"""
-        base = self.last_ok_at if self.last_ok_at is not None else self.started_at
-        return (time.monotonic() - base) <= max(10 * self.interval_s, 35.0)
+        if self.last_ok_at is None:
+            return False  # 启动、等待单实例锁或连续失败都不等于已完成第一次工作。
+        return (time.monotonic() - self.last_ok_at) <= max(10 * self.interval_s, 35.0)
 
 
 async def try_lock(conn) -> bool:

@@ -102,6 +102,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.lock_conn = None
     app.state.loop_health = {}
     app.state.readiness_cache = {"at": 0.0, "resp": None}
+    app.state.readiness_lock = anyio.Lock()
     try:
         settings = app.state.settings
         if not (settings.dispatch_enabled or settings.push_enabled):

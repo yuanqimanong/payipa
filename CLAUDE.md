@@ -26,7 +26,7 @@
   jianbing-utils = { git = "https://github.com/yuanqimanong/jianbing_utils.git", tag = "v0.1.0" }
   ```
   然后 `uv lock` 提交。**path 源绝不进仓库**（会让 lock 锁成本地路径、CI 失败、机器人升级失效）。
-- **jb 发版**：`uv build --no-sources` 验证可脱离本机构建（依赖须全部来自公开 index）；tag `v*` 触发 Trusted Publishing 发 PyPI。
+- **jb 发版**：`uv build --no-sources` 验证可脱离本机构建（依赖须全部来自公开 index）；合并并推 Git tag 后即可供 payipa 固定引用。PyPI 发布目前使用手动触发的 `publish.yml`，需另外配置 Trusted Publishing，推 tag 不会自动发布 PyPI。
 - **payipa 跟进 jb 新版**：`uv lock --upgrade-package jianbing-utils`。
 
 ## 工程约定

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import anyio
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -56,6 +57,7 @@ def create_app() -> FastAPI:
     app.state.settings = settings
     app.state.loop_health = {}
     app.state.readiness_cache = {"at": 0.0, "resp": None}
+    app.state.readiness_lock = anyio.Lock()
     app.state.hub = AgentHub()  # 在线 agent 连接注册表（进程内单例）
     app.state.limiter = SourceRateLimiter()  # 每源令牌桶 + AIMD（派发环限流、结果回报调频）
     app.state.login_throttle = LoginThrottle()  # 登录失败节流：抵御在线暴力破解（进程内、按 IP+用户名）

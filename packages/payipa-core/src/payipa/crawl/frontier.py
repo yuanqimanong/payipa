@@ -15,6 +15,19 @@ from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 from payipa.crawl._policy import url_fingerprint
 from payipa.db.pyp import Batch, Request, Rule, Source, Task
 
+# 每批参数量远低于 asyncpg 的 32767 上限，同时限制单条 SQL 和返回结果的大小。
+_INSERT_BATCH_SIZE = 500
+
+
+async def _insert_children(conn: AsyncConnection, rows: list[dict[str, object]]) -> int:
+    result = await conn.execute(
+        pg_insert(Request.__table__)
+        .values(rows)
+        .on_conflict_do_nothing(index_elements=["batch_id", "url_hash"])
+        .returning(Request.id)
+    )
+    return len(result.all())
+
 
 async def _enqueue_discovered_conn(conn: AsyncConnection, parent_req_id: int, urls: Sequence[str]) -> int:
     """在现有 pyp 事务内派生续爬请求；结果提交会在持有父请求行锁时调用。"""
@@ -52,26 +65,29 @@ async def _enqueue_discovered_conn(conn: AsyncConnection, parent_req_id: int, ur
         return 0
     inserted = 0
     seen: set[str] = set()
+    rows: list[dict[str, object]] = []
     for url in urls:
         uh = url_fingerprint(url)
         if uh in seen:
             continue
         seen.add(uh)
-        res = await conn.execute(
-            pg_insert(Request.__table__)
-            .values(
-                batch_id=batch_id,
-                target=url,
-                rule_id=rule_id,
-                rule_hash=rule_hash,
-                rule_version=rule_version,
-                state=int(RequestState.QUEUED),
-                depth=child_depth,
-                url_hash=uh,
-            )
-            .on_conflict_do_nothing(index_elements=["batch_id", "url_hash"])
+        rows.append(
+            {
+                "batch_id": batch_id,
+                "target": url,
+                "rule_id": rule_id,
+                "rule_hash": rule_hash,
+                "rule_version": rule_version,
+                "state": int(RequestState.QUEUED),
+                "depth": child_depth,
+                "url_hash": uh,
+            }
         )
-        inserted += res.rowcount or 0
+        if len(rows) == _INSERT_BATCH_SIZE:
+            inserted += await _insert_children(conn, rows)
+            rows.clear()
+    if rows:
+        inserted += await _insert_children(conn, rows)
     return inserted
 
 

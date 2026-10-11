@@ -234,16 +234,22 @@ async def mark_running(engine_pyp: AsyncEngine, req_id: int, agent_id: str, atte
     return res.rowcount
 
 
-async def requeue_request(engine_pyp: AsyncEngine, req_id: int) -> int:
-    """把一条已 ASSIGNED 但下发失败（WS 发送异常）的请求退回 QUEUED；未真正执行，不计 attempt。"""
+async def requeue_request(
+    engine_pyp: AsyncEngine, req_id: int, *, agent_id: str | None = None, attempt: int | None = None
+) -> int:
+    """下发失败的 ASSIGNED 请求退回 QUEUED；可限定归属/代次，防止迟到失败撤销新派发。"""
+    owned = [Request.id == req_id, Request.state == int(RequestState.ASSIGNED)]
+    if agent_id is not None:
+        owned.append(Request.agent_id == agent_id)
+    if attempt is not None:
+        owned.append(Request.attempt == attempt)
     async with engine_pyp.begin() as conn:
         running = select(Batch.id).where(Batch.status == "running")
         authorized = _authorized_running_batch_ids()
         requeued = await conn.execute(
             update(Request.__table__)
             .where(
-                Request.id == req_id,
-                Request.state == int(RequestState.ASSIGNED),
+                *owned,
                 Request.batch_id.in_(authorized),
             )
             .values(state=int(RequestState.QUEUED), not_before=None, lease_until=None, agent_id=None)
@@ -251,8 +257,7 @@ async def requeue_request(engine_pyp: AsyncEngine, req_id: int) -> int:
         canceled = await conn.execute(
             update(Request.__table__)
             .where(
-                Request.id == req_id,
-                Request.state == int(RequestState.ASSIGNED),
+                *owned,
                 Request.batch_id.not_in(running),
             )
             .values(state=int(RequestState.CANCELED), lease_until=None, agent_id=None)
@@ -260,8 +265,7 @@ async def requeue_request(engine_pyp: AsyncEngine, req_id: int) -> int:
         paused = await conn.execute(
             update(Request.__table__)
             .where(
-                Request.id == req_id,
-                Request.state == int(RequestState.ASSIGNED),
+                *owned,
                 Request.batch_id.in_(running),
                 Request.batch_id.not_in(authorized),
             )
