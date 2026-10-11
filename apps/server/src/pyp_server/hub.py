@@ -19,7 +19,7 @@ class AgentConn:
     ws: WebSocket
     slot_n: int
     free_slots: int
-    inflight: set[str] = field(default_factory=set)
+    inflight: dict[str, int] = field(default_factory=dict)  # req_id → attempt，迟到结果不得释放新尝试的槽。
     last_seen: float = 0.0  # 单调时钟：最近一次心跳（供后续 liveness reaper；本切片不做超时判定）
     weight: int = 1  # 加权派发：来自 agents 表（管理员预置），平手时权重高者优先
     group_name: str | None = None  # 能力分组：任务带 group 时只派给同组节点（分组亲和）
@@ -78,7 +78,9 @@ class AgentHub:
         if conn is not None:
             conn.last_seen = time.monotonic()
 
-    def pick_free(self, group: str | None = None, engine: str | None = None) -> AgentConn | None:
+    def pick_free(
+        self, group: str | None = None, engine: str | None = None, *, req_id: str | None = None
+    ) -> AgentConn | None:
         """取一个可派发的在线 agent。按 (空闲槽, 权重) 择优（多空闲优先、平手权重高者优先）。
 
         group 非空时只在同组节点里选（分组亲和：任务 group ↔ agent group_name）；无同组空闲则返回 None，
@@ -87,7 +89,10 @@ class AgentHub:
         candidates = [
             c
             for c in self._agents.values()
-            if c.free_slots > 0 and (group is None or c.group_name == group) and (engine is None or engine in c.engines)
+            if c.free_slots > 0
+            and (group is None or c.group_name == group)
+            and (engine is None or engine in c.engines)
+            and (req_id is None or req_id not in c.inflight)
         ]
         return max(candidates, key=lambda c: (c.free_slots, c.weight)) if candidates else None
 
@@ -106,17 +111,38 @@ class AgentHub:
                 caps.setdefault(c.group_name, set()).update(c.engines)
         return caps
 
-    def on_dispatched(self, agent_id: str, req_id: str) -> None:
+    def on_dispatched(self, agent_id: str, req_id: str, *, attempt: int = 0, generation: int | None = None) -> bool:
+        """发送前预留槽；连接已换代、重复请求或已满槽时拒绝。"""
         conn = self._agents.get(agent_id)
-        if conn is not None:
-            conn.free_slots = max(0, conn.free_slots - 1)
-            conn.inflight.add(req_id)
+        if (
+            conn is None
+            or (generation is not None and conn.generation != generation)
+            or req_id in conn.inflight
+            or conn.free_slots <= 0
+        ):
+            return False
+        conn.free_slots -= 1
+        conn.inflight[req_id] = attempt
+        return True
 
-    def on_finished(self, agent_id: str, req_id: str) -> None:
+    def on_finished(
+        self, agent_id: str, req_id: str, *, attempt: int | None = 0, generation: int | None = None
+    ) -> bool:
+        """完成或发送失败只释放对应连接、请求和尝试的一份槽位信用。
+
+        attempt=None 沿用旧状态/错误帧的兼容约定；当前 Agent 始终回显明确的代次。
+        """
         conn = self._agents.get(agent_id)
-        if conn is not None:
-            conn.free_slots = min(conn.slot_n, conn.free_slots + 1)
-            conn.inflight.discard(req_id)
+        if (
+            conn is None
+            or (generation is not None and conn.generation != generation)
+            or req_id not in conn.inflight
+            or (attempt is not None and conn.inflight[req_id] != attempt)
+        ):
+            return False
+        del conn.inflight[req_id]
+        conn.free_slots += 1
+        return True
 
     def find_by_req(self, req_id: str) -> AgentConn | None:
         return next((c for c in self._agents.values() if req_id in c.inflight), None)
@@ -137,7 +163,9 @@ class AgentHub:
             for c in self._agents.values()
         ]
 
-    async def send_frame(self, agent_id: str, frame: ServerFrame) -> None:
+    async def send_frame(self, agent_id: str, frame: ServerFrame, *, generation: int | None = None) -> None:
         conn = self._agents.get(agent_id)
+        if generation is not None and (conn is None or conn.generation != generation):
+            raise ConnectionError("agent connection was replaced before dispatch")
         if conn is not None:
             await conn.ws.send_text(frame.model_dump_json())

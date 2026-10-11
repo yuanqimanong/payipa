@@ -299,3 +299,53 @@ def test_ack_and_attempt_fencing(require_pg: None) -> None:
             await pyp.dispose()
 
     asyncio.run(main())
+
+
+def test_late_send_failure_cannot_requeue_new_assignment(require_pg: None) -> None:
+    """旧 WS 的发送异常不能撤销新 agent/attempt 的 ASSIGNED，也不能撤销已 ACK 或终态。"""
+    uuid = "m2sendfence"
+
+    async def main() -> None:
+        pyp = create_async_engine(get_settings().async_url("pyp"))
+        try:
+            source_id, task_id = await run.setup_source(
+                pyp, uuid, "Send fencing", access_basis="owned", access_reference="test fixture", access_confirmed=True
+            )
+            pointer = await RuleStore(pyp).put(source_id, _rule())
+            _, specs = await run.create_batch_with_requests(
+                pyp, task_id=task_id, source_uuid=uuid, targets=["https://example.invalid/fence"], rule_ptr=pointer
+            )
+            req_id = int(specs[0].req_id)
+            assert await run.mark_assigned(pyp, req_id, "old-agent", attempt=0, lease_s=60) == 1
+            assert await run.requeue_agent_inflight(pyp, "old-agent") == 1
+            assert await run.mark_assigned(pyp, req_id, "new-agent", attempt=1, lease_s=60) == 1
+            for agent, attempt in (("old-agent", 0), ("new-agent", 0), ("old-agent", 1)):
+                assert await run.requeue_request(pyp, req_id, agent_id=agent, attempt=attempt) == 0
+            row = await _req(pyp, req_id)
+            assert (row.state, row.attempt, row.agent_id) == (int(c.RequestState.ASSIGNED), 1, "new-agent")
+
+            # 同一尝试发送失败才撤销；兼容两参数调用仍然可用。
+            assert await run.requeue_request(pyp, req_id, agent_id="new-agent", attempt=1) == 1
+            assert await run.mark_assigned(pyp, req_id, "new-agent", attempt=1, lease_s=60) == 1
+            assert await run.requeue_request(pyp, req_id) == 1
+            assert await run.mark_assigned(pyp, req_id, "new-agent", attempt=1, lease_s=60) == 1
+            assert await run.mark_running(pyp, req_id, "new-agent", 1, lease_s=60) == 1
+            assert await run.requeue_request(pyp, req_id, agent_id="new-agent", attempt=1) == 0
+            assert (await _req(pyp, req_id)).state == int(c.RequestState.RUNNING)
+            await run.set_request_state(pyp, req_id, int(c.RequestState.CANCELED), agent_id="new-agent", attempt=1)
+            assert await run.requeue_request(pyp, req_id, agent_id="new-agent", attempt=1) == 0
+            assert (await _req(pyp, req_id)).state == int(c.RequestState.CANCELED)
+        finally:
+            async with pyp.begin() as conn:
+                for sql in (
+                    "DELETE FROM task_events WHERE batch_id IN (SELECT b.id FROM batches b JOIN tasks t ON b.task_id=t.id JOIN sources s ON t.source_id=s.id WHERE s.uuid=:u)",  # noqa: E501
+                    "DELETE FROM requests WHERE batch_id IN (SELECT b.id FROM batches b JOIN tasks t ON b.task_id=t.id JOIN sources s ON t.source_id=s.id WHERE s.uuid=:u)",  # noqa: E501
+                    "DELETE FROM batches WHERE task_id IN (SELECT t.id FROM tasks t JOIN sources s ON t.source_id=s.id WHERE s.uuid=:u)",  # noqa: E501
+                    "DELETE FROM rules WHERE source_id IN (SELECT id FROM sources WHERE uuid=:u)",
+                    "DELETE FROM tasks WHERE source_id IN (SELECT id FROM sources WHERE uuid=:u)",
+                    "DELETE FROM sources WHERE uuid=:u",
+                ):
+                    await conn.execute(text(sql), {"u": uuid})
+            await pyp.dispose()
+
+    asyncio.run(main())

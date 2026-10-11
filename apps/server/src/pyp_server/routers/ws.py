@@ -286,7 +286,7 @@ async def agent_ws(ws: WebSocket) -> None:
                     )
                 except Exception:  # noqa: BLE001 —— 记日志放行下一帧；该请求由租约 reaper 兜底
                     logger.exception("ingest result for req %s failed", frame.result.req_id)
-                hub.on_finished(agent_id, frame.result.req_id)
+                hub.on_finished(agent_id, frame.result.req_id, attempt=frame.result.attempt, generation=generation)
             elif isinstance(frame, StatusReport) and (frame.state < 0 or frame.state == int(RequestState.CANCELED)):
                 try:
                     if frame.state == int(ErrorCode.ACCESS_PAUSED):
@@ -314,7 +314,7 @@ async def agent_ws(ws: WebSocket) -> None:
                 except Exception:  # noqa: BLE001
                     logger.exception("handle status for req %s failed", frame.req_id)
                     terminal = False
-                hub.on_finished(agent_id, frame.req_id)
+                hub.on_finished(agent_id, frame.req_id, attempt=frame.attempt, generation=generation)
                 if terminal:
                     await _finalize_terminal_request(int(frame.req_id))
             elif isinstance(frame, ErrorFrame) and frame.req_id:
@@ -337,7 +337,7 @@ async def agent_ws(ws: WebSocket) -> None:
                 except Exception:  # noqa: BLE001
                     logger.exception("handle error frame for req %s failed", frame.req_id)
                     terminal = False
-                hub.on_finished(agent_id, frame.req_id)
+                hub.on_finished(agent_id, frame.req_id, attempt=frame.attempt, generation=generation)
                 if terminal:
                     await _finalize_terminal_request(int(frame.req_id))
     except WebSocketDisconnect:

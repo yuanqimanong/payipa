@@ -47,7 +47,9 @@ def test_app_restart_discards_old_probe_results() -> None:
     async def run():
         async with lifespan(app):
             app.state.readiness_cache["resp"] = "stale"
+            old_lock = app.state.readiness_lock
         async with lifespan(app):
             assert app.state.readiness_cache["resp"] is None
+            assert app.state.readiness_lock is not old_lock
 
     anyio.run(run)

@@ -8,7 +8,9 @@
 from __future__ import annotations
 
 import subprocess
+import threading
 import time
+from collections.abc import Awaitable, Callable
 from functools import lru_cache
 
 import anyio
@@ -27,6 +29,24 @@ router = APIRouter(tags=["system"])
 
 _DBS = ("pyp", "data_center", "business")
 _CACHE_TTL_S = 2.0  # readyz 结果短缓存：编排器高频探针不放大三库压力
+_CHECK_TIMEOUT_S = 2.0  # 每项检查独立限时，并行执行，故障库不能卡住整个探针。
+# get_storage/script_head 均为进程级缓存资源；被取消的线程可能跨越 app 重启继续运行。
+# 锁必须由真实工作线程持有到结束，不能随请求超时释放或随 lifespan 重建。
+_BLOCKING_PROBE_LOCKS = {name: threading.Lock() for name in ("storage", "migrations")}
+
+
+class ProbeInProgressError(RuntimeError):
+    """上次阻塞检查尚未退出；当前请求不再重复调用底层资源。"""
+
+
+def _run_blocking_probe[T](name: str, action: Callable[[], T]) -> T:
+    lock = _BLOCKING_PROBE_LOCKS[name]
+    if not lock.acquire(blocking=False):
+        raise ProbeInProgressError(name)
+    try:
+        return action()
+    finally:
+        lock.release()
 
 
 class Health(BaseModel):
@@ -41,17 +61,13 @@ async def livez() -> Health:
 
 
 async def _ping_db(key: str) -> str:
-    try:
-        with anyio.fail_after(2):
-            async with get_engine(key).connect() as conn:
-                await conn.exec_driver_sql("SELECT 1")
-        return "ok"
-    except Exception as exc:  # noqa: BLE001
-        return f"error: {type(exc).__name__}"
+    async with get_engine(key).connect() as conn:
+        await conn.exec_driver_sql("SELECT 1")
+    return "ok"
 
 
 async def _check_migrations() -> str:
-    head = script_head()
+    head = await anyio.to_thread.run_sync(_run_blocking_probe, "migrations", script_head, abandon_on_cancel=True)
     if head is None:
         return "error: 迁移脚本目录不可用（须从仓库根运行或携带 deploy/）"
     for key in _DBS:
@@ -98,26 +114,54 @@ def _check_loop(app, name: str, enabled: bool) -> str:
 
 @router.get("/readyz", summary="可服务探针（三库/迁移/存储/后台环全绿才 200）")
 async def readyz(request: Request) -> JSONResponse:
-    now = time.monotonic()
     cache = request.app.state.readiness_cache
-    if cache["resp"] is not None and now - cache["at"] < _CACHE_TTL_S:
+    if cache["resp"] is not None and time.monotonic() - cache["at"] < _CACHE_TTL_S:
         return cache["resp"]
-    settings = get_server_settings()
+    # 刷新只由一个请求执行；等待者拿锁后重查缓存，取消或失败不会留下半份结果。
+    async with request.app.state.readiness_lock:
+        if cache["resp"] is not None and time.monotonic() - cache["at"] < _CACHE_TTL_S:
+            return cache["resp"]
+        checks = await _readiness_checks(request.app)
+        ready = all(v in ("ok", "disabled") for v in checks.values())
+        resp = JSONResponse(
+            status_code=200 if ready else 503,
+            content={"status": "ready" if ready else "unavailable", "checks": checks},
+        )
+        cache.update(at=time.monotonic(), resp=resp)
+        return resp
+
+
+async def _readiness_checks(app) -> dict[str, str]:
     checks: dict[str, str] = {"config": "ok"}  # preflight 在启动时已把关；能跑到这就是过了
-    for key in _DBS:
-        checks[f"db.{key}"] = await _ping_db(key)
-    checks["migrations"] = await _check_migrations()
-    checks["dynamic_schemas"] = await _check_dynamic_schemas()
-    checks["storage"] = _check_storage()
-    checks["loop.dispatch"] = _check_loop(request.app, "dispatch", settings.dispatch_enabled)
-    checks["loop.consumer"] = _check_loop(request.app, "consumer", settings.push_enabled)
-    ready = all(v in ("ok", "disabled") for v in checks.values())
-    resp = JSONResponse(
-        status_code=200 if ready else 503,
-        content={"status": "ready" if ready else "unavailable", "checks": checks},
-    )
-    cache.update(at=now, resp=resp)
-    return resp
+    cancellations: list[BaseException] = []
+
+    async def check(name: str, action: Callable[[], Awaitable[str]]) -> None:
+        try:
+            with anyio.fail_after(_CHECK_TIMEOUT_S):
+                checks[name] = await action()
+        except Exception as exc:  # 取消继续向上传播；某项失败不影响其余探针。
+            checks[name] = f"error: {type(exc).__name__}"
+        except anyio.get_cancelled_exc_class() as exc:
+            # TaskGroup 将子任务自行取消视为正常退出；保留信号，避免少查一项后误缓存 200。
+            cancellations.append(exc)
+            raise
+
+    async def storage() -> str:
+        # mkdir/disk_usage 可能阻塞（例如挂载卷）；探针超时后不等待底层文件系统恢复。
+        return await anyio.to_thread.run_sync(_run_blocking_probe, "storage", _check_storage, abandon_on_cancel=True)
+
+    async with anyio.create_task_group() as group:
+        for key in _DBS:
+            group.start_soon(check, f"db.{key}", lambda key=key: _ping_db(key))
+        group.start_soon(check, "migrations", _check_migrations)
+        group.start_soon(check, "dynamic_schemas", _check_dynamic_schemas)
+        group.start_soon(check, "storage", storage)
+    if cancellations:
+        raise cancellations[0]
+    settings = app.state.settings
+    checks["loop.dispatch"] = _check_loop(app, "dispatch", settings.dispatch_enabled)
+    checks["loop.consumer"] = _check_loop(app, "consumer", settings.push_enabled)
+    return checks
 
 
 @lru_cache

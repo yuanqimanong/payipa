@@ -111,3 +111,55 @@ def test_free_caps_summary() -> None:
     # 全部满槽 → 空 dict
     hub.on_dispatched("plain", "r2")
     assert hub.free_caps() == {}
+
+
+def test_result_replay_and_unknown_results_do_not_create_slot_credit() -> None:
+    hub = AgentHub()
+    hub.register("a", _WS(), slot_n=2)
+    hub.on_dispatched("a", "r1")
+    hub.on_dispatched("a", "r2")
+    hub.on_finished("a", "unknown")
+    assert hub.pick_free() is None
+    hub.on_finished("a", "r1")
+    hub.on_finished("a", "r1")
+    assert hub.get("a").free_slots == 1
+    assert hub.snapshots()[0].inflight == ["r2"]
+
+
+def test_duplicate_dispatch_does_not_consume_another_slot() -> None:
+    hub = AgentHub()
+    hub.register("a", _WS(), slot_n=2)
+    hub.on_dispatched("a", "r1")
+    hub.on_dispatched("a", "r1")
+    assert hub.get("a").free_slots == 1
+
+
+def test_old_attempt_result_cannot_finish_the_current_attempt() -> None:
+    hub = AgentHub()
+    generation, _ = hub.register("a", _WS(), slot_n=1)
+    hub.on_dispatched("a", "r1", attempt=1, generation=generation)
+    hub.on_finished("a", "r1", attempt=0, generation=generation)
+    assert hub.pick_free() is None
+    hub.on_finished("a", "r1", attempt=1, generation=generation)
+    assert hub.get("a").free_slots == 1
+
+
+def test_superseded_connection_cannot_finish_or_reserve_new_connection_tasks() -> None:
+    hub = AgentHub()
+    old, _ = hub.register("a", _WS(), slot_n=2)
+    current, _ = hub.register("a", _WS(), slot_n=2)
+    hub.on_dispatched("a", "r1", attempt=1, generation=current)
+    hub.on_finished("a", "r1", attempt=1, generation=old)
+    hub.on_dispatched("a", "r2", attempt=1, generation=old)
+    assert hub.get("a").free_slots == 1
+    assert hub.snapshots()[0].inflight == ["r1"]
+
+
+def test_legacy_frame_without_attempt_only_releases_an_existing_reservation() -> None:
+    hub = AgentHub()
+    generation, _ = hub.register("a", _WS(), slot_n=1)
+    hub.on_dispatched("a", "r1", attempt=1, generation=generation)
+    assert not hub.on_finished("a", "unknown", attempt=None, generation=generation)
+    assert hub.on_finished("a", "r1", attempt=None, generation=generation)
+    assert not hub.on_finished("a", "r1", attempt=None, generation=generation)
+    assert hub.get("a").free_slots == 1

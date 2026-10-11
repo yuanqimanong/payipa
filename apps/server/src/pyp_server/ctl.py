@@ -12,6 +12,7 @@ import getpass
 import hashlib
 import json
 import os
+import re
 import secrets
 import shutil
 import socket
@@ -19,6 +20,7 @@ import subprocess
 import sys
 import urllib.error
 import urllib.request
+from contextlib import ExitStack
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -28,6 +30,16 @@ BASE_URL = "http://127.0.0.1:8100"  # compose 把 server 映射到宿主 8100（
 HOST_PORT = 8100
 LOCAL_ALLOWED_HOSTS = "localhost,127.0.0.1,server"
 SUPPORTED_ENVIRONMENTS = {"dev", "production"}
+# 这些键在 compose.yml 中有插值或默认值；缺省时也不能被本机开发环境覆盖。
+COMPOSE_CONFIG_KEYS = {
+    "PG_USER",
+    "PG_PASSWORD",
+    "PG_DB_PYP",
+    "PG_DB_DATA_CENTER",
+    "PG_DB_BUSINESS",
+    "PYP_DEPLOY_BIND_ADDRESS",
+    "PYP_AGENT_ENROLL_TOKEN",
+}
 
 
 def _normalize_production_host(value: str) -> str:
@@ -89,12 +101,15 @@ def probe(path: str, base: str = BASE_URL, timeout: float = 5.0) -> tuple[int, d
 def _run(cmd: list[str], timeout: int = 120) -> tuple[int, str]:
     """跑一条外部命令，返回 (退出码, 合并输出)。找不到命令/超时不抛，转成非 0 码。"""
     try:
-        p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, check=False)
+        env = _compose_environment() if cmd[:2] == ["docker", "compose"] else None
+        p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, check=False, env=env)
         return p.returncode, (p.stdout + p.stderr).strip()
     except FileNotFoundError:
         return 127, f"命令不存在：{cmd[0]}"
     except subprocess.TimeoutExpired:
         return 124, f"命令超时（>{timeout}s）：{' '.join(cmd)}"
+    except OSError as exc:
+        return 1, f"命令未能执行：{exc}"
 
 
 def _compose(*args: str) -> list[str]:
@@ -104,6 +119,25 @@ def _compose(*args: str) -> list[str]:
     return cmd + list(args)
 
 
+def _compose_environment(overrides: dict[str, str] | None = None) -> dict[str, str]:
+    """让 Compose 从部署文件取值，保留 Docker 上下文、代理和可执行文件路径。"""
+    env = os.environ.copy()
+    for key in _env_values().keys() | COMPOSE_CONFIG_KEYS:
+        env.pop(key, None)
+    if overrides:
+        env.update(overrides)
+    return env
+
+
+def _run_compose(*args: str, overrides: dict[str, str] | None = None) -> int:
+    """Compose 输出直通终端；所有修改部署的命令共用同一环境边界。"""
+    try:
+        return subprocess.run(_compose(*args), check=False, env=_compose_environment(overrides)).returncode
+    except OSError as exc:
+        print(f"Compose 命令未能执行：{exc}")
+        return 1
+
+
 def _port_free(port: int) -> bool:
     """宿主端口是否空闲（能 connect 上说明已被占用）。"""
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -111,11 +145,12 @@ def _port_free(port: int) -> bool:
         return s.connect_ex(("127.0.0.1", port)) != 0
 
 
-def _env_values() -> dict[str, str]:
+def _env_values(path: Path | None = None) -> dict[str, str]:
+    path = ENV_FILE if path is None else path
     values: dict[str, str] = {}
-    if not ENV_FILE.exists():
+    if not path.exists():
         return values
-    for raw in ENV_FILE.read_text(encoding="utf-8").splitlines():
+    for raw in path.read_text(encoding="utf-8").splitlines():
         line = raw.strip()
         if not line or line.startswith("#") or "=" not in line:
             continue
@@ -195,15 +230,15 @@ def _sha256(path: Path) -> str:
 
 def _run_binary(cmd: list[str], path: Path, *, stdin_path: Path | None = None) -> tuple[int, str]:
     """执行二进制备份/恢复命令；数据只进文件/stdin，stderr 才作为诊断文本。"""
-    source = stdin_path.open("rb") if stdin_path else None
-    target = path.open("wb") if stdin_path is None else subprocess.DEVNULL
     try:
-        proc = subprocess.run(cmd, stdin=source, stdout=target, stderr=subprocess.PIPE, check=False)
-    finally:
-        if source is not None:
-            source.close()
-        if target is not subprocess.DEVNULL:
-            target.close()
+        with ExitStack() as stack:
+            source = stack.enter_context(stdin_path.open("rb")) if stdin_path else None
+            target = stack.enter_context(path.open("wb")) if stdin_path is None else subprocess.DEVNULL
+            proc = subprocess.run(
+                cmd, stdin=source, stdout=target, stderr=subprocess.PIPE, check=False, env=_compose_environment()
+            )
+    except OSError as exc:
+        return 1, str(exc)
     return proc.returncode, proc.stderr.decode(errors="replace").strip()
 
 
@@ -280,7 +315,7 @@ def up(build: bool = False, agents: bool = False) -> int:
         return 2
     cmd = _compose("up", "-d", "--wait", *(["--build"] if build else []))
     print("$", " ".join(cmd))
-    code = subprocess.run(cmd, check=False).returncode  # 输出直通终端，便于看拉镜像/构建进度
+    code = _run_compose("up", "-d", "--wait", *(["--build"] if build else []))
     if code == 0:
         print(f"已就绪。看状态：uv run pypctl status；冒烟：uv run pypctl smoke；页面：{BASE_URL}/setup")
     return code
@@ -293,11 +328,17 @@ def start_agent(token: str, build: bool = False) -> int:
     if not ENV_FILE.exists():
         print(f"缺 {ENV_FILE}：先 uv run pypctl init")
         return 1
-    env = os.environ.copy()
-    env["PYP_AGENT_ENROLL_TOKEN"] = token
     cmd = _compose("--profile", "agents", "up", "-d", *(["--build"] if build else []), "agent")
     print("$", " ".join(cmd), "(PYP_AGENT_ENROLL_TOKEN=<redacted>)")
-    return subprocess.run(cmd, check=False, env=env).returncode
+    return _run_compose(
+        "--profile",
+        "agents",
+        "up",
+        "-d",
+        *(["--build"] if build else []),
+        "agent",
+        overrides={"PYP_AGENT_ENROLL_TOKEN": token},
+    )
 
 
 def _read_agent_token(token: str | None, token_stdin: bool) -> str | None:
@@ -318,35 +359,18 @@ def _read_agent_token(token: str | None, token_stdin: bool) -> str | None:
     return value
 
 
-def backup(output: str | None = None, *, manage_server: bool = True) -> tuple[int, Path | None]:
-    """冷备三库 + 本地对象卷 + 部署配置，并生成带 SHA-256 的 manifest。"""
-    if not _require_repo_root():
-        return 1, None
-    if not ENV_FILE.exists():
-        print(f"缺 {ENV_FILE}：先 uv run pypctl init")
-        return 1, None
-    target = Path(output) if output else Path("backups") / datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
-    target = target.resolve()
-    if target.exists() and any(target.iterdir()):
-        print(f"备份目录非空，拒绝覆盖：{target}")
-        return 1, None
-    target.mkdir(parents=True, exist_ok=True)
-
-    _version_status, version = probe("/version")
-    code, running = _run(_compose("ps", "--status", "running", "--services"))
-    server_was_running = code == 0 and "server" in running.splitlines()
-    if manage_server and server_was_running:
-        code = subprocess.run(_compose("stop", "server"), check=False).returncode
-        if code:
-            return code, None
-
-    env = _env_values()
-    user = env.get("PG_USER", "postgres")
-    dbs = [
-        env.get("PG_DB_PYP", "pyp_sys"),
-        env.get("PG_DB_DATA_CENTER", "data_center"),
-        env.get("PG_DB_BUSINESS", "business"),
+def _database_names(values: dict[str, str]) -> list[str]:
+    return [
+        values.get("PG_DB_PYP", "pyp_sys"),
+        values.get("PG_DB_DATA_CENTER", "data_center"),
+        values.get("PG_DB_BUSINESS", "business"),
     ]
+
+
+def _write_backup(target: Path, version: dict, env: dict[str, str]) -> tuple[int, Path | None]:
+    """调用方已确认主控停止；只有完整清单写入成功才返回有效备份路径。"""
+    user = env.get("PG_USER", "postgres")
+    dbs = _database_names(env)
     files: list[Path] = []
     try:
         for db in dbs:
@@ -385,9 +409,97 @@ def backup(output: str | None = None, *, manage_server: bool = True) -> tuple[in
         print(f"[OK] 冷备完成：{target}")
         print("备份包含部署密钥，请按最高敏感级别加密保管，并定期在隔离环境执行 restore 演练。")
         return 0, target
+    except OSError as exc:
+        print(f"备份文件写入失败：{exc}")
+        return 1, None
+
+
+def backup(output: str | None = None, *, manage_server: bool = True) -> tuple[int, Path | None]:
+    """冷备三库 + 本地对象卷 + 部署配置，并生成带 SHA-256 的 manifest。"""
+    if not _require_repo_root():
+        return 1, None
+    if not ENV_FILE.exists():
+        print(f"缺 {ENV_FILE}：先 uv run pypctl init")
+        return 1, None
+    target = Path(output) if output else Path("backups") / datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    target = target.resolve()
+    try:
+        if target.exists() and (not target.is_dir() or any(target.iterdir())):
+            print(f"备份目录非空或不是目录，拒绝覆盖：{target}")
+            return 1, None
+        target.mkdir(parents=True, exist_ok=True)
+        env = _env_values()
+    except OSError as exc:
+        print(f"备份准备失败：{exc}")
+        return 1, None
+
+    _version_status, version = probe("/version")
+    code, running = _run(_compose("ps", "--status", "running", "--services"))
+    if code:
+        print(f"无法确认主控状态，备份已终止：{running}")
+        return code, None
+    server_was_running = "server" in running.splitlines()
+    if server_was_running and not manage_server:
+        print("主控仍在运行，拒绝执行冷备。请先确认主控已停止。")
+        return 1, None
+    if server_was_running:
+        code = _run_compose("stop", "server")
+        if code:
+            print("主控停止失败，备份已终止。")
+            return code, None
+
+    restart_code = 0
+    try:
+        code, completed = _write_backup(target, version, env)
     finally:
         if manage_server and server_was_running:
-            subprocess.run(_compose("up", "-d", "--wait", "server"), check=False)
+            restart_code = _run_compose("up", "-d", "--wait", "server")
+            if restart_code:
+                print(f"备份流程结束后主控未能恢复服务，请检查 Compose 日志；备份目录保留在 {target}。")
+    return code or restart_code, completed
+
+
+def _validate_backup(root: Path, current: dict[str, str]) -> list[str]:
+    """停服前完整验证既有清单格式，拒绝缺项或指向目录外的备份。"""
+    manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
+    if not isinstance(manifest, dict):
+        raise ValueError("manifest 必须是 JSON 对象")
+    dbs = manifest.get("databases")
+    if (
+        not isinstance(dbs, list)
+        or len(dbs) != 3
+        or any(not isinstance(db, str) or not db or "/" in db or "\\" in db or "\x00" in db for db in dbs)
+        or len(set(dbs)) != 3
+    ):
+        raise ValueError("manifest 必须列出三个互不相同的有效数据库名称")
+    if dbs != _database_names(current):
+        raise ValueError("备份三库名称与当前部署配置不一致")
+    files = manifest.get("files")
+    required = {*(f"{db}.dump" for db in dbs), "env.compose", "pyp_data.tar.gz"}
+    if not isinstance(files, dict) or not required.issubset(files):
+        raise ValueError("manifest 缺少三库 dump、对象卷或部署配置文件")
+    for name, meta in files.items():
+        if not isinstance(name, str) or "/" in name or "\\" in name or "\x00" in name:
+            raise ValueError("manifest 文件名必须位于备份目录内")
+        path = root / name
+        if path.resolve().parent != root or not path.is_file():
+            raise ValueError(f"备份文件缺失或不在备份目录内：{name}")
+        if (
+            not isinstance(meta, dict)
+            or type(meta.get("size")) is not int
+            or meta["size"] < 0
+            or not isinstance(meta.get("sha256"), str)
+            or not re.fullmatch(r"[0-9a-fA-F]{64}", meta["sha256"])
+        ):
+            raise ValueError(f"备份文件校验元数据无效：{name}")
+        if path.stat().st_size != meta["size"] or _sha256(path) != meta["sha256"].lower():
+            raise ValueError(f"备份校验失败：{name}")
+    backed_up = _env_values(root / "env.compose")
+    if dbs != _database_names(backed_up):
+        raise ValueError("备份三库名称与备份部署配置不一致")
+    if not current.get("CRED_KEK") or current["CRED_KEK"] != backed_up.get("CRED_KEK"):
+        raise ValueError("当前 CRED_KEK 与备份不一致或未配置；恢复后凭证密文将不可解密")
+    return dbs
 
 
 def restore(backup_dir: str, confirmation: str) -> int:
@@ -398,29 +510,19 @@ def restore(backup_dir: str, confirmation: str) -> int:
         print("恢复会覆盖当前三库和对象卷；请追加 --confirm RESTORE")
         return 2
     root = Path(backup_dir).resolve()
-    manifest_path = root / "manifest.json"
-    if not manifest_path.is_file():
-        print(f"缺备份清单：{manifest_path}")
-        return 1
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    for name, meta in manifest.get("files", {}).items():
-        path = root / name
-        if not path.is_file() or _sha256(path) != meta.get("sha256"):
-            print(f"备份校验失败：{name}")
-            return 1
-    current = _env_values()
-    backed_up = {}
-    for line in (root / "env.compose").read_text(encoding="utf-8").splitlines():
-        if "=" in line and not line.lstrip().startswith("#"):
-            key, value = line.split("=", 1)
-            backed_up[key] = value
-    if current.get("CRED_KEK") != backed_up.get("CRED_KEK"):
-        print("当前 CRED_KEK 与备份不一致，拒绝恢复：否则库中信封密文将不可解密。")
+    try:
+        current = _env_values()
+        dbs = _validate_backup(root, current)
+    except (OSError, ValueError) as exc:
+        print(f"恢复前校验失败，未修改当前部署：{exc}")
         return 1
 
-    subprocess.run(_compose("stop", "server", "agent"), check=False)
+    code = _run_compose("stop", "server", "agent")
+    if code:
+        print("主控或 Agent 停止失败，未开始恢复数据。请检查运行状态后重试。")
+        return code
     user = current.get("PG_USER", "postgres")
-    for db in manifest.get("databases", []):
+    for db in dbs:
         path = root / f"{db}.dump"
         code, error = _run_binary(
             _compose(
@@ -457,11 +559,11 @@ def restore(backup_dir: str, confirmation: str) -> int:
     if code:
         print(f"对象卷恢复失败：{error}")
         return code
-    code = subprocess.run(_compose("run", "--rm", "migrate"), check=False).returncode
+    code = _run_compose("run", "--rm", "migrate")
     if code:
         print("恢复后的迁移失败，主控保持停止，请检查日志。")
         return code
-    code = subprocess.run(_compose("up", "-d", "--wait", "server"), check=False).returncode
+    code = _run_compose("up", "-d", "--wait", "server")
     if code == 0:
         print("[OK] 恢复完成；请立即执行 pypctl smoke，并重新签发 Agent 入网码。")
     return code
@@ -471,21 +573,24 @@ def upgrade(build: bool = False) -> int:
     """短停机升级：停止主控 → 冷备 → 构建/拉起 → 迁移门 → smoke。"""
     if not _require_repo_root():
         return 1
-    subprocess.run(_compose("stop", "server"), check=False)
+    code = _run_compose("stop", "server")
+    if code:
+        print("主控停止失败，升级在备份和迁移前终止。")
+        return code
     code, backup_path = backup(manage_server=False)
     if code:
         print("升级在迁移前终止；当前数据未改变。")
         return code
     if build:
-        code = subprocess.run(_compose("build", "server", "migrate"), check=False).returncode
+        code = _run_compose("build", "server", "migrate")
         if code:
             print(f"升级镜像构建失败；备份位于 {backup_path}。")
             return code
-    code = subprocess.run(_compose("up", "-d", "--wait", "db"), check=False).returncode
+    code = _run_compose("up", "-d", "--wait", "db")
     if code == 0:
-        code = subprocess.run(_compose("run", "--rm", "migrate"), check=False).returncode
+        code = _run_compose("run", "--rm", "migrate")
     if code == 0:
-        code = subprocess.run(_compose("up", "-d", "--wait", "--no-deps", "server"), check=False).returncode
+        code = _run_compose("up", "-d", "--wait", "--no-deps", "server")
     if code:
         print(f"升级启动失败；备份位于 {backup_path}，不要自动执行 Alembic downgrade。")
         return code
@@ -498,7 +603,7 @@ def down(volumes: bool = False) -> int:
         return 1
     cmd = _compose("down", *(["-v"] if volumes else []))
     print("$", " ".join(cmd))
-    return subprocess.run(cmd, check=False).returncode
+    return _run_compose("down", *(["-v"] if volumes else []))
 
 
 def status(url: str) -> int:
@@ -528,9 +633,11 @@ def smoke(url: str) -> int:
         return 1
     vcode, ver = probe("/version", url)
     schema = ver.get("schema", {}) if vcode == 200 else {}
+    if not isinstance(schema, dict):
+        schema = {}
     head = schema.get("expected_head")
-    bad = {k: v for k, v in schema.items() if k != "expected_head" and v != head}
-    if vcode != 200 or not head or bad:
+    bad = {key: schema.get(key) for key in ("pyp", "data_center", "business") if schema.get(key) != head}
+    if vcode != 200 or not isinstance(head, str) or not head or bad:
         print(
             f"[!!] 三库 revision 与迁移 head 不一致：head={head}，异常项={json.dumps(bad or ver, ensure_ascii=False)}"
         )

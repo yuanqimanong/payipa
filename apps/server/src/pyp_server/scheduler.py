@@ -59,7 +59,7 @@ async def drain_once(hub: AgentHub, pyp: AsyncEngine, secret: str, ack_s: int, l
             return dispatched
         progressed = False
         for spec in specs:
-            conn = hub.pick_free(spec.group, spec.engine_hint.value)  # 同组且具备目标引擎的空闲节点
+            conn = hub.pick_free(spec.group, spec.engine_hint.value, req_id=spec.req_id)
             if conn is None:
                 continue  # 该任务分组暂无空闲节点 → 跳过，换下一条（不阻塞别组）
             if not limiter.take(spec.source, rates.get(spec.source, 0)):
@@ -80,17 +80,21 @@ async def drain_once(hub: AgentHub, pyp: AsyncEngine, secret: str, ack_s: int, l
                 # mark_assigned 已置 ASSIGNED 时不回退：ACK 短租到期由 reaper 回收、attempt 累进至 max 后定格
                 # NODE_LOST 自然止损；mark_assigned 前失败则仍 QUEUED，仅本条每 tick 重试、不阻塞他源。
                 continue
+            if not hub.on_dispatched(conn.agent_id, spec.req_id, attempt=spec.attempt, generation=conn.generation):
+                await requeue_request(pyp, req_id, agent_id=conn.agent_id, attempt=spec.attempt)
+                continue
             try:
                 await hub.send_frame(
                     conn.agent_id,
                     TaskAssign(task=spec, upload_token=token, rule_token=rule_token),
+                    generation=conn.generation,
                 )
             except Exception:  # noqa: BLE001 —— 下发失败（连接坏）：退回 QUEUED，结束本轮
                 logger.warning("send TaskAssign failed for req %s; requeue", req_id, exc_info=True)
+                hub.on_finished(conn.agent_id, spec.req_id, attempt=spec.attempt, generation=conn.generation)
                 # requeue 也失败则异常上抛给 dispatch_loop 退避重试；该请求暂留 ASSIGNED，租约 reaper 兜底。
-                await requeue_request(pyp, req_id)
+                await requeue_request(pyp, req_id, agent_id=conn.agent_id, attempt=spec.attempt)
                 return dispatched
-            hub.on_dispatched(conn.agent_id, spec.req_id)
             dispatched += 1
             progressed = True
         if not progressed:  # 本批都无匹配节点/抢失败 → 结束本轮，等下一 tick（不忙转）
